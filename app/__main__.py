@@ -24,6 +24,14 @@ def main() -> int:
     cfg = load_config(cfg_path)
     apply_theme(app, cfg.theme)
 
+    from app.ui.widgets.splash import Splash
+    splash = Splash("Khởi tạo…")
+    splash.show()
+    app.processEvents()
+
+    splash.set_message("Loading model…")
+    app.processEvents()
+
     window = MainWindow(cfg)
     controller = AppController(cfg, cfg_path, db_path())
 
@@ -67,6 +75,8 @@ def main() -> int:
         )
 
     controller.start()
+
+    splash.finish(window)
 
     history_service = controller.history
     if history_service is not None:
