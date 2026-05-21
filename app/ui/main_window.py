@@ -49,11 +49,17 @@ class MainWindow(QMainWindow):
 
         self.stack = QStackedWidget()
         self.live_page = LivePage()
+        self.mapping_page = None
         self.stack.addWidget(self.live_page)
-        for label in NAV_ITEMS[1:4]:
-            page = QLabel(f"{label} — placeholder")
-            page.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.stack.addWidget(page)
+        for idx, label in enumerate(NAV_ITEMS[1:4], start=1):
+            if idx == 2 and cfg is not None:
+                from app.ui.pages.mapping import MappingPage
+                self.mapping_page = MappingPage(cfg.mappings)
+                self.stack.addWidget(self.mapping_page)
+            else:
+                page = QLabel(f"{label} — placeholder")
+                page.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.stack.addWidget(page)
         if cfg is not None:
             from app.ui.pages.settings import SettingsPage
             self.settings_page = SettingsPage(cfg)

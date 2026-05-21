@@ -30,6 +30,12 @@ def main() -> int:
     controller.uart_status.connect(window.live_page.set_uart_status)
     if window.settings_page is not None:
         window.settings_page.config_saved.connect(controller.update_config)
+    if window.mapping_page is not None:
+        def _on_mappings(lst):
+            new_cfg = controller.cfg.model_copy(deep=True)
+            new_cfg.mappings = lst
+            controller.update_config(new_cfg)
+        window.mapping_page.mappings_saved.connect(_on_mappings)
 
     def _on_frame(frame, detections, fps, latency):
         window.live_page.update_frame(frame, detections)
