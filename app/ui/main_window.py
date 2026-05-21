@@ -18,7 +18,8 @@ from app.core.config import AppConfig
 from app.ui.widgets.sidebar import Sidebar
 from app.ui.widgets.title_bar import TitleBar
 
-NAV_ITEMS = ["▶  Live", "▦  Lịch sử", "⇆  Mapping", "◉  Capture", "📋  Nhật ký", "⚙  Cài đặt"]
+NAV_ITEMS = ["Live", "Lịch sử", "Mapping", "Capture", "Nhật ký", "Cài đặt"]
+NAV_ICONS = ["recycle", "history", "mapping", "capture", "log", "settings"]
 
 
 class MainWindow(QMainWindow):
@@ -49,7 +50,7 @@ class MainWindow(QMainWindow):
         body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(0)
 
-        self.sidebar = Sidebar(NAV_ITEMS)
+        self.sidebar = Sidebar(NAV_ITEMS, icons=NAV_ICONS)
         from app.ui.pages.live import LivePage
         from app.ui.pages.system_log import SystemLogPage
 

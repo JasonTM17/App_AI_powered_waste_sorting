@@ -3,25 +3,59 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QSplashScreen
 
+from app import __version__
+from app.utils.paths import resource_path
 
-def _make_splash_pixmap(width: int = 480, height: int = 280) -> QPixmap:
+
+def _make_splash_pixmap(width: int = 520, height: int = 320) -> QPixmap:
     pix = QPixmap(width, height)
     pix.fill(QColor("#0B1220"))
     painter = QPainter(pix)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(QColor("#10B981"))
-    title_font = QFont("Inter", 28, QFont.Weight.Bold)
-    painter.setFont(title_font)
+
+    # subtle accent bar at top
+    painter.fillRect(0, 0, width, 4, QColor("#10B981"))
+
+    # logo
+    logo_path = resource_path("app/ui/resources/icons/logo.svg")
+    if logo_path.exists():
+        icon = QIcon(str(logo_path))
+        logo_size = 88
+        logo_pix = icon.pixmap(logo_size, logo_size)
+        painter.drawPixmap(
+            (width - logo_size) // 2, 56, logo_pix
+        )
+
+    # title
+    painter.setPen(QColor("#F1F5F9"))
+    painter.setFont(QFont("Inter", 24, QFont.Weight.Bold))
     painter.drawText(
-        pix.rect().adjusted(0, -30, 0, -30), Qt.AlignmentFlag.AlignCenter, "Trash Sorter Pro"
+        pix.rect().adjusted(0, 60, 0, 60),
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+        "Trash Sorter Pro",
     )
-    painter.setPen(QColor("#94A3B8"))
-    sub_font = QFont("Inter", 12)
-    painter.setFont(sub_font)
-    painter.drawText(pix.rect().adjusted(0, 30, 0, 30), Qt.AlignmentFlag.AlignCenter, "v2.0.0")
+
+    # tagline
+    painter.setPen(QColor("#10B981"))
+    painter.setFont(QFont("Inter", 12, QFont.Weight.DemiBold))
+    painter.drawText(
+        pix.rect().adjusted(0, 92, 0, 92),
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+        "AI Phân loại rác thông minh",
+    )
+
+    # version
+    painter.setPen(QColor("#64748B"))
+    painter.setFont(QFont("Inter", 10))
+    painter.drawText(
+        pix.rect().adjusted(0, 0, 0, -16),
+        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
+        f"v{__version__}",
+    )
+
     painter.end()
     return pix
 

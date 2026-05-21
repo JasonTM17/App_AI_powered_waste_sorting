@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QMouseEvent
+from PySide6.QtCore import QPoint, QSize, Qt, Signal
+from PySide6.QtGui import QIcon, QMouseEvent
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+
+from app.utils.paths import resource_path
 
 
 class TitleBar(QWidget):
@@ -21,11 +23,20 @@ class TitleBar(QWidget):
         self._cam_on = False
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setContentsMargins(12, 0, 0, 0)
+        layout.setSpacing(8)
 
-        self.label = QLabel(f"●  {title}")
-        self.label.setStyleSheet("color: #F1F5F9; font-weight: 600;")
+        logo_path = resource_path("app/ui/resources/icons/logo.svg")
+        self.logo = QLabel()
+        if logo_path.exists():
+            pix = QIcon(str(logo_path)).pixmap(QSize(22, 22))
+            self.logo.setPixmap(pix)
+        self.logo.setFixedSize(24, 40)
+        self.logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.logo)
+
+        self.label = QLabel(title)
+        self.label.setStyleSheet("color: #F1F5F9; font-weight: 600; font-size: 13px;")
         layout.addWidget(self.label)
         layout.addStretch()
 

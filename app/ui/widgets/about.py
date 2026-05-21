@@ -1,9 +1,9 @@
-"""About dialog: version, model info, links."""
+"""About dialog: branded hero + model info."""
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from app import __version__
+from app.utils.paths import resource_path
 
 
 class AboutDialog(QDialog):
@@ -22,32 +23,64 @@ class AboutDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle("Về Trash Sorter Pro")
-        self.setMinimumSize(480, 360)
+        self.setMinimumSize(520, 460)
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 24, 24, 24)
-        outer.setSpacing(12)
+        outer.setContentsMargins(28, 24, 28, 20)
+        outer.setSpacing(10)
 
+        # hero row: logo + title + version
+        hero = QHBoxLayout()
+        hero.setSpacing(16)
+        logo = QLabel()
+        logo_path = resource_path("app/ui/resources/icons/logo.svg")
+        if logo_path.exists():
+            logo.setPixmap(QIcon(str(logo_path)).pixmap(QSize(64, 64)))
+        logo.setFixedSize(72, 72)
+        logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hero.addWidget(logo)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(2)
         title = QLabel("Trash Sorter Pro")
         title.setFont(QFont("Inter", 20, QFont.Weight.Bold))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        outer.addWidget(title)
-
+        text_col.addWidget(title)
+        tagline = QLabel("AI Phân loại rác thông minh")
+        tagline.setStyleSheet("color: #10B981; font-size: 13px; font-weight: 600;")
+        text_col.addWidget(tagline)
         ver = QLabel(f"version {__version__}")
-        ver.setStyleSheet("color: #94A3B8;")
-        ver.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        outer.addWidget(ver)
+        ver.setStyleSheet("color: #94A3B8; font-size: 12px;")
+        text_col.addWidget(ver)
+        text_col.addStretch()
+        hero.addLayout(text_col, 1)
+        outer.addLayout(hero)
+
+        names = model_class_names or {}
+        meta = QLabel(
+            f"<span style='color:#94A3B8'>Model:</span> "
+            f"<span style='color:#F1F5F9'>YOLOv8 · "
+            f"{len(names)} lớp · input {model_imgsz}px</span><br>"
+            f"<span style='color:#94A3B8'>Dataset:</span> "
+            f"<span style='color:#F1F5F9'>Roboflow projectverba/yolo-waste-detection</span>"
+        )
+        meta.setTextFormat(Qt.TextFormat.RichText)
+        meta.setStyleSheet(
+            "background: #0B1220; border-radius: 8px;"
+            " padding: 12px 14px; font-size: 12px;"
+        )
+        outer.addWidget(meta)
 
         info = QTextEdit()
         info.setReadOnly(True)
-        info.setStyleSheet("background: #0B1220; border-radius: 8px; padding: 12px;")
-        names = model_class_names or {}
+        info.setStyleSheet(
+            "background: #0B1220; border-radius: 8px; padding: 12px;"
+            " font-family: 'JetBrains Mono','Consolas',monospace; font-size: 12px;"
+        )
         names_str = (
-            "\n".join(f"  {k}: {v}" for k, v in sorted(names.items())) or "  (no model loaded)"
+            "\n".join(f"  {k:>2}: {v}" for k, v in sorted(names.items()))
+            or "  (no model loaded)"
         )
-        info.setPlainText(
-            f"Model input size: {model_imgsz}\nClasses ({len(names)}):\n{names_str}\n"
-        )
+        info.setPlainText(f"Classes ({len(names)}):\n{names_str}\n")
         outer.addWidget(info, 1)
 
         btn_row = QHBoxLayout()

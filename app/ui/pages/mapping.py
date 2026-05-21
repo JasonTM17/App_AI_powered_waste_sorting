@@ -20,6 +20,29 @@ from PySide6.QtWidgets import (
 from app.core.config import ClassMapping
 from app.core.uart_protocol import encode_sort
 
+# Visual category by class name keyword → dot color (waste taxonomy)
+_CATEGORY_RULES = (
+    # organic / food → green
+    ("#10B981", ("food", "organic", "fruit", "vegetable", "leaf", "grass", "compost")),
+    # paper / cardboard → amber
+    ("#F59E0B", ("paper", "cardboard", "cellulose", "papier", "newspaper")),
+    # plastic / glass / metal recyclable → blue
+    ("#3B82F6", ("plastic", "bottle", "can", "glass", "metal", "aluminum", "tin", "polypropylene", "polyethylene", "tetra")),
+    # hazardous → red
+    ("#EF4444", ("battery", "electronic", "chemical", "medical", "syringe", "lamp", "bulb")),
+    # textile / wood → violet
+    ("#A855F7", ("textile", "fabric", "cloth", "wood", "leather", "shoe")),
+)
+_DEFAULT_DOT = "#64748B"  # slate — anything we can't categorise
+
+
+def _category_color(class_name: str) -> str:
+    n = class_name.lower()
+    for color, kws in _CATEGORY_RULES:
+        if any(k in n for k in kws):
+            return color
+    return _DEFAULT_DOT
+
 
 class MappingRow(QWidget):
     test_clicked = Signal(str)
@@ -31,8 +54,11 @@ class MappingRow(QWidget):
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(12)
 
-        handle = QLabel("⠿")
-        handle.setStyleSheet("color: #94A3B8; font-size: 18px;")
+        handle = QLabel("●")
+        handle.setStyleSheet(
+            f"color: {_category_color(mapping.class_name)}; font-size: 18px;"
+            " min-width: 18px;"
+        )
         layout.addWidget(handle)
 
         self.cls_label = QLabel(mapping.class_name)
