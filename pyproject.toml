@@ -45,7 +45,7 @@ files = ["app/core"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
-addopts = "-ra --strict-markers"
+addopts = "-ra --strict-markers --cov=app/core --cov-report=term-missing"
 
 [tool.coverage.run]
 source = ["app"]

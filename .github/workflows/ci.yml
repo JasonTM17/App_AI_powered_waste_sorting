@@ -25,5 +25,5 @@ jobs:
       - name: mypy core
         run: python -m uv run mypy app/core
         continue-on-error: true
-      - name: pytest
-        run: python -m uv run pytest --cov=app --cov-report=term-missing
+      - name: pytest with core coverage gate
+        run: python -m uv run pytest --cov=app/core --cov-report=term-missing --cov-fail-under=65
