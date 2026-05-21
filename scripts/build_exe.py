@@ -65,6 +65,14 @@ def main() -> int:
     print("PyInstaller args:", args)
     PyInstaller.__main__.run(args)
     print(f"\n[OK] Build complete: {DIST / APP_NAME}")
+
+    # Drop shortcuts at project root + Desktop so user doesn't have to
+    # dig into dist/TrashSorterPro/ to launch the app.
+    try:
+        from scripts.make_shortcuts import main as _make_shortcuts
+        _make_shortcuts()
+    except Exception as e:
+        print(f"warn: shortcut creation failed: {e}")
     return 0
 
 

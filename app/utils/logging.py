@@ -6,6 +6,7 @@ Production-ready setup that survives PyInstaller --noconsole builds where
 
 from __future__ import annotations
 
+import contextlib
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -56,10 +57,8 @@ def setup_logging(level: str = "INFO", log_file: str | Path | None = None) -> Pa
     logger.remove()
 
     if _has_console_stream():
-        try:
+        with contextlib.suppress(Exception):
             logger.add(sys.stderr, level=level, colorize=True)
-        except Exception:
-            pass
 
     logfile = _resolve_log_file(log_file)
     try:
@@ -74,16 +73,12 @@ def setup_logging(level: str = "INFO", log_file: str | Path | None = None) -> Pa
     except Exception as exc:
         # If the structured sink fails (permissions, disk full, etc.), at
         # least try a plain text fallback so we don't lose everything.
-        try:
+        with contextlib.suppress(Exception):
             fallback = logfile.with_suffix(".plain.log")
             logger.add(fallback, level="DEBUG", enqueue=True)
-        except Exception:
-            pass
         # surface why the primary sink failed via the still-active sinks
-        try:
+        with contextlib.suppress(Exception):
             logger.warning("structured log sink failed: {}", exc)
-        except Exception:
-            pass
 
     return logfile
 
