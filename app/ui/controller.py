@@ -24,6 +24,7 @@ class AppController(QObject):
     test_camera_result = Signal(bool, str)
     test_uart_result = Signal(bool, str)
     reload_model_result = Signal(bool, str)
+    snapshot_saved = Signal(bool, str)
 
     def __init__(self, cfg: AppConfig, config_path: Path, db_path: Path):
         super().__init__()
@@ -37,6 +38,7 @@ class AppController(QObject):
         self._last_frame_t = 0.0
         self._fps = 0.0
         self._latency = 0.0
+        self._last_frame = None
 
     def start(self) -> None:
         self._engine = InferenceEngine(
@@ -78,6 +80,7 @@ class AppController(QObject):
         t0 = time.time()
         ts = datetime.now(timezone.utc)
         detections = self._pipeline.process_frame(frame, ts)
+        self._last_frame = frame
         self._latency = (time.time() - t0) * 1000
         if self._last_frame_t:
             inst_fps = 1.0 / max(time.time() - self._last_frame_t, 1e-6)
@@ -161,6 +164,21 @@ class AppController(QObject):
     @property
     def history(self):
         return self._pipeline.history if self._pipeline is not None else None
+
+    def take_snapshot(self) -> None:
+        from datetime import datetime
+        import cv2
+        from app.utils.paths import snapshots_dir
+        if self._last_frame is None:
+            self.snapshot_saved.emit(False, "no frame yet")
+            return
+        ts = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+        out = snapshots_dir() / f"snap-{ts}.jpg"
+        try:
+            cv2.imwrite(str(out), self._last_frame)
+            self.snapshot_saved.emit(True, str(out))
+        except Exception as e:
+            self.snapshot_saved.emit(False, str(e))
 
     def stop(self) -> None:
         if self._camera is not None:

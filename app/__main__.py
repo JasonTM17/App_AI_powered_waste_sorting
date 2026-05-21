@@ -47,6 +47,7 @@ def main() -> int:
         window.live_page.set_latency(latency)
 
     controller.frame_processed.connect(_on_frame)
+    window.live_page.snapshot_requested.connect(controller.take_snapshot)
 
     window.show()
     controller.start()
