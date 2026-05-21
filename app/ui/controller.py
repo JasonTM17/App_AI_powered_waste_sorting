@@ -21,6 +21,9 @@ class AppController(QObject):
     uart_status = Signal(bool)
     model_status = Signal(bool)
     frame_processed = Signal(object, list, float, float)
+    test_camera_result = Signal(bool, str)
+    test_uart_result = Signal(bool, str)
+    reload_model_result = Signal(bool, str)
 
     def __init__(self, cfg: AppConfig, config_path: Path, db_path: Path):
         super().__init__()
@@ -92,6 +95,68 @@ class AppController(QObject):
         if self._pipeline is not None:
             self._pipeline.update_mappings(new_cfg.mappings)
         logger.info("config updated")
+
+    def test_camera(self, source: str) -> None:
+        import cv2
+        try:
+            src: int | str = int(source) if source.isdigit() else source
+            cap = cv2.VideoCapture(src)
+            ok = cap.isOpened()
+            if ok:
+                ok, frame = cap.read()
+                ok = ok and frame is not None
+            cap.release()
+            self.test_camera_result.emit(ok, "" if ok else "Cannot open source")
+        except Exception as e:
+            self.test_camera_result.emit(False, str(e))
+
+    def test_uart_ping(self, port: str, baud: int) -> None:
+        import time
+
+        import serial
+
+        from app.core.uart_protocol import encode_ping, parse_line
+        try:
+            s = serial.Serial(port, baud, timeout=1.0)
+        except Exception as e:
+            self.test_uart_result.emit(False, f"open {port} failed: {e}")
+            return
+        try:
+            s.write(encode_ping())
+            deadline = time.time() + 1.5
+            while time.time() < deadline:
+                raw = s.readline()
+                if not raw:
+                    continue
+                msg = parse_line(raw)
+                if msg and msg[0] == "pong":
+                    self.test_uart_result.emit(True, f"PONG from {port}")
+                    return
+            self.test_uart_result.emit(False, f"no PONG from {port} within 1.5s")
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+
+    def reload_model(self, path: str) -> None:
+        try:
+            new_engine = InferenceEngine(
+                path,
+                device=self.cfg.model.device,
+                conf=self.cfg.model.conf_threshold,
+                iou=self.cfg.model.iou_threshold,
+                imgsz=self.cfg.model.input_size,
+                half=self.cfg.model.half_precision,
+            )
+        except Exception as e:
+            self.reload_model_result.emit(False, str(e))
+            return
+        self._engine = new_engine
+        if self._pipeline is not None:
+            self._pipeline.engine = new_engine
+        self.cfg.model.path = path
+        self.reload_model_result.emit(True, f"Loaded {len(new_engine.class_names)} classes")
 
     def stop(self) -> None:
         if self._camera is not None:

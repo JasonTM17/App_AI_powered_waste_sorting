@@ -30,6 +30,10 @@ def main() -> int:
     controller.uart_status.connect(window.live_page.set_uart_status)
     if window.settings_page is not None:
         window.settings_page.config_saved.connect(controller.update_config)
+    if window.settings_page is not None:
+        window.settings_page.test_camera_requested.connect(controller.test_camera)
+        window.settings_page.test_uart_requested.connect(controller.test_uart_ping)
+        window.settings_page.reload_model_requested.connect(controller.reload_model)
     if window.mapping_page is not None:
         def _on_mappings(lst):
             new_cfg = controller.cfg.model_copy(deep=True)
