@@ -50,6 +50,22 @@ def main() -> int:
     window.live_page.snapshot_requested.connect(controller.take_snapshot)
 
     window.show()
+
+    from PySide6.QtWidgets import QSystemTrayIcon
+    from app.ui.widgets.tray import TrayIcon
+    if QSystemTrayIcon.isSystemTrayAvailable():
+        tray = TrayIcon(window)
+        tray.show()
+        tray.show_requested.connect(window.show)
+        tray.show_requested.connect(window.activateWindow)
+        tray.quit_requested.connect(window.force_quit)
+        window.tray = tray
+        window._minimize_to_tray = cfg.minimize_to_tray
+        controller.uart_status.connect(
+            lambda ok: tray.notify("UART", "Mất kết nối" if not ok else "Đã kết nối")
+            if not ok else None
+        )
+
     controller.start()
 
     history_service = controller.history

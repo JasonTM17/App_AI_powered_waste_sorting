@@ -22,6 +22,9 @@ NAV_ITEMS = ["▶  Live", "▦  Lịch sử", "⇆  Mapping", "◉  Capture", "�
 class MainWindow(QMainWindow):
     def __init__(self, cfg: AppConfig | None = None, history=None) -> None:
         super().__init__()
+        self._force_quit = False
+        self._minimize_to_tray = False
+        self.tray = None
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.resize(1280, 800)
@@ -107,3 +110,17 @@ class MainWindow(QMainWindow):
             self.showNormal()
         else:
             self.showMaximized()
+
+    def closeEvent(self, event):
+        if getattr(self, "_force_quit", False):
+            event.accept()
+            return
+        if getattr(self, "_minimize_to_tray", False) and getattr(self, "tray", None) is not None:
+            event.ignore()
+            self.hide()
+        else:
+            event.accept()
+
+    def force_quit(self):
+        self._force_quit = True
+        self.close()
