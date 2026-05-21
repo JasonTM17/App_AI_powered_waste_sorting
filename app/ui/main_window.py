@@ -44,8 +44,12 @@ class MainWindow(QMainWindow):
         body_layout.setSpacing(0)
 
         self.sidebar = Sidebar(NAV_ITEMS)
+        from app.ui.pages.live import LivePage
+
         self.stack = QStackedWidget()
-        for label in NAV_ITEMS:
+        self.live_page = LivePage()
+        self.stack.addWidget(self.live_page)
+        for label in NAV_ITEMS[1:]:
             page = QLabel(f"{label} — placeholder")
             page.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.stack.addWidget(page)
