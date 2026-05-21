@@ -197,11 +197,18 @@ class AppController(QObject):
 
     def _on_inferred(self, frame, detections, latency_ms: float) -> None:
         import time
+        now = time.time()
+        # Cap UI emit rate to ~30 fps regardless of how fast inference runs.
+        # The pipeline still ran (history + UART), we just skip pushing the
+        # frame to the renderer when the previous emit was very recent.
+        min_interval = 1.0 / 30.0
+        if self._last_frame_t and (now - self._last_frame_t) < min_interval:
+            return
         self._latency = latency_ms
         if self._last_frame_t:
-            inst_fps = 1.0 / max(time.time() - self._last_frame_t, 1e-6)
+            inst_fps = 1.0 / max(now - self._last_frame_t, 1e-6)
             self._fps = 0.9 * self._fps + 0.1 * inst_fps
-        self._last_frame_t = time.time()
+        self._last_frame_t = now
         self.frame_processed.emit(frame, detections, self._fps, self._latency)
 
     def update_config(self, new_cfg: AppConfig) -> None:

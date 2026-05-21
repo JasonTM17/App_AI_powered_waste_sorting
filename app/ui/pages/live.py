@@ -142,6 +142,10 @@ class LivePage(QWidget):
     def update_frame(self, frame, detections: list[Detection]) -> None:
         if self._paused or not self._cam_on:
             return
+        # If the Live page itself isn't visible (user on another tab),
+        # skip the QPixmap conversion + repaint entirely.
+        if not self.isVisible():
+            return
         self.video.set_frame(frame)
         self.video.set_detections(detections)
 
