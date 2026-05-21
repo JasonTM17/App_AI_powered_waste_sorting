@@ -36,6 +36,7 @@ class UartWorker(QThread):
         self._queue: queue.Queue[_Cmd] = queue.Queue(maxsize=100)
         self._ser = None
         self.is_connected = False
+        self._last_open_warn = 0.0
 
     def send(self, track_id, command, conf):
         try:
@@ -53,9 +54,17 @@ class UartWorker(QThread):
             self.is_connected = True
             self.connected.emit(True)
             self._ser.write(encode_ping())
+            logger.info("uart connected port={}", self._port)
+            self._last_open_warn = 0.0
             return True
         except Exception as e:
-            logger.warning("uart open failed port={} err={}", self._port, e)
+            now = time.time()
+            # throttle the noisy 'open failed' line to once every 30s so
+            # logs are still informative but not flooded while user has
+            # nothing on COM3
+            if now - self._last_open_warn > 30.0:
+                logger.warning("uart open failed port={} err={}", self._port, e)
+                self._last_open_warn = now
             self.is_connected = False
             self.connected.emit(False)
             self.error.emit(f"open {self._port} failed: {e}")

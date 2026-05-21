@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,8 +26,10 @@ from app.core.config import AppConfig
 class _CameraScan(QThread):
     """Probe camera indices 0..max_idx across all Windows backends.
 
-    Returns labels like "0 (MSMF)", "1 (DSHOW)" so user can tell which
-    backend each index responds on.
+    Returns labels like "1 (DSHOW) USB Camera". When PnP enumeration
+    succeeds, each working OpenCV index is annotated with the friendly
+    device name and a tag — so user can tell the laptop webcam apart
+    from a real plugged-in USB camera.
     """
 
     done = Signal(list)
@@ -38,13 +40,20 @@ class _CameraScan(QThread):
 
     def run(self):
         import cv2
+
+        from app.utils.camera_enum import list_pnp_cameras
+
+        pnp = list_pnp_cameras()
+        externals = [c for c in pnp if c.get("is_external")]
+        builtins = [c for c in pnp if c.get("is_usb") and not c.get("is_external")]
+
         backends = [
             ("MSMF", cv2.CAP_MSMF),
             ("DSHOW", cv2.CAP_DSHOW),
             ("ANY", cv2.CAP_ANY),
         ]
         seen: set[int] = set()
-        found: list[str] = []
+        rows: list[tuple[int, str]] = []  # (priority, label)
         for name, b in backends:
             for i in range(self._max + 1):
                 if i in seen:
@@ -54,10 +63,35 @@ class _CameraScan(QThread):
                 if ok:
                     ok2, frame = cap.read()
                     if ok2 and frame is not None:
-                        found.append(f"{i} ({name})")
+                        # naive heuristic: index 0 + only-builtins-present
+                        # = laptop webcam; otherwise treat as external
+                        if externals and i == 0 and not builtins:
+                            tag = "USB"
+                            prio = 0
+                        elif externals and i > 0:
+                            tag = "USB"
+                            prio = 0
+                        elif builtins and i == 0:
+                            tag = "Webcam laptop"
+                            prio = 9
+                        else:
+                            tag = "?"
+                            prio = 5
+                        rows.append((prio, f"{i} ({name}) — {tag}"))
                         seen.add(i)
                 cap.release()
-        self.done.emit(found)
+        rows.sort()
+        self.done.emit([r[1] for r in rows])
+
+
+class _PortScan(QThread):
+    """List visible COM ports off the GUI thread."""
+
+    done = Signal(list)
+
+    def run(self):
+        from app.utils.serial_enum import list_serial_ports
+        self.done.emit(list_serial_ports())
 
 
 def _section(title: str) -> tuple[QFrame, QFormLayout]:
@@ -184,7 +218,10 @@ class SettingsPage(QWidget):
 
         # uart
         uart_box, uart_form = _section("UART")
-        self.uart_port = QLineEdit(self._cfg.uart.port)
+        self.uart_port = QComboBox()
+        self.uart_port.setEditable(True)
+        self.uart_port.addItem(self._cfg.uart.port)
+        self.uart_port.setCurrentText(self._cfg.uart.port)
         self.uart_baud = QComboBox()
         self.uart_baud.addItems(["9600", "19200", "38400", "57600", "115200"])
         self.uart_baud.setCurrentText(str(self._cfg.uart.baud))
@@ -198,15 +235,28 @@ class SettingsPage(QWidget):
         uart_form.addRow("Baud", self.uart_baud)
         uart_form.addRow("Ack timeout", self.uart_timeout)
         uart_form.addRow("", self.uart_auto)
+        uart_btns = QHBoxLayout()
+        btn_scan_uart = QPushButton("⟳ Scan cổng")
+        btn_scan_uart.setObjectName("secondary")
+        btn_scan_uart.clicked.connect(self._scan_ports)
         btn_test_uart = QPushButton("▶ Test ping")
         btn_test_uart.setObjectName("secondary")
         btn_test_uart.clicked.connect(
             lambda: self.test_uart_requested.emit(
-                self.uart_port.text(), int(self.uart_baud.currentText())
+                self.uart_port.currentText().split(" ")[0].strip(),
+                int(self.uart_baud.currentText())
             )
         )
-        uart_form.addRow("", btn_test_uart)
+        uart_btns.addWidget(btn_scan_uart)
+        uart_btns.addWidget(btn_test_uart)
+        uart_btns.addStretch()
+        uart_btns_w = QWidget()
+        uart_btns_w.setLayout(uart_btns)
+        uart_form.addRow("", uart_btns_w)
         outer.addWidget(uart_box)
+        self._port_scan: _PortScan | None = None
+        # populate port list immediately on first show so user sees real ports
+        QTimer.singleShot(0, self._scan_ports)
 
         # app
         app_box, app_form = _section("Ứng dụng")
@@ -248,6 +298,35 @@ class SettingsPage(QWidget):
         if f:
             self.mdl_path.setText(f)
 
+    def _scan_ports(self):
+        if self._port_scan is not None and self._port_scan.isRunning():
+            return
+        scan = _PortScan()
+        self._port_scan = scan
+
+        def _apply(ports: list[dict]):
+            current = self.uart_port.currentText().split(" ")[0].strip()
+            self.uart_port.blockSignals(True)
+            self.uart_port.clear()
+            if not ports:
+                self.uart_port.addItem(current or "COM3")
+            else:
+                for p in ports:
+                    tag = "USB" if p.get("is_usb") else "—"
+                    label = f"{p['device']} ({tag}) {p.get('name','')[:40]}"
+                    self.uart_port.addItem(label, p["device"])
+                # try to keep the previously selected device
+                idx = self.uart_port.findData(current)
+                if idx >= 0:
+                    self.uart_port.setCurrentIndex(idx)
+                else:
+                    self.uart_port.setCurrentIndex(0)
+            self.uart_port.blockSignals(False)
+
+        scan.done.connect(_apply)
+        scan.finished.connect(scan.deleteLater)
+        scan.start()
+
     def _scan_cameras(self):
         if self._cam_scan is not None and self._cam_scan.isRunning():
             return
@@ -283,7 +362,7 @@ class SettingsPage(QWidget):
         cfg.model.conf_threshold = self.mdl_conf.value() / 100
         cfg.model.iou_threshold = self.mdl_iou.value() / 100
         cfg.model.input_size = int(self.mdl_imgsz.currentText())
-        cfg.uart.port = self.uart_port.text()
+        cfg.uart.port = self.uart_port.currentText().split(" ")[0].strip()
         cfg.uart.baud = int(self.uart_baud.currentText())
         cfg.uart.ack_timeout_ms = self.uart_timeout.value()
         cfg.uart.auto_reconnect = self.uart_auto.isChecked()

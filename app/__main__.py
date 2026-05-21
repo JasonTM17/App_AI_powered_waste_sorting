@@ -113,6 +113,13 @@ def main() -> int:
         window.live_page.set_fps(fps)
         window.live_page.set_latency(latency)
         window.set_fps(fps)
+        # Push each detection into the side stream so user can see what
+        # the model classified (= app cũ's "system log under camera")
+        if detections:
+            from datetime import datetime
+            ts = datetime.now().strftime("%H:%M:%S")
+            for d in detections:
+                window.live_page.append_detection(d.cls_name, d.conf, ts)
 
     controller.frame_processed.connect(_on_frame)
     window.live_page.snapshot_requested.connect(controller.take_snapshot)
