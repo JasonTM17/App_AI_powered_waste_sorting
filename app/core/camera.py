@@ -26,15 +26,37 @@ class CameraWorker(QThread):
         self._cap = None
 
     def _open(self):
-        src = int(self._source) if self._source.isdigit() else self._source
-        cap = cv2.VideoCapture(src)
-        if not cap.isOpened():
-            cap.release()
-            return False
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
-        self._cap = cap
-        return True
+        src_raw = self._source.strip()
+        is_index = src_raw.isdigit()
+        src: int | str = int(src_raw) if is_index else src_raw
+
+        attempts: list[tuple[str, int]] = []
+        if is_index:
+            # Windows: try MSMF then DSHOW then default. Many UVC/IP cams
+            # only respond on one specific backend.
+            attempts = [
+                ("MSMF", cv2.CAP_MSMF),
+                ("DSHOW", cv2.CAP_DSHOW),
+                ("ANY", cv2.CAP_ANY),
+            ]
+        else:
+            attempts = [("ANY", cv2.CAP_ANY)]
+
+        for name, backend in attempts:
+            cap = cv2.VideoCapture(src, backend) if is_index else cv2.VideoCapture(src)
+            if not cap.isOpened():
+                cap.release()
+                continue
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
+            ok, _frame = cap.read()
+            if not ok:
+                cap.release()
+                continue
+            logger.info("camera open ok source={} backend={}", self._source, name)
+            self._cap = cap
+            return True
+        return False
 
     def run(self):
         consecutive_fail = 0

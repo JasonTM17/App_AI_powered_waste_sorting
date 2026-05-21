@@ -23,25 +23,39 @@ from app.core.config import AppConfig
 
 
 class _CameraScan(QThread):
-    """Probe camera indices 0..max_idx, emit list of working ones."""
+    """Probe camera indices 0..max_idx across all Windows backends.
+
+    Returns labels like "0 (MSMF)", "1 (DSHOW)" so user can tell which
+    backend each index responds on.
+    """
 
     done = Signal(list)
 
-    def __init__(self, max_idx: int = 5):
+    def __init__(self, max_idx: int = 9):
         super().__init__()
         self._max = max_idx
 
     def run(self):
         import cv2
-        found: list[int] = []
-        for i in range(self._max + 1):
-            cap = cv2.VideoCapture(i)
-            ok = cap.isOpened()
-            if ok:
-                ok2, frame = cap.read()
-                if ok2 and frame is not None:
-                    found.append(i)
-            cap.release()
+        backends = [
+            ("MSMF", cv2.CAP_MSMF),
+            ("DSHOW", cv2.CAP_DSHOW),
+            ("ANY", cv2.CAP_ANY),
+        ]
+        seen: set[int] = set()
+        found: list[str] = []
+        for name, b in backends:
+            for i in range(self._max + 1):
+                if i in seen:
+                    continue
+                cap = cv2.VideoCapture(i, b)
+                ok = cap.isOpened()
+                if ok:
+                    ok2, frame = cap.read()
+                    if ok2 and frame is not None:
+                        found.append(f"{i} ({name})")
+                        seen.add(i)
+                cap.release()
         self.done.emit(found)
 
 
@@ -222,16 +236,18 @@ class SettingsPage(QWidget):
     def _scan_cameras(self):
         if self._cam_scan is not None and self._cam_scan.isRunning():
             return
-        scan = _CameraScan(max_idx=5)
+        scan = _CameraScan(max_idx=9)
         self._cam_scan = scan
 
-        def _apply(found: list[int]):
+        def _apply(found: list[str]):
             current = self.cam_source.currentText()
             self.cam_source.blockSignals(True)
             self.cam_source.clear()
-            items = [str(i) for i in found] or ["0"]
+            items = found if found else ["0"]
             self.cam_source.addItems(items)
-            if current in items:
+            # If user already typed an index/url, keep it in front
+            if current and current not in items:
+                self.cam_source.insertItem(0, current)
                 self.cam_source.setCurrentText(current)
             else:
                 self.cam_source.setCurrentText(items[0])
@@ -243,7 +259,7 @@ class SettingsPage(QWidget):
 
     def _collect(self) -> AppConfig:
         cfg = self._cfg.model_copy(deep=True)
-        cfg.camera.source = self.cam_source.currentText()
+        cfg.camera.source = self.cam_source.currentText().split(" ")[0].strip()
         cfg.camera.width = self.cam_w.value()
         cfg.camera.height = self.cam_h.value()
         cfg.camera.mirror = self.cam_mirror.isChecked()
