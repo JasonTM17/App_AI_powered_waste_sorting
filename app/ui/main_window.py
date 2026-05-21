@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core.config import AppConfig
 from app.ui.widgets.sidebar import Sidebar
 from app.ui.widgets.title_bar import TitleBar
 
@@ -19,7 +20,7 @@ NAV_ITEMS = ["▶  Live", "▦  Lịch sử", "⇆  Mapping", "◉  Capture", "�
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, cfg: AppConfig | None = None) -> None:
         super().__init__()
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
@@ -49,8 +50,17 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.live_page = LivePage()
         self.stack.addWidget(self.live_page)
-        for label in NAV_ITEMS[1:]:
+        for label in NAV_ITEMS[1:4]:
             page = QLabel(f"{label} — placeholder")
+            page.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.stack.addWidget(page)
+        if cfg is not None:
+            from app.ui.pages.settings import SettingsPage
+            self.settings_page = SettingsPage(cfg)
+            self.stack.addWidget(self.settings_page)
+        else:
+            self.settings_page = None
+            page = QLabel(f"{NAV_ITEMS[4]} — placeholder")
             page.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.stack.addWidget(page)
         self.sidebar.page_changed.connect(self.stack.setCurrentIndex)

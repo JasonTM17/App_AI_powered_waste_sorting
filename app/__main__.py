@@ -24,10 +24,12 @@ def main() -> int:
     cfg = load_config(cfg_path)
     apply_theme(app, cfg.theme)
 
-    window = MainWindow()
+    window = MainWindow(cfg)
     controller = AppController(cfg, cfg_path, db_path())
 
     controller.uart_status.connect(window.live_page.set_uart_status)
+    if window.settings_page is not None:
+        window.settings_page.config_saved.connect(controller.update_config)
 
     def _on_frame(frame, detections, fps, latency):
         window.live_page.update_frame(frame, detections)
