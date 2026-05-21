@@ -152,6 +152,7 @@ class HistoryPage(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setVisible(False)
+        self.table.doubleClicked.connect(self._open_detail)
         table_layout.addWidget(self.table)
         outer.addWidget(table_card, 1)
 
@@ -209,6 +210,16 @@ class HistoryPage(QWidget):
         curve = self.area_plot.plot(xs, ys, pen=pg.mkPen("#10B981", width=2),
                                     fillLevel=0, brush=(16, 185, 129, 60))
         _ = curve
+
+    def _open_detail(self, index) -> None:
+        from app.ui.widgets.detail_dialog import DetectionDetailDialog
+        if not index.isValid():
+            return
+        row = self.model._rows[index.row()] if 0 <= index.row() < len(self.model._rows) else None
+        if row is None:
+            return
+        dlg = DetectionDetailDialog(row, self)
+        dlg.exec()
 
     def _export(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Export CSV", "history.csv", "CSV (*.csv)")
