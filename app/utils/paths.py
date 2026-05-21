@@ -9,6 +9,30 @@ from pathlib import Path
 APP_NAME = "TrashSorter"
 
 
+def bundle_dir() -> Path:
+    """Directory containing read-only resources bundled with the app.
+
+    - When running from a PyInstaller frozen build, returns ``sys._MEIPASS``
+      (one-folder mode: ``dist/TrashSorterPro/_internal/``).
+    - When running from source, returns the project root (parent of ``app/``).
+    """
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass)
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def resource_path(rel: str | Path) -> Path:
+    """Resolve a relative resource path against the bundle dir.
+
+    Absolute paths are returned unchanged.
+    """
+    p = Path(rel)
+    if p.is_absolute():
+        return p
+    return bundle_dir() / p
+
+
 def app_data_dir() -> Path:
     if sys.platform == "win32":
         base = os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming"))
@@ -40,3 +64,8 @@ def config_path() -> Path:
 
 def db_path() -> Path:
     return app_data_dir() / "history.db"
+
+
+def example_config_path() -> Path:
+    """Path to the seed config bundled with the app."""
+    return resource_path("config.example.json")

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.core.events import Detection
 from app.utils.logging import logger
+from app.utils.paths import resource_path
 
 
 class InferenceEngine:
@@ -14,7 +15,11 @@ class InferenceEngine:
 
         path = Path(model_path)
         if not path.exists():
-            raise FileNotFoundError(f"model not found: {path}")
+            bundled = resource_path(path)
+            if bundled.exists():
+                path = bundled
+            else:
+                raise FileNotFoundError(f"model not found: {model_path}")
         self._model = YOLO(str(path))
         self.class_names = dict(self._model.names)
         self.device = device

@@ -39,10 +39,17 @@ def _icon_arg() -> list[str]:
 
 
 def main() -> int:
-    if DIST.exists():
-        shutil.rmtree(DIST)
-    if BUILD.exists():
-        shutil.rmtree(BUILD)
+    # Don't pre-delete dist/build — if a previous build's exe is still
+    # running it locks the folder. PyInstaller's --noconfirm overwrites
+    # files in place; --clean wipes the PyInstaller work cache only.
+    for d in (DIST, BUILD):
+        if not d.exists():
+            continue
+        try:
+            shutil.rmtree(d)
+        except (OSError, PermissionError) as e:
+            print(f"warn: could not remove {d} (probably locked): {e}")
+            print("      proceeding — PyInstaller will overwrite reachable files")
 
     args = [
         "--name", APP_NAME,

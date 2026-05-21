@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 
 from PySide6.QtWidgets import QApplication
@@ -11,7 +12,24 @@ from app.ui.controller import AppController
 from app.ui.main_window import MainWindow
 from app.ui.widgets.theme import apply_theme
 from app.utils.logging import logger, setup_logging
-from app.utils.paths import config_path, db_path
+from app.utils.paths import config_path, db_path, example_config_path
+
+
+def _seed_config_if_missing() -> None:
+    """Copy bundled `config.example.json` to user config on first run.
+
+    Without this, the user gets an empty `mappings: []` default and the
+    Mapping tab shows nothing. The example bundles all 42 model classes.
+    """
+    target = config_path()
+    if target.exists():
+        return
+    seed = example_config_path()
+    if not seed.exists():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(seed, target)
+    logger.info("seeded config from {}", seed)
 
 
 def main() -> int:
@@ -21,6 +39,7 @@ def main() -> int:
     app.setApplicationName("Trash Sorter Pro")
     app.setOrganizationName("TrashSorter")
 
+    _seed_config_if_missing()
     cfg_path = config_path()
     cfg = load_config(cfg_path)
     apply_theme(app, cfg.theme)

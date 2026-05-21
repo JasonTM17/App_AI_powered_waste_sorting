@@ -17,7 +17,7 @@ from app.core.config import AppConfig
 from app.ui.widgets.sidebar import Sidebar
 from app.ui.widgets.title_bar import TitleBar
 
-NAV_ITEMS = ["▶  Live", "▦  Lịch sử", "⇆  Mapping", "◉  Capture", "⚙  Cài đặt"]
+NAV_ITEMS = ["▶  Live", "▦  Lịch sử", "⇆  Mapping", "◉  Capture", "📋  Nhật ký", "⚙  Cài đặt"]
 
 
 class MainWindow(QMainWindow):
@@ -50,12 +50,14 @@ class MainWindow(QMainWindow):
 
         self.sidebar = Sidebar(NAV_ITEMS)
         from app.ui.pages.live import LivePage
+        from app.ui.pages.system_log import SystemLogPage
 
         self.stack = QStackedWidget()
         self.live_page = LivePage()
         self.mapping_page = None
         self.history_page = None
         self.capture_page = None
+        self.system_log_page = SystemLogPage()
         self.stack.addWidget(self.live_page)
         for idx, label in enumerate(NAV_ITEMS[1:4], start=1):
             if idx == 1 and history is not None:
@@ -77,6 +79,8 @@ class MainWindow(QMainWindow):
                 page = QLabel(f"{label} — placeholder")
                 page.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.stack.addWidget(page)
+        # tab 4 = system log (always available, doesn't need cfg)
+        self.stack.addWidget(self.system_log_page)
         if cfg is not None:
             from app.ui.pages.settings import SettingsPage
 
@@ -84,7 +88,7 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(self.settings_page)
         else:
             self.settings_page = None
-            page = QLabel(f"{NAV_ITEMS[4]} — placeholder")
+            page = QLabel(f"{NAV_ITEMS[5]} — placeholder")
             page.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.stack.addWidget(page)
         self.sidebar.page_changed.connect(self.stack.setCurrentIndex)
@@ -99,7 +103,7 @@ class MainWindow(QMainWindow):
         self.status.setContentsMargins(16, 0, 16, 0)
         outer.addWidget(self.status)
 
-        for i in range(5):
+        for i in range(6):
             QShortcut(
                 QKeySequence(f"Ctrl+{i + 1}"),
                 self,
