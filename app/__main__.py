@@ -63,7 +63,18 @@ def main() -> int:
     controller.uart_status.connect(window.live_page.set_uart_status)
     controller.uart_status.connect(window.set_uart_status)
     controller.camera_status.connect(window.set_camera_status)
+    controller.camera_status.connect(window.live_page.set_camera_on)
+    controller.camera_status.connect(window.title_bar.set_camera_on)
     controller.model_status.connect(window.set_model_status)
+
+    def _on_camera_request(on: bool):
+        if on:
+            controller.start_camera()
+        else:
+            controller.stop_camera()
+
+    window.live_page.camera_toggled.connect(_on_camera_request)
+    window.title_bar.camera_toggled.connect(_on_camera_request)
     if window.settings_page is not None:
         def _on_config_saved(new_cfg):
             apply_theme(app, new_cfg.theme)

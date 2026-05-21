@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QStackedLayout,
     QVBoxLayout,
     QWidget,
 )
@@ -22,10 +23,12 @@ from app.ui.widgets.video_view import VideoView
 class LivePage(QWidget):
     pause_toggled = Signal(bool)
     snapshot_requested = Signal()
+    camera_toggled = Signal(bool)  # True = bật, False = tắt
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._paused = False
+        self._cam_on = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 24, 24, 24)
@@ -36,12 +39,19 @@ class LivePage(QWidget):
         title.setStyleSheet("font-size: 20px; font-weight: 700;")
         header.addWidget(title)
         header.addStretch()
+        self.btn_camera = QPushButton("▶  Bật camera")
+        self.btn_camera.setObjectName("primary")
+        self.btn_camera.setCheckable(True)
+        self.btn_camera.clicked.connect(self._toggle_camera)
         self.btn_pause = QPushButton("⏸  Pause")
         self.btn_pause.setObjectName("secondary")
+        self.btn_pause.setEnabled(False)
         self.btn_pause.clicked.connect(self._toggle_pause)
         self.btn_snap = QPushButton("📷  Snapshot")
         self.btn_snap.setObjectName("secondary")
+        self.btn_snap.setEnabled(False)
         self.btn_snap.clicked.connect(self.snapshot_requested.emit)
+        header.addWidget(self.btn_camera)
         header.addWidget(self.btn_pause)
         header.addWidget(self.btn_snap)
         root.addLayout(header)
@@ -49,8 +59,26 @@ class LivePage(QWidget):
         body = QHBoxLayout()
         body.setSpacing(16)
 
+        # video container with overlayed empty-state placeholder
+        video_container = QWidget()
+        self._video_stack = QStackedLayout(video_container)
+        self._video_stack.setStackingMode(QStackedLayout.StackingMode.StackOne)
+
         self.video = VideoView()
-        body.addWidget(self.video, 3)
+        self._video_stack.addWidget(self.video)
+
+        self.placeholder = QLabel(
+            "📷\n\nCamera đang tắt\n\nNhấn “Bật camera” để bắt đầu nhận diện"
+        )
+        self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.placeholder.setStyleSheet(
+            "background: #0B1220; color: #64748B; font-size: 16px;"
+            " border-radius: 8px;"
+        )
+        self._video_stack.addWidget(self.placeholder)
+        self._video_stack.setCurrentWidget(self.placeholder)
+
+        body.addWidget(video_container, 3)
 
         self.stream = QListWidget()
         self.stream.setObjectName("card")
@@ -68,7 +96,6 @@ class LivePage(QWidget):
         self.card_uart = StatCard("UART", "—", "status")
         self.card_total = StatCard("TOTAL", "0", "all-time")
         self.card_acc = StatCard("AVG CONF", "0.00", "running")
-        # 3-column grid: 2 rows on narrow, 1 row on wide (Qt promotes equally)
         all_cards = [
             self.card_today, self.card_fps, self.card_latency,
             self.card_uart, self.card_total, self.card_acc,
@@ -79,6 +106,33 @@ class LivePage(QWidget):
             cards.setColumnStretch(col, 1)
         root.addLayout(cards)
 
+    def _toggle_camera(self) -> None:
+        self._cam_on = not self._cam_on
+        self.set_camera_on(self._cam_on, emit=True)
+
+    def set_camera_on(self, on: bool, emit: bool = False) -> None:
+        """Update UI for camera on/off. emit=True propagates to controller."""
+        self._cam_on = on
+        self.btn_camera.blockSignals(True)
+        self.btn_camera.setChecked(on)
+        self.btn_camera.setText("⏹  Tắt camera" if on else "▶  Bật camera")
+        self.btn_camera.setObjectName("secondary" if on else "primary")
+        self.btn_camera.style().unpolish(self.btn_camera)
+        self.btn_camera.style().polish(self.btn_camera)
+        self.btn_camera.blockSignals(False)
+        self.btn_pause.setEnabled(on)
+        self.btn_snap.setEnabled(on)
+        if on:
+            self._video_stack.setCurrentWidget(self.video)
+        else:
+            self._video_stack.setCurrentWidget(self.placeholder)
+            self._paused = False
+            self.btn_pause.setText("⏸  Pause")
+            self.card_fps.set_value("0")
+            self.card_latency.set_value("0")
+        if emit:
+            self.camera_toggled.emit(on)
+
     def _toggle_pause(self) -> None:
         self._paused = not self._paused
         self.btn_pause.setText("▶  Resume" if self._paused else "⏸  Pause")
@@ -88,7 +142,7 @@ class LivePage(QWidget):
         return self._paused
 
     def update_frame(self, frame, detections: list[Detection]) -> None:
-        if self._paused:
+        if self._paused or not self._cam_on:
             return
         self.video.set_frame(frame)
         self.video.set_detections(detections)
@@ -101,9 +155,13 @@ class LivePage(QWidget):
             self.stream.takeItem(self.stream.count() - 1)
 
     def set_fps(self, fps: float) -> None:
+        if not self._cam_on:
+            return
         self.card_fps.set_value(f"{fps:.0f}")
 
     def set_latency(self, ms: float) -> None:
+        if not self._cam_on:
+            return
         self.card_latency.set_value(f"{ms:.0f}")
 
     def set_today(self, n: int) -> None:

@@ -11,12 +11,14 @@ class TitleBar(QWidget):
     minimize_requested = Signal()
     maximize_toggled = Signal()
     close_requested = Signal()
+    camera_toggled = Signal(bool)  # True = bật, False = tắt
 
     def __init__(self, title: str = "Trash Sorter Pro", parent=None):
         super().__init__(parent)
         self.setObjectName("titlebar")
         self.setFixedHeight(40)
         self._drag_offset: QPoint | None = None
+        self._cam_on = False
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 0, 0, 0)
@@ -26,6 +28,14 @@ class TitleBar(QWidget):
         self.label.setStyleSheet("color: #F1F5F9; font-weight: 600;")
         layout.addWidget(self.label)
         layout.addStretch()
+
+        self.btn_camera = QPushButton("▶  Bật camera")
+        self.btn_camera.setObjectName("titlebar-cta")
+        self.btn_camera.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_camera.setFixedHeight(28)
+        self.btn_camera.clicked.connect(self._on_camera_clicked)
+        layout.addWidget(self.btn_camera)
+        layout.addSpacing(12)
 
         self.btn_min = QPushButton("—")
         self.btn_max = QPushButton("□")
@@ -40,6 +50,19 @@ class TitleBar(QWidget):
         self.btn_min.clicked.connect(self.minimize_requested)
         self.btn_max.clicked.connect(self.maximize_toggled)
         self.btn_close.clicked.connect(self.close_requested)
+
+    def _on_camera_clicked(self) -> None:
+        self.set_camera_on(not self._cam_on, emit=True)
+
+    def set_camera_on(self, on: bool, emit: bool = False) -> None:
+        self._cam_on = on
+        self.btn_camera.setText("⏹  Tắt camera" if on else "▶  Bật camera")
+        # toggle property so QSS can theme on/off states
+        self.btn_camera.setProperty("active", on)
+        self.btn_camera.style().unpolish(self.btn_camera)
+        self.btn_camera.style().polish(self.btn_camera)
+        if emit:
+            self.camera_toggled.emit(on)
 
     def mousePressEvent(self, e: QMouseEvent) -> None:
         if e.button() == Qt.MouseButton.LeftButton and self.window() is not None:

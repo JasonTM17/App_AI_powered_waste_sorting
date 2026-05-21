@@ -163,6 +163,20 @@ QSlider::handle:horizontal {
 #titlebar QPushButton:hover { background: #152038; color: #F1F5F9; }
 #titlebar QPushButton#close-btn:hover { background: #EF4444; color: white; }
 
+QPushButton#titlebar-cta {
+  background: #10B981; color: #0B1220;
+  border: none; border-radius: 6px;
+  padding: 4px 14px; font-weight: 700; font-size: 12px;
+}
+QPushButton#titlebar-cta:hover { background: #34D399; }
+QPushButton#titlebar-cta[active="true"] {
+  background: transparent; color: #F1F5F9;
+  border: 1px solid #EF4444;
+}
+QPushButton#titlebar-cta[active="true"]:hover {
+  background: rgba(239,68,68,0.15);
+}
+
 QScrollBar:vertical {
   background: transparent; width: 10px; margin: 0;
 }

@@ -135,6 +135,15 @@ class AppController(QObject):
         self._inference_worker.processed.connect(self._on_inferred)
         self._inference_worker.start()
 
+        # Camera is no longer auto-started. User opts in from Live page.
+        # This avoids holding the camera handle while idle and lets the
+        # user tweak Settings before the device is opened.
+        self.camera_status.emit(False)
+        logger.info("controller started (camera idle)")
+
+    def start_camera(self) -> None:
+        if self._camera is not None and self._camera.isRunning():
+            return
         self._camera = CameraWorker(
             source=self.cfg.camera.source,
             width=self.cfg.camera.width,
@@ -144,7 +153,25 @@ class AppController(QObject):
         self._camera.connected.connect(self.camera_status.emit)
         self._camera.frame_ready.connect(self._on_frame)
         self._camera.start()
-        logger.info("controller started")
+        logger.info("camera start requested source={}", self.cfg.camera.source)
+
+    def stop_camera(self) -> None:
+        if self._camera is None:
+            return
+        cam = self._camera
+        self._camera = None
+        try:
+            cam.frame_ready.disconnect(self._on_frame)
+        except (RuntimeError, TypeError):
+            pass
+        cam.stop()
+        cam.wait(2000)
+        cam.deleteLater()
+        self.camera_status.emit(False)
+        logger.info("camera stopped")
+
+    def is_camera_running(self) -> bool:
+        return self._camera is not None and self._camera.isRunning()
 
     def _on_frame(self, frame: np.ndarray) -> None:
         if self._inference_worker is None:
@@ -162,6 +189,15 @@ class AppController(QObject):
         self.frame_processed.emit(frame, detections, self._fps, self._latency)
 
     def update_config(self, new_cfg: AppConfig) -> None:
+        cam_changed = (
+            self.cfg.camera.source != new_cfg.camera.source
+            or self.cfg.camera.width != new_cfg.camera.width
+            or self.cfg.camera.height != new_cfg.camera.height
+            or self.cfg.camera.mirror != new_cfg.camera.mirror
+        )
+        was_running = self.is_camera_running()
+        if cam_changed and was_running:
+            self.stop_camera()
         self.cfg = new_cfg
         save_config(new_cfg, self.config_path)
         if self._engine is not None:
@@ -170,7 +206,9 @@ class AppController(QObject):
             )
         if self._pipeline is not None:
             self._pipeline.update_mappings(new_cfg.mappings)
-        logger.info("config updated")
+        if cam_changed and was_running:
+            self.start_camera()
+        logger.info("config updated cam_changed={}", cam_changed)
 
     def test_camera(self, source: str) -> None:
         worker = _CamProbe(source)
@@ -231,6 +269,7 @@ class AppController(QObject):
         if self._camera is not None:
             self._camera.stop()
             self._camera.wait(2000)
+            self._camera = None
         if self._inference_worker is not None:
             self._inference_worker.stop()
             self._inference_worker.wait(2000)
