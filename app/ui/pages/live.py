@@ -67,13 +67,11 @@ class LivePage(QWidget):
         self.video = VideoView()
         self._video_stack.addWidget(self.video)
 
-        self.placeholder = QLabel(
-            "📷\n\nCamera đang tắt\n\nNhấn “Bật camera” để bắt đầu nhận diện"
-        )
+        self.placeholder = QLabel("📷  Camera đang tắt")
         self.placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.placeholder.setStyleSheet(
-            "background: #0B1220; color: #64748B; font-size: 16px;"
-            " border-radius: 8px;"
+            "background: #000000; color: #475569; font-size: 14px;"
+            " letter-spacing: 1px;"
         )
         self._video_stack.addWidget(self.placeholder)
         self._video_stack.setCurrentWidget(self.placeholder)
