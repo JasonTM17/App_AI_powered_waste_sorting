@@ -68,17 +68,15 @@ class LivePage(QWidget):
         self.card_uart = StatCard("UART", "—", "status")
         self.card_total = StatCard("TOTAL", "0", "all-time")
         self.card_acc = StatCard("AVG CONF", "0.00", "running")
-        for col, c in enumerate(
-            [
-                self.card_today,
-                self.card_fps,
-                self.card_latency,
-                self.card_uart,
-                self.card_total,
-                self.card_acc,
-            ]
-        ):
-            cards.addWidget(c, 0, col)
+        # 3-column grid: 2 rows on narrow, 1 row on wide (Qt promotes equally)
+        all_cards = [
+            self.card_today, self.card_fps, self.card_latency,
+            self.card_uart, self.card_total, self.card_acc,
+        ]
+        for i, c in enumerate(all_cards):
+            cards.addWidget(c, i // 3, i % 3)
+        for col in range(3):
+            cards.setColumnStretch(col, 1)
         root.addLayout(cards)
 
     def _toggle_pause(self) -> None:

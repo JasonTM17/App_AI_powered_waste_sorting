@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSpinBox,
     QVBoxLayout,
@@ -85,7 +86,18 @@ class SettingsPage(QWidget):
     def __init__(self, cfg: AppConfig, parent=None):
         super().__init__(parent)
         self._cfg = cfg.model_copy(deep=True)
-        outer = QVBoxLayout(self)
+
+        page = QVBoxLayout(self)
+        page.setContentsMargins(0, 0, 0, 0)
+        page.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        body = QWidget()
+        outer = QVBoxLayout(body)
         outer.setContentsMargins(24, 24, 24, 24)
         outer.setSpacing(16)
 
@@ -227,6 +239,9 @@ class SettingsPage(QWidget):
         save_row.addWidget(btn_cancel)
         save_row.addWidget(btn_save)
         outer.addLayout(save_row)
+
+        scroll.setWidget(body)
+        page.addWidget(scroll)
 
     def _browse_model(self):
         f, _ = QFileDialog.getOpenFileName(self, "Select model", "", "PyTorch (*.pt)")
