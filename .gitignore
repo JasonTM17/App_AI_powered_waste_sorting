@@ -43,6 +43,13 @@ draft*.md
 .private/
 .omc/
 .claude/worktrees/
+docs/superpowers/
+
+# Coverage / test artifacts
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
 
 # OS
 Thumbs.db
