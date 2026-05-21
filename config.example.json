@@ -1,0 +1,76 @@
+{
+  "camera": {
+    "source": "0",
+    "width": 1280,
+    "height": 720,
+    "mirror": false
+  },
+  "model": {
+    "path": "models/best.pt",
+    "device": "cpu",
+    "conf_threshold": 0.4,
+    "iou_threshold": 0.45,
+    "input_size": 640,
+    "half_precision": false
+  },
+  "uart": {
+    "port": "COM3",
+    "baud": 9600,
+    "auto_reconnect": true,
+    "ack_timeout_ms": 200
+  },
+  "mappings": [
+    {
+      "class_name": "paper",
+      "command": "P",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "plastic",
+      "command": "S",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "metal",
+      "command": "M",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "glass",
+      "command": "G",
+      "bin_index": 4,
+      "enabled": true
+    },
+    {
+      "class_name": "organic",
+      "command": "O",
+      "bin_index": 5,
+      "enabled": true
+    },
+    {
+      "class_name": "cardboard",
+      "command": "C",
+      "bin_index": 6,
+      "enabled": true
+    }
+  ],
+  "roi": {
+    "enabled": false,
+    "x": 0,
+    "y": 0,
+    "width": 0,
+    "height": 0
+  },
+  "capture": {
+    "mode": "auto_low_conf",
+    "low_conf_threshold": 0.6,
+    "output_dir": "dataset_v2"
+  },
+  "theme": "dark",
+  "language": "vi",
+  "minimize_to_tray": true,
+  "autostart": false
+}
