@@ -24,6 +24,8 @@ class VideoView(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumSize(640, 360)
         self._pixmap: QPixmap | None = None
+        self._scaled: QPixmap | None = None
+        self._scaled_for_size = (0, 0)
         self._frame_w = 0
         self._frame_h = 0
         self._detections: list[Detection] = []
@@ -35,28 +37,45 @@ class VideoView(QWidget):
         img = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
         self._pixmap = QPixmap.fromImage(img.copy())
         self._frame_w, self._frame_h = w, h
-        self.update()
+        self._scaled = None  # invalidate cache
+        # detections also arrive with frame; trigger one repaint, not two
+        # (caller should call set_detections before set_frame OR we accept
+        # the slightly stale boxes for one frame — better than 2x repaint)
 
     def set_detections(self, detections: list[Detection]) -> None:
         self._detections = detections
         self.update()
 
+    def resizeEvent(self, ev) -> None:
+        self._scaled = None
+        super().resizeEvent(ev)
+
+    def _ensure_scaled(self) -> QPixmap | None:
+        if self._pixmap is None:
+            return None
+        size = (self.width(), self.height())
+        if self._scaled is not None and self._scaled_for_size == size:
+            return self._scaled
+        self._scaled = self._pixmap.scaled(
+            self.size(),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        )
+        self._scaled_for_size = size
+        return self._scaled
+
     def paintEvent(self, _ev) -> None:
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if self._pixmap is None:
+        scaled = self._ensure_scaled()
+        if scaled is None:
             p.fillRect(self.rect(), QColor("#000"))
             return
         target = self.rect()
-        scaled = self._pixmap.scaled(
-            target.size(),
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
         x = (target.width() - scaled.width()) // 2
         y = (target.height() - scaled.height()) // 2
         p.drawPixmap(x, y, scaled)
-        if self._frame_w and self._frame_h:
+        if self._frame_w and self._frame_h and self._detections:
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
             sx = scaled.width() / self._frame_w
             sy = scaled.height() / self._frame_h
             font = QFont("Inter", 10, QFont.Weight.Bold)

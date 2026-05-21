@@ -12,6 +12,7 @@ from PySide6.QtCore import QObject, QThread, Signal
 from app.core.camera import CameraWorker
 from app.core.config import AppConfig, save_config
 from app.core.inference import InferenceEngine
+from app.core.inference_worker import InferenceWorker
 from app.core.pipeline import Pipeline
 from app.core.uart import UartWorker
 from app.utils.logging import logger
@@ -99,6 +100,7 @@ class AppController(QObject):
         self._camera: CameraWorker | None = None
         self._uart: UartWorker | None = None
         self._pipeline: Pipeline | None = None
+        self._inference_worker: InferenceWorker | None = None
         self._last_frame_t = 0.0
         self._fps = 0.0
         self._latency = 0.0
@@ -129,6 +131,10 @@ class AppController(QObject):
         self._pipeline.on_capture_saved = self.capture_saved.emit
         self._uart.ack_received.connect(self._pipeline.on_ack)
 
+        self._inference_worker = InferenceWorker(self._pipeline)
+        self._inference_worker.processed.connect(self._on_inferred)
+        self._inference_worker.start()
+
         self._camera = CameraWorker(
             source=self.cfg.camera.source,
             width=self.cfg.camera.width,
@@ -141,13 +147,14 @@ class AppController(QObject):
         logger.info("controller started")
 
     def _on_frame(self, frame: np.ndarray) -> None:
-        if self._pipeline is None:
+        if self._inference_worker is None:
             return
-        t0 = time.time()
-        ts = datetime.now(timezone.utc)
-        detections = self._pipeline.process_frame(frame, ts)
         self._last_frame = frame
-        self._latency = (time.time() - t0) * 1000
+        self._inference_worker.submit(frame)
+
+    def _on_inferred(self, frame, detections, latency_ms: float) -> None:
+        import time
+        self._latency = latency_ms
         if self._last_frame_t:
             inst_fps = 1.0 / max(time.time() - self._last_frame_t, 1e-6)
             self._fps = 0.9 * self._fps + 0.1 * inst_fps
@@ -224,6 +231,9 @@ class AppController(QObject):
         if self._camera is not None:
             self._camera.stop()
             self._camera.wait(2000)
+        if self._inference_worker is not None:
+            self._inference_worker.stop()
+            self._inference_worker.wait(2000)
         if self._uart is not None:
             self._uart.stop()
             self._uart.wait(2000)

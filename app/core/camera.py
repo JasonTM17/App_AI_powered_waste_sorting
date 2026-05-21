@@ -49,6 +49,10 @@ class CameraWorker(QThread):
                 continue
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
+            try:
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
             ok, _frame = cap.read()
             if not ok:
                 cap.release()
