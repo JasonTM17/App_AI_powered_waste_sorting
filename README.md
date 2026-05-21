@@ -19,7 +19,12 @@ pip install uv
 python -m uv sync
 
 # 3. Đặt model YOLO vào models/best.pt
-cp /path/to/your/best.pt models/
+#    - Tải từ Roboflow: https://universe.roboflow.com/projectverba/yolo-waste-detection
+#      → tab Versions → chọn version mới nhất → Download → format YOLOv8 → file weights.pt
+#      → đổi tên thành best.pt rồi đưa vào models/
+#    - Hoặc dùng model bạn tự train (42-class waste detection, YOLOv8 detect task)
+mkdir -p models
+# cp <đường-dẫn-best.pt-của-bạn> models/best.pt
 
 # 4. Chạy app
 python -m uv run python -m app
@@ -63,7 +68,7 @@ Xem `docs/adr/` để hiểu các quyết định kiến trúc.
 python -m uv run pytest -q
 ```
 
-Hiện ~68 test, coverage `app/core` ≥ 65% (gate trong CI).
+Hiện 69 test passed (1 skip cho system tray), coverage `app/core` ≥ 65% (gate trong CI). Tham khảo `docs/superpowers/specs/` cho mục tiêu 80% (debt theo dõi).
 
 ## Build (Windows)
 
@@ -91,7 +96,13 @@ Xem ADR-0004 để biết thêm.
 
 `%APPDATA%/TrashSorter/config.json` (Windows) hoặc `~/.config/trash-sorter/config.json` (Linux). Mở tab Cài đặt trong app để chỉnh, hoặc edit file rồi restart.
 
-`config.example.json` ở root là template với 6 mapping default (paper/plastic/metal/glass/organic/cardboard).
+`config.example.json` ở root là template với 42 mapping (toàn bộ class của model upstream Roboflow) gom vào 6 bin (P=Paper, S=Plastic, M=Metal, G=Glass, O=Organic, C=Composite).
+
+Kiểm tra class names model thực tế:
+
+```bash
+python -m uv run python scripts/inspect_model.py
+```
 
 ## License
 
