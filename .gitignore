@@ -51,6 +51,9 @@ docs/superpowers/
 htmlcov/
 .pytest_cache/
 
+# Generated launcher shortcuts (regenerated on every build)
+*.lnk
+
 # OS
 Thumbs.db
 .DS_Store
