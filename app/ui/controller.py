@@ -158,6 +158,10 @@ class AppController(QObject):
         self.cfg.model.path = path
         self.reload_model_result.emit(True, f"Loaded {len(new_engine.class_names)} classes")
 
+    @property
+    def history(self):
+        return self._pipeline.history if self._pipeline is not None else None
+
     def stop(self) -> None:
         if self._camera is not None:
             self._camera.stop()

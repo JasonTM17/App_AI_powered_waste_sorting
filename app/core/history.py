@@ -77,6 +77,22 @@ class HistoryService:
         with self._engine.begin() as conn:
             return {name: int(cnt) for name, cnt in conn.execute(stmt).all()}
 
+    def count_by_hour(self, date: datetime) -> dict[int, int]:
+        prefix = date.strftime("%Y-%m-%d")
+        stmt = (
+            select(detections.c.ts)
+            .where(detections.c.ts.like(f"{prefix}%"))
+        )
+        out: dict[int, int] = {h: 0 for h in range(24)}
+        with self._engine.begin() as conn:
+            for (ts,) in conn.execute(stmt).all():
+                try:
+                    hour = int(ts[11:13])
+                    out[hour] = out.get(hour, 0) + 1
+                except (ValueError, IndexError):
+                    continue
+        return out
+
     def export_csv(self, out_path: Path) -> int:
         rows = self.query(limit=1_000_000)
         cols = ["id", "track_id", "ts", "cls_id", "cls_name", "conf",

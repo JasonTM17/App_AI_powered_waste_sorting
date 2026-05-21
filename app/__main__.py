@@ -50,6 +50,16 @@ def main() -> int:
 
     window.show()
     controller.start()
+
+    history_service = controller.history
+    if history_service is not None:
+        from app.ui.pages.history import HistoryPage
+        hp = HistoryPage(history_service)
+        old = window.stack.widget(1)
+        window.stack.insertWidget(1, hp)
+        window.stack.removeWidget(old)
+        window.history_page = hp
+
     rc = app.exec()
     controller.stop()
     return rc

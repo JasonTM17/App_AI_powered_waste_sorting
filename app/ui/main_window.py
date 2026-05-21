@@ -20,7 +20,7 @@ NAV_ITEMS = ["▶  Live", "▦  Lịch sử", "⇆  Mapping", "◉  Capture", "�
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, cfg: AppConfig | None = None) -> None:
+    def __init__(self, cfg: AppConfig | None = None, history=None) -> None:
         super().__init__()
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
@@ -50,9 +50,14 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.live_page = LivePage()
         self.mapping_page = None
+        self.history_page = None
         self.stack.addWidget(self.live_page)
         for idx, label in enumerate(NAV_ITEMS[1:4], start=1):
-            if idx == 2 and cfg is not None:
+            if idx == 1 and history is not None:
+                from app.ui.pages.history import HistoryPage
+                self.history_page = HistoryPage(history)
+                self.stack.addWidget(self.history_page)
+            elif idx == 2 and cfg is not None:
                 from app.ui.pages.mapping import MappingPage
                 self.mapping_page = MappingPage(cfg.mappings)
                 self.stack.addWidget(self.mapping_page)

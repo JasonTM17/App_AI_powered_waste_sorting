@@ -64,3 +64,19 @@ def test_stats_by_class(tmp_path: Path):
     assert counts.get("paper") == 2
     assert counts.get("plastic") == 1
     svc.close()
+
+
+def test_count_by_hour(tmp_path):
+    from datetime import datetime, UTC
+    from app.core.history import HistoryService
+    db = tmp_path / "h.db"
+    svc = HistoryService(db)
+    today = datetime.now(UTC).replace(hour=10, minute=30)
+    svc.insert(track_id=1, ts=today, cls_id=0, cls_name="paper", conf=0.9,
+               bbox=(0, 0, 1, 1), thumbnail=b"", uart_command="P", ack_status="ok")
+    svc.insert(track_id=2, ts=today.replace(hour=14), cls_id=0, cls_name="paper", conf=0.9,
+               bbox=(0, 0, 1, 1), thumbnail=b"", uart_command="P", ack_status="ok")
+    counts = svc.count_by_hour(today)
+    assert counts[10] == 1
+    assert counts[14] == 1
+    svc.close()
