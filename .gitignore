@@ -48,3 +48,6 @@ draft*.md
 Thumbs.db
 .DS_Store
 desktop.ini
+
+models/*.pt
+!models/.gitkeep
