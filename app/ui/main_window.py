@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QSizeGrip,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -102,6 +103,10 @@ class MainWindow(QMainWindow):
         self.status.setFixedHeight(32)
         self.status.setContentsMargins(16, 0, 16, 0)
         outer.addWidget(self.status)
+        self._cam_ok = False
+        self._uart_ok = False
+        self._model_ok = False
+        self._fps = 0.0
 
         for i in range(6):
             QShortcut(
@@ -114,6 +119,21 @@ class MainWindow(QMainWindow):
             )
         QShortcut(QKeySequence("Ctrl+Q"), self, activated=self.close)
         QShortcut(QKeySequence("F1"), self, activated=self._show_about)
+
+        self._grip_br = QSizeGrip(self)
+        self._grip_bl = QSizeGrip(self)
+        self._grip_br.setFixedSize(16, 16)
+        self._grip_bl.setFixedSize(16, 16)
+        self._grip_br.setStyleSheet("background: transparent;")
+        self._grip_bl.setStyleSheet("background: transparent;")
+        self._grip_br.raise_()
+        self._grip_bl.raise_()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_grip_br"):
+            self._grip_br.move(self.width() - 16, self.height() - 16)
+            self._grip_bl.move(0, self.height() - 16)
 
     def _show_about(self):
         from app.ui.widgets.about import AboutDialog
@@ -141,3 +161,33 @@ class MainWindow(QMainWindow):
     def force_quit(self):
         self._force_quit = True
         self.close()
+
+    def _render_status(self) -> None:
+        def dot(ok: bool) -> str:
+            color = "#10B981" if ok else "#EF4444"
+            return f'<span style="color:{color}">●</span>'
+        self.status.setText(
+            f"{dot(self._cam_ok)} Camera  &nbsp;•&nbsp;  "
+            f"{dot(self._uart_ok)} UART  &nbsp;•&nbsp;  "
+            f"{dot(self._model_ok)} Model  &nbsp;•&nbsp;  "
+            f"FPS {self._fps:.0f}  "
+        )
+        self.status.setTextFormat(Qt.TextFormat.RichText)
+
+    def set_camera_status(self, ok: bool) -> None:
+        self._cam_ok = ok
+        self._render_status()
+
+    def set_uart_status(self, ok: bool) -> None:
+        self._uart_ok = ok
+        self._render_status()
+        if hasattr(self, "live_page") and self.live_page is not None:
+            self.live_page.set_uart_status(ok)
+
+    def set_model_status(self, ok: bool) -> None:
+        self._model_ok = ok
+        self._render_status()
+
+    def set_fps(self, fps: float) -> None:
+        self._fps = fps
+        self._render_status()

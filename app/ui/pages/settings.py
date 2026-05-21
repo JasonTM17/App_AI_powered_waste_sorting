@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,6 +20,29 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import AppConfig
+
+
+class _CameraScan(QThread):
+    """Probe camera indices 0..max_idx, emit list of working ones."""
+
+    done = Signal(list)
+
+    def __init__(self, max_idx: int = 5):
+        super().__init__()
+        self._max = max_idx
+
+    def run(self):
+        import cv2
+        found: list[int] = []
+        for i in range(self._max + 1):
+            cap = cv2.VideoCapture(i)
+            ok = cap.isOpened()
+            if ok:
+                ok2, frame = cap.read()
+                if ok2 and frame is not None:
+                    found.append(i)
+            cap.release()
+        self.done.emit(found)
 
 
 def _section(title: str) -> tuple[QFrame, QFormLayout]:
@@ -58,7 +81,10 @@ class SettingsPage(QWidget):
 
         # camera
         cam_box, cam_form = _section("Camera")
-        self.cam_source = QLineEdit(self._cfg.camera.source)
+        self.cam_source = QComboBox()
+        self.cam_source.setEditable(True)
+        self.cam_source.addItems(["0", "1", "2"])
+        self.cam_source.setCurrentText(self._cfg.camera.source)
         self.cam_w = QSpinBox()
         self.cam_w.setRange(160, 7680)
         self.cam_w.setValue(self._cfg.camera.width)
@@ -71,13 +97,23 @@ class SettingsPage(QWidget):
         cam_form.addRow("Width", self.cam_w)
         cam_form.addRow("Height", self.cam_h)
         cam_form.addRow("", self.cam_mirror)
+        cam_btns = QHBoxLayout()
+        btn_scan_cam = QPushButton("⟳ Scan")
+        btn_scan_cam.setObjectName("secondary")
+        btn_scan_cam.clicked.connect(self._scan_cameras)
         btn_test_cam = QPushButton("▶ Test camera")
         btn_test_cam.setObjectName("secondary")
         btn_test_cam.clicked.connect(
-            lambda: self.test_camera_requested.emit(self.cam_source.text())
+            lambda: self.test_camera_requested.emit(self.cam_source.currentText())
         )
-        cam_form.addRow("", btn_test_cam)
+        cam_btns.addWidget(btn_scan_cam)
+        cam_btns.addWidget(btn_test_cam)
+        cam_btns.addStretch()
+        cam_btns_w = QWidget()
+        cam_btns_w.setLayout(cam_btns)
+        cam_form.addRow("", cam_btns_w)
         outer.addWidget(cam_box)
+        self._cam_scan: _CameraScan | None = None
 
         # model
         mdl_box, mdl_form = _section("Model AI")
@@ -183,9 +219,31 @@ class SettingsPage(QWidget):
         if f:
             self.mdl_path.setText(f)
 
+    def _scan_cameras(self):
+        if self._cam_scan is not None and self._cam_scan.isRunning():
+            return
+        scan = _CameraScan(max_idx=5)
+        self._cam_scan = scan
+
+        def _apply(found: list[int]):
+            current = self.cam_source.currentText()
+            self.cam_source.blockSignals(True)
+            self.cam_source.clear()
+            items = [str(i) for i in found] or ["0"]
+            self.cam_source.addItems(items)
+            if current in items:
+                self.cam_source.setCurrentText(current)
+            else:
+                self.cam_source.setCurrentText(items[0])
+            self.cam_source.blockSignals(False)
+
+        scan.done.connect(_apply)
+        scan.finished.connect(scan.deleteLater)
+        scan.start()
+
     def _collect(self) -> AppConfig:
         cfg = self._cfg.model_copy(deep=True)
-        cfg.camera.source = self.cam_source.text()
+        cfg.camera.source = self.cam_source.currentText()
         cfg.camera.width = self.cam_w.value()
         cfg.camera.height = self.cam_h.value()
         cfg.camera.mirror = self.cam_mirror.isChecked()

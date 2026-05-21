@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 from app.core.camera import CameraWorker
 from app.core.config import AppConfig, save_config
@@ -15,6 +15,68 @@ from app.core.inference import InferenceEngine
 from app.core.pipeline import Pipeline
 from app.core.uart import UartWorker
 from app.utils.logging import logger
+
+
+class _CamProbe(QThread):
+    done = Signal(bool, str)
+
+    def __init__(self, source: str):
+        super().__init__()
+        self._src = source
+
+    def run(self):
+        import cv2
+
+        try:
+            src = int(self._src) if self._src.isdigit() else self._src
+            cap = cv2.VideoCapture(src)
+            ok = cap.isOpened()
+            if ok:
+                ok, frame = cap.read()
+                ok = ok and frame is not None
+            cap.release()
+            self.done.emit(ok, "" if ok else "Cannot open source")
+        except Exception as e:
+            self.done.emit(False, str(e))
+
+
+class _UartProbe(QThread):
+    done = Signal(bool, str)
+
+    def __init__(self, port: str, baud: int):
+        super().__init__()
+        self._port = port
+        self._baud = baud
+
+    def run(self):
+        import time as _t
+
+        import serial
+
+        from app.core.uart_protocol import encode_ping, parse_line
+
+        try:
+            s = serial.Serial(self._port, self._baud, timeout=1.0)
+        except Exception as e:
+            self.done.emit(False, f"open {self._port} failed: {e}")
+            return
+        try:
+            s.write(encode_ping())
+            deadline = _t.time() + 1.5
+            while _t.time() < deadline:
+                raw = s.readline()
+                if not raw:
+                    continue
+                msg = parse_line(raw)
+                if msg and msg[0] == "pong":
+                    self.done.emit(True, f"PONG from {self._port}")
+                    return
+            self.done.emit(False, f"no PONG from {self._port} within 1.5s")
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
 
 
 class AppController(QObject):
@@ -26,6 +88,7 @@ class AppController(QObject):
     test_uart_result = Signal(bool, str)
     reload_model_result = Signal(bool, str)
     snapshot_saved = Signal(bool, str)
+    capture_saved = Signal(str)
 
     def __init__(self, cfg: AppConfig, config_path: Path, db_path: Path):
         super().__init__()
@@ -40,6 +103,7 @@ class AppController(QObject):
         self._fps = 0.0
         self._latency = 0.0
         self._last_frame = None
+        self._probes: list[QThread] = []
 
     def start(self) -> None:
         self._engine = InferenceEngine(
@@ -62,6 +126,7 @@ class AppController(QObject):
         self._uart.start()
 
         self._pipeline = Pipeline(self.cfg, self._engine, self._uart, self.db_path)
+        self._pipeline.on_capture_saved = self.capture_saved.emit
         self._uart.ack_received.connect(self._pipeline.on_ack)
 
         self._camera = CameraWorker(
@@ -101,49 +166,18 @@ class AppController(QObject):
         logger.info("config updated")
 
     def test_camera(self, source: str) -> None:
-        import cv2
-
-        try:
-            src: int | str = int(source) if source.isdigit() else source
-            cap = cv2.VideoCapture(src)
-            ok = cap.isOpened()
-            if ok:
-                ok, frame = cap.read()
-                ok = ok and frame is not None
-            cap.release()
-            self.test_camera_result.emit(ok, "" if ok else "Cannot open source")
-        except Exception as e:
-            self.test_camera_result.emit(False, str(e))
+        worker = _CamProbe(source)
+        worker.done.connect(self.test_camera_result.emit)
+        worker.finished.connect(worker.deleteLater)
+        self._probes.append(worker)
+        worker.start()
 
     def test_uart_ping(self, port: str, baud: int) -> None:
-        import time
-
-        import serial
-
-        from app.core.uart_protocol import encode_ping, parse_line
-
-        try:
-            s = serial.Serial(port, baud, timeout=1.0)
-        except Exception as e:
-            self.test_uart_result.emit(False, f"open {port} failed: {e}")
-            return
-        try:
-            s.write(encode_ping())
-            deadline = time.time() + 1.5
-            while time.time() < deadline:
-                raw = s.readline()
-                if not raw:
-                    continue
-                msg = parse_line(raw)
-                if msg and msg[0] == "pong":
-                    self.test_uart_result.emit(True, f"PONG from {port}")
-                    return
-            self.test_uart_result.emit(False, f"no PONG from {port} within 1.5s")
-        finally:
-            try:
-                s.close()
-            except Exception:
-                pass
+        worker = _UartProbe(port, baud)
+        worker.done.connect(self.test_uart_result.emit)
+        worker.finished.connect(worker.deleteLater)
+        self._probes.append(worker)
+        worker.start()
 
     def reload_model(self, path: str) -> None:
         try:

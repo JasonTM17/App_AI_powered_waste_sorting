@@ -33,6 +33,7 @@ class Pipeline:
         self.history = HistoryService(history_db)
         self._mapping = {m.class_name: m for m in cfg.mappings if m.enabled}
         self._track_to_row: dict[int, int] = {}
+        self.on_capture_saved = None  # type: ignore[assignment]
 
     def update_mappings(self, mappings):
         self._mapping = {m.class_name: m for m in mappings if m.enabled}
@@ -62,6 +63,12 @@ class Pipeline:
             ],
         }
         (out_dir / f"{uid}.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        cb = self.on_capture_saved
+        if callable(cb):
+            try:
+                cb(str(img_path))
+            except Exception as e:
+                logger.warning("on_capture_saved callback failed: {}", e)
 
     def _in_roi(self, xyxy):
         roi = self.cfg.roi

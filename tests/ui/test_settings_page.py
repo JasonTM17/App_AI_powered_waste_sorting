@@ -22,6 +22,6 @@ def test_settings_collect_carries_camera_source(qtbot):
     cfg = AppConfig()
     page = SettingsPage(cfg)
     qtbot.addWidget(page)
-    page.cam_source.setText("rtsp://x")
+    page.cam_source.setCurrentText("rtsp://x")
     out = page._collect()
     assert out.camera.source == "rtsp://x"

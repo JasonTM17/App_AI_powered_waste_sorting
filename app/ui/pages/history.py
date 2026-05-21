@@ -98,6 +98,9 @@ class HistoryPage(QWidget):
         self.date_from = QDateEdit()
         self.date_from.setCalendarPopup(True)
         self.date_from.setDate(_today_qdate())
+        self.date_to = QDateEdit()
+        self.date_to.setCalendarPopup(True)
+        self.date_to.setDate(_today_qdate())
         self.cls_filter = QComboBox()
         self.cls_filter.addItem("Tất cả lớp", "")
         self.ack_filter = QComboBox()
@@ -110,6 +113,8 @@ class HistoryPage(QWidget):
         btn_export.clicked.connect(self._export)
         filter_row.addWidget(QLabel("Từ ngày"))
         filter_row.addWidget(self.date_from)
+        filter_row.addWidget(QLabel("Đến ngày"))
+        filter_row.addWidget(self.date_to)
         filter_row.addWidget(self.cls_filter)
         filter_row.addWidget(self.ack_filter)
         filter_row.addStretch()
@@ -166,7 +171,16 @@ class HistoryPage(QWidget):
         since_dt = datetime(
             since_qdate.year, since_qdate.month, since_qdate.day, tzinfo=timezone.utc
         )
+        until_qdate = self.date_to.date().toPython()
+        until_dt = datetime(
+            until_qdate.year, until_qdate.month, until_qdate.day,
+            23, 59, 59, tzinfo=timezone.utc,
+        )
         rows = self.history.query(limit=500, cls_name=cls, since=since_dt)
+        rows = [
+            r for r in rows
+            if (ts := getattr(r, "ts", "")) and ts <= until_dt.isoformat()
+        ]
         if ack and ack != "Tất cả":
             rows = [r for r in rows if getattr(r, "ack_status", None) == ack]
         self.model.set_rows(rows)

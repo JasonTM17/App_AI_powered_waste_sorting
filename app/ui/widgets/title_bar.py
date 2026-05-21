@@ -46,8 +46,21 @@ class TitleBar(QWidget):
             self._drag_offset = e.globalPosition().toPoint() - self.window().pos()
 
     def mouseMoveEvent(self, e: QMouseEvent) -> None:
-        if self._drag_offset is not None and (e.buttons() & Qt.MouseButton.LeftButton):
-            self.window().move(e.globalPosition().toPoint() - self._drag_offset)
+        if self._drag_offset is None or not (e.buttons() & Qt.MouseButton.LeftButton):
+            return
+        win = self.window()
+        if win is None:
+            return
+        if win.isMaximized():
+            # restore + re-anchor cursor near the original click x ratio
+            global_pos = e.globalPosition().toPoint()
+            ratio_x = max(0.0, min(1.0, e.position().x() / max(self.width(), 1)))
+            win.showNormal()
+            new_w = win.width()
+            self._drag_offset = QPoint(int(new_w * ratio_x), e.position().toPoint().y())
+            win.move(global_pos - self._drag_offset)
+            return
+        win.move(e.globalPosition().toPoint() - self._drag_offset)
 
     def mouseReleaseEvent(self, e: QMouseEvent) -> None:
         self._drag_offset = None

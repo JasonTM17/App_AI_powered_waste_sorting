@@ -61,8 +61,20 @@ def main() -> int:
     controller = AppController(cfg, cfg_path, db_path())
 
     controller.uart_status.connect(window.live_page.set_uart_status)
+    controller.uart_status.connect(window.set_uart_status)
+    controller.camera_status.connect(window.set_camera_status)
+    controller.model_status.connect(window.set_model_status)
     if window.settings_page is not None:
-        window.settings_page.config_saved.connect(controller.update_config)
+        def _on_config_saved(new_cfg):
+            apply_theme(app, new_cfg.theme)
+            controller.update_config(new_cfg)
+            from PySide6.QtCore import QPoint
+            from app.ui.widgets.toast import Toast
+            t = Toast(window, "Đã lưu cài đặt", level="ok")
+            tr = window.mapToGlobal(QPoint(window.width(), 0))
+            t.show_at(window.mapFromGlobal(tr))
+
+        window.settings_page.config_saved.connect(_on_config_saved)
     if window.settings_page is not None:
         window.settings_page.test_camera_requested.connect(controller.test_camera)
         window.settings_page.test_uart_requested.connect(controller.test_uart_ping)
@@ -80,9 +92,12 @@ def main() -> int:
         window.live_page.update_frame(frame, detections)
         window.live_page.set_fps(fps)
         window.live_page.set_latency(latency)
+        window.set_fps(fps)
 
     controller.frame_processed.connect(_on_frame)
     window.live_page.snapshot_requested.connect(controller.take_snapshot)
+    if window.capture_page is not None:
+        controller.capture_saved.connect(lambda _p: window.capture_page.reload())
 
     window.show()
 
