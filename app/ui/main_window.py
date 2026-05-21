@@ -1,4 +1,5 @@
 """Frameless main window: title bar + sidebar + stacked pages + status bar."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -59,14 +60,17 @@ class MainWindow(QMainWindow):
         for idx, label in enumerate(NAV_ITEMS[1:4], start=1):
             if idx == 1 and history is not None:
                 from app.ui.pages.history import HistoryPage
+
                 self.history_page = HistoryPage(history)
                 self.stack.addWidget(self.history_page)
             elif idx == 2 and cfg is not None:
                 from app.ui.pages.mapping import MappingPage
+
                 self.mapping_page = MappingPage(cfg.mappings)
                 self.stack.addWidget(self.mapping_page)
             elif idx == 3 and cfg is not None:
                 from app.ui.pages.capture import CapturePage
+
                 self.capture_page = CapturePage(cfg)
                 self.stack.addWidget(self.capture_page)
             else:
@@ -75,6 +79,7 @@ class MainWindow(QMainWindow):
                 self.stack.addWidget(page)
         if cfg is not None:
             from app.ui.pages.settings import SettingsPage
+
             self.settings_page = SettingsPage(cfg)
             self.stack.addWidget(self.settings_page)
         else:
@@ -96,7 +101,7 @@ class MainWindow(QMainWindow):
 
         for i in range(5):
             QShortcut(
-                QKeySequence(f"Ctrl+{i+1}"),
+                QKeySequence(f"Ctrl+{i + 1}"),
                 self,
                 activated=lambda i=i: (
                     self.sidebar.set_active(i),
@@ -108,6 +113,7 @@ class MainWindow(QMainWindow):
 
     def _show_about(self):
         from app.ui.widgets.about import AboutDialog
+
         names = {}
         imgsz = 640
         AboutDialog(names, imgsz, self).exec()

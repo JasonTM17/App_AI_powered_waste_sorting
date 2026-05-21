@@ -1,4 +1,5 @@
 """Application config schema and atomic load/save."""
+
 from __future__ import annotations
 
 import json

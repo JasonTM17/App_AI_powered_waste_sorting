@@ -1,4 +1,5 @@
 """Capture tab: low-conf queue review + YOLO format export."""
+
 from __future__ import annotations
 
 import json
@@ -114,7 +115,8 @@ class CapturePage(QWidget):
                 except Exception:
                     pass
             pix = QPixmap(str(f)).scaled(
-                160, 120,
+                160,
+                120,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
@@ -155,6 +157,7 @@ def export_yolo_dataset(queue_dir: Path, output_dir: Path) -> int:
             continue
 
         from PIL import Image
+
         try:
             im = Image.open(jpg)
             w, h = im.size

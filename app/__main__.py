@@ -1,4 +1,5 @@
 """Entry point: python -m app."""
+
 from __future__ import annotations
 
 import sys
@@ -25,9 +26,11 @@ def main() -> int:
     apply_theme(app, cfg.theme)
 
     from app.utils.i18n import install_translator
+
     install_translator(app, cfg.language)
 
     from app.ui.widgets.splash import Splash
+
     splash = Splash("Khởi tạo…")
     splash.show()
     app.processEvents()
@@ -46,10 +49,12 @@ def main() -> int:
         window.settings_page.test_uart_requested.connect(controller.test_uart_ping)
         window.settings_page.reload_model_requested.connect(controller.reload_model)
     if window.mapping_page is not None:
+
         def _on_mappings(lst):
             new_cfg = controller.cfg.model_copy(deep=True)
             new_cfg.mappings = lst
             controller.update_config(new_cfg)
+
         window.mapping_page.mappings_saved.connect(_on_mappings)
 
     def _on_frame(frame, detections, fps, latency):
@@ -63,7 +68,9 @@ def main() -> int:
     window.show()
 
     from PySide6.QtWidgets import QSystemTrayIcon
+
     from app.ui.widgets.tray import TrayIcon
+
     if QSystemTrayIcon.isSystemTrayAvailable():
         tray = TrayIcon(window)
         tray.show()
@@ -73,8 +80,9 @@ def main() -> int:
         window.tray = tray
         window._minimize_to_tray = cfg.minimize_to_tray
         controller.uart_status.connect(
-            lambda ok: tray.notify("UART", "Mất kết nối" if not ok else "Đã kết nối")
-            if not ok else None
+            lambda ok: (
+                tray.notify("UART", "Mất kết nối" if not ok else "Đã kết nối") if not ok else None
+            )
         )
 
     controller.start()
@@ -84,6 +92,7 @@ def main() -> int:
     history_service = controller.history
     if history_service is not None:
         from app.ui.pages.history import HistoryPage
+
         hp = HistoryPage(history_service)
         old = window.stack.widget(1)
         window.stack.insertWidget(1, hp)

@@ -1,4 +1,5 @@
 """UART worker: send commands, parse responses, auto-reconnect."""
+
 from __future__ import annotations
 
 import queue

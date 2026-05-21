@@ -1,4 +1,5 @@
 """About dialog: version, model info, links."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -16,8 +17,9 @@ from app import __version__
 
 
 class AboutDialog(QDialog):
-    def __init__(self, model_class_names: dict[int, str] | None = None,
-                 model_imgsz: int = 640, parent=None):
+    def __init__(
+        self, model_class_names: dict[int, str] | None = None, model_imgsz: int = 640, parent=None
+    ):
         super().__init__(parent)
         self.setWindowTitle("Về Trash Sorter Pro")
         self.setMinimumSize(480, 360)
@@ -40,10 +42,11 @@ class AboutDialog(QDialog):
         info.setReadOnly(True)
         info.setStyleSheet("background: #0B1220; border-radius: 8px; padding: 12px;")
         names = model_class_names or {}
-        names_str = "\n".join(f"  {k}: {v}" for k, v in sorted(names.items())) or "  (no model loaded)"
+        names_str = (
+            "\n".join(f"  {k}: {v}" for k, v in sorted(names.items())) or "  (no model loaded)"
+        )
         info.setPlainText(
-            f"Model input size: {model_imgsz}\n"
-            f"Classes ({len(names)}):\n{names_str}\n"
+            f"Model input size: {model_imgsz}\nClasses ({len(names)}):\n{names_str}\n"
         )
         outer.addWidget(info, 1)
 

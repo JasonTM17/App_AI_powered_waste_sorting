@@ -1,4 +1,5 @@
 """Immutable event/data classes shared across core modules."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

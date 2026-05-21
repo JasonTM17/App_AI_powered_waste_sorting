@@ -1,4 +1,5 @@
 """Toast notification: slide-in top-right, auto-dismiss."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import (
@@ -36,9 +37,7 @@ class Toast(QFrame):
         layout.setSpacing(12)
 
         dot = QLabel("●")
-        dot.setStyleSheet(
-            f"color: {_LEVEL_COLORS.get(level, '#3B82F6')}; font-size: 16px;"
-        )
+        dot.setStyleSheet(f"color: {_LEVEL_COLORS.get(level, '#3B82F6')}; font-size: 16px;")
         layout.addWidget(dot)
 
         msg = QLabel(message)

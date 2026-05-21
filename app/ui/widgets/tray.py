@@ -1,4 +1,5 @@
 """System tray icon with menu and balloon notifications."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
@@ -38,7 +39,11 @@ class TrayIcon(QSystemTrayIcon):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self.show_requested.emit()
 
-    def notify(self, title: str, message: str,
-               level: QSystemTrayIcon.MessageIcon = QSystemTrayIcon.MessageIcon.Information):
+    def notify(
+        self,
+        title: str,
+        message: str,
+        level: QSystemTrayIcon.MessageIcon = QSystemTrayIcon.MessageIcon.Information,
+    ):
         if QSystemTrayIcon.supportsMessages():
             self.showMessage(title, message, level, 4000)

@@ -1,5 +1,4 @@
 import os
-import tempfile
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -22,6 +21,7 @@ def ctl(qtbot, tmp_path, monkeypatch):
 
 def _wait(cond, timeout=2.0):
     import time
+
     deadline = time.time() + timeout
     while not cond() and time.time() < deadline:
         QCoreApplication.processEvents()

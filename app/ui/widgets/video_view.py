@@ -1,4 +1,5 @@
 """Video display widget with bbox overlay (paintEvent based)."""
+
 from __future__ import annotations
 
 import numpy as np

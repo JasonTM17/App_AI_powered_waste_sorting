@@ -1,4 +1,5 @@
 """Pipeline orchestrator: frame -> infer -> track -> uart -> history."""
+
 from __future__ import annotations
 
 import io
@@ -43,7 +44,11 @@ class Pipeline:
             return
         if all(d.conf >= self.cfg.capture.low_conf_threshold for d in detections):
             return
-        import cv2, json, uuid
+        import json
+        import uuid
+
+        import cv2
+
         out_dir = Path(self.cfg.capture.output_dir) / "low_conf_queue"
         out_dir.mkdir(parents=True, exist_ok=True)
         uid = uuid.uuid4().hex[:12]
@@ -52,8 +57,7 @@ class Pipeline:
         meta = {
             "ts": ts.isoformat(),
             "boxes": [
-                {"cls_id": d.cls_id, "cls_name": d.cls_name, "conf": d.conf,
-                 "xyxy": list(d.xyxy)}
+                {"cls_id": d.cls_id, "cls_name": d.cls_name, "conf": d.conf, "xyxy": list(d.xyxy)}
                 for d in detections
             ],
         }
@@ -70,7 +74,9 @@ class Pipeline:
 
     def process_frame(self, frame_bgr: np.ndarray, ts: datetime):
         raw = self.engine.predict(frame_bgr)
-        filtered = [d for d in raw if d.conf >= self.cfg.model.conf_threshold and self._in_roi(d.xyxy)]
+        filtered = [
+            d for d in raw if d.conf >= self.cfg.model.conf_threshold and self._in_roi(d.xyxy)
+        ]
         self._save_low_conf_frame(frame_bgr, raw, ts)
         tracked = self.tracker.update(filtered)
         detections_for_render = [t.detection for t in tracked]
@@ -83,15 +89,25 @@ class Pipeline:
             self.tracker.mark_emitted(t.track_id)
             thumb = _make_thumbnail(frame_bgr)
             row_id = self.history.insert(
-                track_id=t.track_id, ts=ts,
-                cls_id=t.detection.cls_id, cls_name=t.detection.cls_name,
-                conf=t.detection.conf, bbox=t.detection.xyxy,
-                thumbnail=thumb, uart_command=mapping.command, ack_status="pending",
+                track_id=t.track_id,
+                ts=ts,
+                cls_id=t.detection.cls_id,
+                cls_name=t.detection.cls_name,
+                conf=t.detection.conf,
+                bbox=t.detection.xyxy,
+                thumbnail=thumb,
+                uart_command=mapping.command,
+                ack_status="pending",
             )
             self._track_to_row[t.track_id] = row_id
             self.uart.send(track_id=t.track_id, command=mapping.command, conf=t.detection.conf)
-            logger.info("dispatch track={} cls={} cmd={} conf={:.2f}",
-                        t.track_id, t.detection.cls_name, mapping.command, t.detection.conf)
+            logger.info(
+                "dispatch track={} cls={} cmd={} conf={:.2f}",
+                t.track_id,
+                t.detection.cls_name,
+                mapping.command,
+                t.detection.conf,
+            )
         return detections_for_render
 
     def on_ack(self, track_id: int, command: str, status: str, rtt_ms):

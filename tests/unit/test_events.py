@@ -1,4 +1,4 @@
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 import numpy as np
 
@@ -25,8 +25,12 @@ def test_tracked_detection_carries_track_id():
 def test_detection_event_holds_frame():
     frame = np.zeros((10, 10, 3), dtype=np.uint8)
     e = DetectionEvent(
-        track_id=1, cls_id=0, cls_name="paper", conf=0.9,
-        frame=frame, ts=datetime.now(UTC),
+        track_id=1,
+        cls_id=0,
+        cls_name="paper",
+        conf=0.9,
+        frame=frame,
+        ts=datetime.now(UTC),
     )
     assert e.frame.shape == (10, 10, 3)
 

@@ -1,4 +1,5 @@
 """Sidebar with mutually-exclusive nav buttons."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal

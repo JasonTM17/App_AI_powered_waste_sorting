@@ -1,4 +1,5 @@
 """UART wire protocol encoders and parsers (pure functions)."""
+
 from __future__ import annotations
 
 
@@ -6,7 +7,7 @@ def encode_sort(command: str, conf: float) -> bytes:
     if not command or len(command) != 1:
         raise ValueError("command must be exactly 1 character")
     conf = max(0.0, min(1.0, float(conf)))
-    return f"SORT:{command}:{conf:.2f}\n".encode("utf-8")
+    return f"SORT:{command}:{conf:.2f}\n".encode()
 
 
 def encode_ping() -> bytes:

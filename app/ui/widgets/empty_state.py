@@ -1,4 +1,5 @@
 """Empty state placeholder: centered icon + heading + sub-message."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -7,8 +8,9 @@ from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 
 class EmptyState(QWidget):
-    def __init__(self, icon: str = "○", heading: str = "Chưa có dữ liệu",
-                 message: str = "", parent=None):
+    def __init__(
+        self, icon: str = "○", heading: str = "Chưa có dữ liệu", message: str = "", parent=None
+    ):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)

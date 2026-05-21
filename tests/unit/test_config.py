@@ -3,22 +3,28 @@ from pathlib import Path
 
 import pytest
 
-from app.core.config import AppConfig, ClassMapping, load_config, save_config
+from app.core.config import AppConfig, load_config, save_config
 
 
 def _default_dict():
     return {
         "camera": {"source": "0", "width": 1280, "height": 720, "mirror": False},
         "model": {
-            "path": "models/best.pt", "device": "cpu",
-            "conf_threshold": 0.4, "iou_threshold": 0.45,
-            "input_size": 640, "half_precision": False,
+            "path": "models/best.pt",
+            "device": "cpu",
+            "conf_threshold": 0.4,
+            "iou_threshold": 0.45,
+            "input_size": 640,
+            "half_precision": False,
         },
         "uart": {"port": "COM3", "baud": 9600, "auto_reconnect": True, "ack_timeout_ms": 200},
         "mappings": [{"class_name": "plastic", "command": "S", "bin_index": 2, "enabled": True}],
         "roi": {"enabled": False, "x": 0, "y": 0, "width": 0, "height": 0},
         "capture": {"mode": "auto_low_conf", "low_conf_threshold": 0.6, "output_dir": "dataset_v2"},
-        "theme": "dark", "language": "vi", "minimize_to_tray": True, "autostart": False,
+        "theme": "dark",
+        "language": "vi",
+        "minimize_to_tray": True,
+        "autostart": False,
     }
 
 

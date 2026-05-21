@@ -1,9 +1,8 @@
 """YOLO inference wrapper around ultralytics."""
+
 from __future__ import annotations
 
 from pathlib import Path
-
-import numpy as np
 
 from app.core.events import Detection
 from app.utils.logging import logger
@@ -25,7 +24,9 @@ class InferenceEngine:
         self.half = half
         logger.info(
             "inference loaded model={} classes={} device={}",
-            str(path), len(self.class_names), device,
+            str(path),
+            len(self.class_names),
+            device,
         )
 
     def predict(self, frame_bgr):
@@ -49,12 +50,14 @@ class InferenceEngine:
         clss = r.boxes.cls.cpu().numpy().astype(int)
         for box, cf, ci in zip(xyxy, confs, clss, strict=True):
             x1, y1, x2, y2 = (int(v) for v in box)
-            out.append(Detection(
-                cls_id=int(ci),
-                cls_name=self.class_names.get(int(ci), str(int(ci))),
-                conf=float(cf),
-                xyxy=(x1, y1, x2, y2),
-            ))
+            out.append(
+                Detection(
+                    cls_id=int(ci),
+                    cls_name=self.class_names.get(int(ci), str(int(ci))),
+                    conf=float(cf),
+                    xyxy=(x1, y1, x2, y2),
+                )
+            )
         return out
 
     def update_thresholds(self, conf=None, iou=None):

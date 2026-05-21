@@ -1,4 +1,5 @@
 """Settings tab: camera/model/uart/app sections with Test buttons."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
@@ -96,9 +97,7 @@ class SettingsPage(QWidget):
         self.mdl_conf.setRange(0, 100)
         self.mdl_conf.setValue(int(self._cfg.model.conf_threshold * 100))
         self.mdl_conf_label = QLabel(f"{self._cfg.model.conf_threshold:.2f}")
-        self.mdl_conf.valueChanged.connect(
-            lambda v: self.mdl_conf_label.setText(f"{v/100:.2f}")
-        )
+        self.mdl_conf.valueChanged.connect(lambda v: self.mdl_conf_label.setText(f"{v / 100:.2f}"))
         conf_row = QHBoxLayout()
         conf_row.addWidget(self.mdl_conf)
         conf_row.addWidget(self.mdl_conf_label)
@@ -117,9 +116,7 @@ class SettingsPage(QWidget):
         mdl_form.addRow("Input size", self.mdl_imgsz)
         btn_reload = QPushButton("↻ Hot reload model")
         btn_reload.setObjectName("secondary")
-        btn_reload.clicked.connect(
-            lambda: self.reload_model_requested.emit(self.mdl_path.text())
-        )
+        btn_reload.clicked.connect(lambda: self.reload_model_requested.emit(self.mdl_path.text()))
         mdl_form.addRow("", btn_reload)
         outer.addWidget(mdl_box)
 

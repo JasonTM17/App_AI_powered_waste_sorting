@@ -21,6 +21,7 @@ def ctl(qtbot):
 
 def _wait(cond, timeout=2.0):
     import time
+
     deadline = time.time() + timeout
     while not cond() and time.time() < deadline:
         QCoreApplication.processEvents()

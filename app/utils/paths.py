@@ -1,4 +1,5 @@
 """Cross-platform user data paths."""
+
 from __future__ import annotations
 
 import os

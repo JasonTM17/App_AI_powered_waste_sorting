@@ -1,4 +1,5 @@
 """Glue between core workers and UI signals/slots."""
+
 from __future__ import annotations
 
 import time
@@ -101,6 +102,7 @@ class AppController(QObject):
 
     def test_camera(self, source: str) -> None:
         import cv2
+
         try:
             src: int | str = int(source) if source.isdigit() else source
             cap = cv2.VideoCapture(src)
@@ -119,6 +121,7 @@ class AppController(QObject):
         import serial
 
         from app.core.uart_protocol import encode_ping, parse_line
+
         try:
             s = serial.Serial(port, baud, timeout=1.0)
         except Exception as e:
@@ -167,8 +170,11 @@ class AppController(QObject):
 
     def take_snapshot(self) -> None:
         from datetime import datetime
+
         import cv2
+
         from app.utils.paths import snapshots_dir
+
         if self._last_frame is None:
             self.snapshot_saved.emit(False, "no frame yet")
             return

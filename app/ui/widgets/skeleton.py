@@ -1,10 +1,11 @@
 """Shimmer skeleton placeholder widget."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import (
-    QPropertyAnimation,
-    QEasingCurve,
     Property,
+    QEasingCurve,
+    QPropertyAnimation,
     Qt,
 )
 from PySide6.QtGui import QColor, QLinearGradient, QPainter

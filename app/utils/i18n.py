@@ -1,4 +1,5 @@
 """Minimal i18n stub: load .qm if present, fallback to English."""
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -1,10 +1,11 @@
 """Lightweight IoU-based tracker for per-object UART dispatch."""
+
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
 
-from app.core.events import Detection, TrackedDetection
+from app.core.events import TrackedDetection
 
 
 def _iou(a, b):
@@ -65,12 +66,14 @@ class Tracker:
                 t.age = 0
                 t.stable_frames += 1
                 t.xyxy = det.xyxy
-            out.append(TrackedDetection(
-                track_id=t.track_id,
-                detection=det,
-                stable_frames=t.stable_frames,
-                first_seen_ts=t.first_seen_ts,
-            ))
+            out.append(
+                TrackedDetection(
+                    track_id=t.track_id,
+                    detection=det,
+                    stable_frames=t.stable_frames,
+                    first_seen_ts=t.first_seen_ts,
+                )
+            )
         dead = [tid for tid, t in self._tracks.items() if t.age > self._max_age]
         for tid in dead:
             self._tracks.pop(tid, None)

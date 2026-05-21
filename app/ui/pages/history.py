@@ -1,4 +1,5 @@
 """History tab: filter, charts, virtualized table."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -162,7 +163,9 @@ class HistoryPage(QWidget):
         cls = self.cls_filter.currentData() or None
         ack = self.ack_filter.currentText()
         since_qdate = self.date_from.date().toPython()
-        since_dt = datetime(since_qdate.year, since_qdate.month, since_qdate.day, tzinfo=timezone.utc)
+        since_dt = datetime(
+            since_qdate.year, since_qdate.month, since_qdate.day, tzinfo=timezone.utc
+        )
         rows = self.history.query(limit=500, cls_name=cls, since=since_dt)
         if ack and ack != "Tất cả":
             rows = [r for r in rows if getattr(r, "ack_status", None) == ack]
@@ -207,12 +210,14 @@ class HistoryPage(QWidget):
         xs = list(range(24))
         ys = [per_hour.get(h, 0) for h in xs]
         self.area_plot.clear()
-        curve = self.area_plot.plot(xs, ys, pen=pg.mkPen("#10B981", width=2),
-                                    fillLevel=0, brush=(16, 185, 129, 60))
+        curve = self.area_plot.plot(
+            xs, ys, pen=pg.mkPen("#10B981", width=2), fillLevel=0, brush=(16, 185, 129, 60)
+        )
         _ = curve
 
     def _open_detail(self, index) -> None:
         from app.ui.widgets.detail_dialog import DetectionDetailDialog
+
         if not index.isValid():
             return
         row = self.model._rows[index.row()] if 0 <= index.row() < len(self.model._rows) else None
@@ -231,5 +236,6 @@ class HistoryPage(QWidget):
 
 def _today_qdate():
     from PySide6.QtCore import QDate
+
     n = datetime.now()
     return QDate(n.year, n.month, n.day)

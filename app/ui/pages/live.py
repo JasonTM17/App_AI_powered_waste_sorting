@@ -1,4 +1,5 @@
 """Live tab: video feed + detection stream + stat cards."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
@@ -67,10 +68,16 @@ class LivePage(QWidget):
         self.card_uart = StatCard("UART", "—", "status")
         self.card_total = StatCard("TOTAL", "0", "all-time")
         self.card_acc = StatCard("AVG CONF", "0.00", "running")
-        for col, c in enumerate([
-            self.card_today, self.card_fps, self.card_latency,
-            self.card_uart, self.card_total, self.card_acc,
-        ]):
+        for col, c in enumerate(
+            [
+                self.card_today,
+                self.card_fps,
+                self.card_latency,
+                self.card_uart,
+                self.card_total,
+                self.card_acc,
+            ]
+        ):
             cards.addWidget(c, 0, col)
         root.addLayout(cards)
 

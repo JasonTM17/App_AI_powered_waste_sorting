@@ -1,7 +1,8 @@
 """Mapping tab: edit class -> uart command rows, drag-reorder priority."""
+
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -63,9 +64,7 @@ class MappingRow(QWidget):
 
         self.btn_test = QPushButton("▶ Test")
         self.btn_test.setObjectName("secondary")
-        self.btn_test.clicked.connect(
-            lambda: self.test_clicked.emit(self.cmd_edit.text() or "?")
-        )
+        self.btn_test.clicked.connect(lambda: self.test_clicked.emit(self.cmd_edit.text() or "?"))
         layout.addWidget(self.btn_test)
 
     def _on_cmd_changed(self, text: str) -> None:

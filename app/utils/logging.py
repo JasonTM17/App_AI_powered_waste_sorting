@@ -1,4 +1,5 @@
 """Structured JSON logging via loguru."""
+
 from __future__ import annotations
 
 import sys

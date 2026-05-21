@@ -38,10 +38,12 @@ class FakeSerial:
 @pytest.fixture
 def fake_serial(monkeypatch):
     instances = []
+
     def factory(port, baud, timeout=0.1):
         s = FakeSerial(port, baud, timeout)
         instances.append(s)
         return s
+
     monkeypatch.setattr("app.core.uart.serial.Serial", factory)
     return instances
 
@@ -61,7 +63,8 @@ def test_send_receives_ack(fake_serial, qtbot):
     _wait(lambda: w.is_connected, 2.0)
     w.send(track_id=1, command="S", conf=0.9)
     _wait(lambda: len(acks) >= 1, 2.0)
-    w.stop(); w.wait(2000)
+    w.stop()
+    w.wait(2000)
     assert acks and acks[0] == (1, "S", "ok")
 
 
@@ -70,7 +73,10 @@ def test_no_ack_marked_when_silent(monkeypatch, qtbot):
         def write(self, data):
             self._tx.append(bytes(data))
             return len(data)
-    monkeypatch.setattr("app.core.uart.serial.Serial", lambda p, b, timeout=0.1: SilentSerial(p, b, timeout))
+
+    monkeypatch.setattr(
+        "app.core.uart.serial.Serial", lambda p, b, timeout=0.1: SilentSerial(p, b, timeout)
+    )
     acks = []
     w = UartWorker(port="COM_FAKE", baud=9600, ack_timeout_ms=200)
     w.ack_received.connect(lambda tid, c, st, rtt: acks.append((tid, c, st)))
@@ -78,5 +84,6 @@ def test_no_ack_marked_when_silent(monkeypatch, qtbot):
     _wait(lambda: w.is_connected, 2.0)
     w.send(track_id=2, command="P", conf=0.8)
     _wait(lambda: len(acks) >= 1, 2.0)
-    w.stop(); w.wait(2000)
+    w.stop()
+    w.wait(2000)
     assert acks and acks[0] == (2, "P", "no_ack")

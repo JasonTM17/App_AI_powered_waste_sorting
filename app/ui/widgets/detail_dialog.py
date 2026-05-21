@@ -1,4 +1,5 @@
 """Detail dialog: thumbnail preview + detection metadata."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -44,7 +45,8 @@ class DetectionDetailDialog(QDialog):
             if not pix.isNull():
                 img_label.setPixmap(
                     pix.scaled(
-                        360, 360,
+                        360,
+                        360,
                         Qt.AspectRatioMode.KeepAspectRatio,
                         Qt.TransformationMode.SmoothTransformation,
                     )

@@ -1,4 +1,5 @@
 """Camera worker: read frames in QThread, emit via signal."""
+
 from __future__ import annotations
 
 import time

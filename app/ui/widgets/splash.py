@@ -1,4 +1,5 @@
 """Splash screen shown during model loading."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -14,7 +15,9 @@ def _make_splash_pixmap(width: int = 480, height: int = 280) -> QPixmap:
     painter.setPen(QColor("#10B981"))
     title_font = QFont("Inter", 28, QFont.Weight.Bold)
     painter.setFont(title_font)
-    painter.drawText(pix.rect().adjusted(0, -30, 0, -30), Qt.AlignmentFlag.AlignCenter, "Trash Sorter Pro")
+    painter.drawText(
+        pix.rect().adjusted(0, -30, 0, -30), Qt.AlignmentFlag.AlignCenter, "Trash Sorter Pro"
+    )
     painter.setPen(QColor("#94A3B8"))
     sub_font = QFont("Inter", 12)
     painter.setFont(sub_font)

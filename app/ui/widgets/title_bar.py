@@ -1,4 +1,5 @@
 """Custom frameless window title bar."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, Qt, Signal
