@@ -36,6 +36,29 @@ class Pipeline:
     def update_mappings(self, mappings):
         self._mapping = {m.class_name: m for m in mappings if m.enabled}
 
+    def _save_low_conf_frame(self, frame_bgr, detections, ts):
+        if self.cfg.capture.mode != "auto_low_conf":
+            return
+        if not detections:
+            return
+        if all(d.conf >= self.cfg.capture.low_conf_threshold for d in detections):
+            return
+        import cv2, json, uuid
+        out_dir = Path(self.cfg.capture.output_dir) / "low_conf_queue"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        uid = uuid.uuid4().hex[:12]
+        img_path = out_dir / f"{uid}.jpg"
+        cv2.imwrite(str(img_path), frame_bgr)
+        meta = {
+            "ts": ts.isoformat(),
+            "boxes": [
+                {"cls_id": d.cls_id, "cls_name": d.cls_name, "conf": d.conf,
+                 "xyxy": list(d.xyxy)}
+                for d in detections
+            ],
+        }
+        (out_dir / f"{uid}.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
     def _in_roi(self, xyxy):
         roi = self.cfg.roi
         if not roi.enabled or roi.width == 0 or roi.height == 0:
@@ -48,6 +71,7 @@ class Pipeline:
     def process_frame(self, frame_bgr: np.ndarray, ts: datetime):
         raw = self.engine.predict(frame_bgr)
         filtered = [d for d in raw if d.conf >= self.cfg.model.conf_threshold and self._in_roi(d.xyxy)]
+        self._save_low_conf_frame(frame_bgr, raw, ts)
         tracked = self.tracker.update(filtered)
         detections_for_render = [t.detection for t in tracked]
         for t in tracked:

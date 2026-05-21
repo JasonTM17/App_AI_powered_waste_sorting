@@ -51,6 +51,7 @@ class MainWindow(QMainWindow):
         self.live_page = LivePage()
         self.mapping_page = None
         self.history_page = None
+        self.capture_page = None
         self.stack.addWidget(self.live_page)
         for idx, label in enumerate(NAV_ITEMS[1:4], start=1):
             if idx == 1 and history is not None:
@@ -61,6 +62,10 @@ class MainWindow(QMainWindow):
                 from app.ui.pages.mapping import MappingPage
                 self.mapping_page = MappingPage(cfg.mappings)
                 self.stack.addWidget(self.mapping_page)
+            elif idx == 3 and cfg is not None:
+                from app.ui.pages.capture import CapturePage
+                self.capture_page = CapturePage(cfg)
+                self.stack.addWidget(self.capture_page)
             else:
                 page = QLabel(f"{label} — placeholder")
                 page.setAlignment(Qt.AlignmentFlag.AlignCenter)
