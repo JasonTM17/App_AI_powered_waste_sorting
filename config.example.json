@@ -21,37 +21,253 @@
   },
   "mappings": [
     {
-      "class_name": "paper",
+      "class_name": "Cardboard",
       "command": "P",
       "bin_index": 1,
       "enabled": true
     },
     {
-      "class_name": "plastic",
+      "class_name": "Cellulose",
+      "command": "P",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Paper",
+      "command": "P",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Paper bag",
+      "command": "P",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Paper cups",
+      "command": "P",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Paper shavings",
+      "command": "P",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Papier mache",
+      "command": "P",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Postal packaging",
+      "command": "P",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Printing industry",
+      "command": "P",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Combined plastic",
       "command": "S",
       "bin_index": 2,
       "enabled": true
     },
     {
-      "class_name": "metal",
+      "class_name": "Plastic bag",
+      "command": "S",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Plastic bottle",
+      "command": "S",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Plastic can",
+      "command": "S",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Plastic canister",
+      "command": "S",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Plastic caps",
+      "command": "S",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Plastic cup",
+      "command": "S",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Plastic shaker",
+      "command": "S",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Plastic shavings",
+      "command": "S",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Plastic toys",
+      "command": "S",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Stretch film",
+      "command": "S",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Unknown plastic",
+      "command": "S",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Zip plastic bag",
+      "command": "S",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Aerosols",
+      "command": "S",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Aluminum can",
       "command": "M",
       "bin_index": 3,
       "enabled": true
     },
     {
-      "class_name": "glass",
+      "class_name": "Aluminum caps",
+      "command": "M",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Foil",
+      "command": "M",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Iron utensils",
+      "command": "M",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Metal shavings",
+      "command": "M",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Scrap metal",
+      "command": "M",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Tin",
+      "command": "M",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Ceramic",
       "command": "G",
       "bin_index": 4,
       "enabled": true
     },
     {
-      "class_name": "organic",
+      "class_name": "Glass bottle",
+      "command": "G",
+      "bin_index": 4,
+      "enabled": true
+    },
+    {
+      "class_name": "Milk bottle",
+      "command": "G",
+      "bin_index": 4,
+      "enabled": true
+    },
+    {
+      "class_name": "Liquid",
       "command": "O",
       "bin_index": 5,
       "enabled": true
     },
     {
-      "class_name": "cardboard",
+      "class_name": "Organic",
+      "command": "O",
+      "bin_index": 5,
+      "enabled": true
+    },
+    {
+      "class_name": "Container for household chemicals",
+      "command": "C",
+      "bin_index": 6,
+      "enabled": true
+    },
+    {
+      "class_name": "Disposable tableware",
+      "command": "C",
+      "bin_index": 6,
+      "enabled": true
+    },
+    {
+      "class_name": "Electronics",
+      "command": "C",
+      "bin_index": 6,
+      "enabled": true
+    },
+    {
+      "class_name": "Furniture",
+      "command": "C",
+      "bin_index": 6,
+      "enabled": true
+    },
+    {
+      "class_name": "Tetra pack",
+      "command": "C",
+      "bin_index": 6,
+      "enabled": true
+    },
+    {
+      "class_name": "Textile",
+      "command": "C",
+      "bin_index": 6,
+      "enabled": true
+    },
+    {
+      "class_name": "Wood",
       "command": "C",
       "bin_index": 6,
       "enabled": true

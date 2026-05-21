@@ -22,6 +22,7 @@ testable core split from UI.
 - Snapshot to `%APPDATA%/TrashSorter/snapshots/`.
 - Auto-capture low-confidence frames + YOLO format export.
 - ADRs for major decisions (`docs/adr/`).
+- `config.example.json` mapping all 42 model classes (from upstream Roboflow dataset) into 6 physical bins.
 - CI workflow: ruff + mypy advisory, pytest with 65% core coverage gate.
 
 ### Notes
