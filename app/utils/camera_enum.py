@@ -16,8 +16,24 @@ import os
 import subprocess
 
 
+_BUILTIN_NAME_HINTS = (
+    "integrated",
+    "built-in",
+    "builtin",
+    "internal",
+    "hp truevision",
+    "hp wide vision",
+    "ealsia",
+)
+
+
+def _is_builtin(name: str) -> bool:
+    n = name.lower()
+    return any(h in n for h in _BUILTIN_NAME_HINTS)
+
+
 def list_pnp_cameras() -> list[dict]:
-    """Return [{name, instance_id, is_usb}] for every camera the OS sees."""
+    """Return [{name, instance_id, is_usb, is_external}] for every camera."""
     if os.name != "nt":
         return []
     ps = (
@@ -52,23 +68,26 @@ def list_pnp_cameras() -> list[dict]:
         name = (item.get("Name") or "").strip()
         did = (item.get("DeviceID") or "").strip()
         is_usb = "USB" in did.upper()
-        result.append({"name": name, "instance_id": did, "is_usb": is_usb})
+        is_external = is_usb and not _is_builtin(name)
+        result.append(
+            {
+                "name": name,
+                "instance_id": did,
+                "is_usb": is_usb,
+                "is_external": is_external,
+            }
+        )
     return result
 
 
 def has_external_camera() -> bool:
-    """True if at least one USB camera is currently plugged in.
-
-    Returns True (permissive) on non-Windows or when PnP enumeration is
-    unavailable so the start path stays unblocked on those platforms.
-    """
+    """True if at least one external (non-laptop-built-in) USB camera is plugged in."""
     if os.name != "nt":
         return True
     cams = list_pnp_cameras()
     if not cams:
-        # could be a hardening config that blocks WMI; let the user try
         return True
-    return any(c.get("is_usb") for c in cams)
+    return any(c.get("is_external") for c in cams)
 
 
 __all__ = ["list_pnp_cameras", "has_external_camera"]
