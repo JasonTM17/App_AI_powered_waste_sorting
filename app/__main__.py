@@ -5,9 +5,12 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
+from app.core.config import load_config
+from app.ui.controller import AppController
 from app.ui.main_window import MainWindow
 from app.ui.widgets.theme import apply_theme
 from app.utils.logging import logger, setup_logging
+from app.utils.paths import config_path, db_path
 
 
 def main() -> int:
@@ -16,10 +19,28 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("Trash Sorter Pro")
     app.setOrganizationName("TrashSorter")
-    apply_theme(app, "dark")
+
+    cfg_path = config_path()
+    cfg = load_config(cfg_path)
+    apply_theme(app, cfg.theme)
+
     window = MainWindow()
+    controller = AppController(cfg, cfg_path, db_path())
+
+    controller.uart_status.connect(window.live_page.set_uart_status)
+
+    def _on_frame(frame, detections, fps, latency):
+        window.live_page.update_frame(frame, detections)
+        window.live_page.set_fps(fps)
+        window.live_page.set_latency(latency)
+
+    controller.frame_processed.connect(_on_frame)
+
     window.show()
-    return app.exec()
+    controller.start()
+    rc = app.exec()
+    controller.stop()
+    return rc
 
 
 if __name__ == "__main__":
