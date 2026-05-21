@@ -90,6 +90,7 @@ class AppController(QObject):
     reload_model_result = Signal(bool, str)
     snapshot_saved = Signal(bool, str)
     capture_saved = Signal(str)
+    camera_error = Signal(str)
 
     def __init__(self, cfg: AppConfig, config_path: Path, db_path: Path):
         super().__init__()
@@ -144,6 +145,21 @@ class AppController(QObject):
     def start_camera(self) -> None:
         if self._camera is not None and self._camera.isRunning():
             return
+        src = self.cfg.camera.source.strip()
+        is_local_index = src.isdigit()
+        if is_local_index:
+            # Match the previous app: refuse to fall back on the laptop
+            # webcam when the requested USB camera isn't plugged in.
+            from app.utils.camera_enum import has_external_camera
+            if not has_external_camera():
+                msg = (
+                    "Chưa phát hiện camera USB. "
+                    "Vui lòng cắm camera vào cổng USB và thử lại."
+                )
+                logger.warning("camera start refused: {}", msg)
+                self.camera_error.emit(msg)
+                self.camera_status.emit(False)
+                return
         self._camera = CameraWorker(
             source=self.cfg.camera.source,
             width=self.cfg.camera.width,

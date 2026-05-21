@@ -75,6 +75,15 @@ def main() -> int:
 
     window.live_page.camera_toggled.connect(_on_camera_request)
     window.title_bar.camera_toggled.connect(_on_camera_request)
+
+    def _on_camera_error(msg: str):
+        from PySide6.QtCore import QPoint
+        from app.ui.widgets.toast import Toast
+        t = Toast(window, msg, level="warn", duration_ms=5000)
+        tr = window.mapToGlobal(QPoint(window.width(), 0))
+        t.show_at(window.mapFromGlobal(tr))
+
+    controller.camera_error.connect(_on_camera_error)
     if window.settings_page is not None:
         def _on_config_saved(new_cfg):
             apply_theme(app, new_cfg.theme)
