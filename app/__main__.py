@@ -6,9 +6,12 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from app.ui.main_window import MainWindow
+from app.utils.logging import logger, setup_logging
 
 
 def main() -> int:
+    setup_logging()
+    logger.info("starting app")
     app = QApplication(sys.argv)
     app.setApplicationName("Trash Sorter Pro")
     app.setOrganizationName("TrashSorter")
