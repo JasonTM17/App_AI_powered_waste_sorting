@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv/
+
+# Build
+build/
+dist/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+
+# App data
+*.log
+*.db
+*.sqlite
+*.sqlite3
+snapshots/
+dataset_v2/
+
+# Config (private)
+config.local.json
+.env
+.env.*
+!.env.example
+
+# Private docs (per global rule)
+PLAN*.md
+plan*.md
+NOTES*.md
+notes*.md
+TODO*.md
+todo*.md
+DRAFT*.md
+draft*.md
+*.private.md
+*.local.md
+.claude-private/
+.private/
+.omc/
+.claude/worktrees/
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
