@@ -104,6 +104,13 @@ class MainWindow(QMainWindow):
                 ),
             )
         QShortcut(QKeySequence("Ctrl+Q"), self, activated=self.close)
+        QShortcut(QKeySequence("F1"), self, activated=self._show_about)
+
+    def _show_about(self):
+        from app.ui.widgets.about import AboutDialog
+        names = {}
+        imgsz = 640
+        AboutDialog(names, imgsz, self).exec()
 
     def _toggle_max(self) -> None:
         if self.isMaximized():

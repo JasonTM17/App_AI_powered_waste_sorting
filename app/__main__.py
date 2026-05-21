@@ -24,6 +24,9 @@ def main() -> int:
     cfg = load_config(cfg_path)
     apply_theme(app, cfg.theme)
 
+    from app.utils.i18n import install_translator
+    install_translator(app, cfg.language)
+
     from app.ui.widgets.splash import Splash
     splash = Splash("Khởi tạo…")
     splash.show()
