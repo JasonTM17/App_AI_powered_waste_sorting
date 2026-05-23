@@ -32,6 +32,7 @@ def _write_web_item(
                 "source_author": "Example",
                 "canonical_class": cls_name,
                 "reviewed": True,
+                "bbox_reviewed": True,
                 "needs_annotation": False,
                 "review_method": review_method,
                 "generated": False,
