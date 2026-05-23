@@ -14,6 +14,7 @@ def _write_reviewed_item(queue, name: str, cls_name: str = "Pen") -> None:
     meta = {
         "source": "manual_camera_capture",
         "reviewed": True,
+        "bbox_reviewed": True,
         "split": "train",
         "boxes": [{"cls_id": 42, "cls_name": cls_name, "conf": 1.0, "xyxy": [8, 8, 70, 52]}],
     }
