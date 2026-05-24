@@ -87,7 +87,11 @@ COMMON_WASTE_ITEMS: tuple[CommonWasteItem, ...] = (
     CommonWasteItem("Ban chai danh rang", "Toothbrush", ("ban chai danh rang", "toothbrush")),
     CommonWasteItem("Pin", "Battery", ("pin", "pin tieu", "battery")),
     CommonWasteItem("Khau trang", "Textile", ("khau trang", "face mask")),
-    CommonWasteItem("Quan ao/vai cu", "Textile", ("quan ao cu", "vai cu", "rag", "old clothes")),
+    CommonWasteItem(
+        "Quan ao/vai cu",
+        "Textile",
+        ("quan ao cu", "quần áo cũ", "vai", "vải", "vai cu", "vải cũ", "mieng vai", "miếng vải", "rag", "old clothes"),
+    ),
     CommonWasteItem("Chen/bat gom su", "Ceramic", ("chen su", "bat su", "do gom su", "ceramic bowl")),
     CommonWasteItem("Ta giay/giay uot", "Textile", ("ta giay", "giay uot", "wet tissue", "diaper")),
     CommonWasteItem(

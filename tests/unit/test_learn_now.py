@@ -11,6 +11,7 @@ def _write_item(queue, name: str, cls_name: str, *, reviewed: bool = True, holdo
     meta = {
         "source": "manual_camera_capture",
         "reviewed": reviewed,
+        "bbox_reviewed": reviewed,
         "holdout": holdout,
         "split": "test" if holdout else "train",
         "split_lock": holdout,
@@ -43,6 +44,28 @@ def test_learn_now_counts_reviewed_references_and_routes_pen(tmp_path):
     assert selected["priority"] == "P0"
     assert selected["ready_for_reference"] is True
     assert selected["ready_for_micro_train"] is True
+
+
+def test_learn_now_textile_aliases_route_and_unlock_candidate_readiness(tmp_path):
+    queue = tmp_path / "queue"
+    queue.mkdir()
+    labels = ["mieng vai", "miếng vải", "vai cu", "vải cũ", "khau trang", "Textile"]
+    for index, label in enumerate(labels):
+        _write_item(queue, f"textile_{index}", label)
+
+    status = build_learn_now_status(queue, "miếng vải")
+    selected = status["selected"]
+
+    assert selected["class_name"] == "Textile"
+    assert selected["class_id"] == 37
+    assert selected["command"] == "R"
+    assert selected["bin_index"] == 2
+    assert selected["reference_count"] == 6
+    assert selected["reviewed_count"] == 6
+    assert selected["ready_for_reference"] is True
+    assert selected["ready_for_micro_train"] is True
+    assert selected["ready_for_strong_train"] is False
+    assert selected["missing_for_strong_train"] == 18
 
 
 def test_learn_now_micro_and_strong_thresholds(tmp_path):
@@ -133,3 +156,29 @@ def test_learn_now_excludes_quarantined_web_references(tmp_path):
     assert selected["trainable_count"] == 0
     assert selected["reference_count"] == 0
     assert selected["ready_for_reference"] is False
+
+
+def test_learn_now_excludes_training_excluded_reviewed_items_from_train_readiness(tmp_path):
+    queue = tmp_path / "queue"
+    queue.mkdir()
+    for index in range(6):
+        _write_item(queue, f"textile_excluded_{index}", "Textile")
+        meta_path = queue / f"textile_excluded_{index}.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta.update(
+            {
+                "training_excluded": True,
+                "recognition_enabled": False,
+                "training_exclusion_reason": "visual_review_rejected",
+            }
+        )
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    selected = build_learn_now_status(queue, "Textile")["selected"]
+
+    assert selected["reviewed_count"] == 6
+    assert selected["trainable_reviewed_count"] == 0
+    assert selected["eligible_reviewed_count"] == 0
+    assert selected["ready_for_reference"] is False
+    assert selected["ready_for_micro_train"] is False
+    assert selected["missing_for_micro_train"] == 6

@@ -16,25 +16,21 @@ from pathlib import Path
 from typing import Any
 
 from app.core.dataset_catalog import DatasetCatalog
+from app.core.dataset_trust import (
+    TRUSTED_SOURCES,
+)
+from app.core.dataset_trust import (
+    is_trainable_meta as _trust_is_trainable_meta,
+)
+from app.core.dataset_trust import (
+    is_trusted_meta as _trust_is_trusted_meta,
+)
 from app.core.downloaded_zip_intake import (
     DOWNLOADED_ANCHOR_BOOTSTRAP_SOURCE,
     has_downloaded_bootstrap_source_metadata,
 )
+from app.core.waste_categories import canonical_class_name
 
-TRUSTED_SOURCES = {
-    "auto_low_conf",
-    "manual_import",
-    "manual_camera_capture",
-    "manual_web_import",
-    "roboflow",
-    DOWNLOADED_ANCHOR_BOOTSTRAP_SOURCE,
-}
-REVIEW_REQUIRED_SOURCES = {
-    "auto_low_conf",
-    "manual_camera_capture",
-    "manual_web_import",
-    DOWNLOADED_ANCHOR_BOOTSTRAP_SOURCE,
-}
 MAX_MANUAL_URL_BYTES = 10 * 1024 * 1024
 MANUAL_IMPORT_USER_AGENT = "TrashSorterPro/2.0 (jasonbmt06@gmail.com) manual-training-import"
 
@@ -42,6 +38,8 @@ MANUAL_IMPORT_USER_AGENT = "TrashSorterPro/2.0 (jasonbmt06@gmail.com) manual-tra
 def summarize_queue(queue_dir: Path) -> dict:
     images = sorted(queue_dir.glob("*.jpg")) if queue_dir.exists() else []
     classes: Counter[str] = Counter()
+    trainable_classes: Counter[str] = Counter()
+    blocked_classes: Counter[str] = Counter()
     sources: Counter[str] = Counter()
     boxes = 0
     missing_meta = 0
@@ -60,18 +58,27 @@ def summarize_queue(queue_dir: Path) -> dict:
         sources[source] += 1
         if not is_trusted_meta(meta):
             untrusted += 1
+        trainable = is_trainable_meta(meta)
         for box in meta.get("boxes") or []:
+            cls_name = canonical_class_name(str(box.get("cls_name") or "")) or str(box.get("cls_name") or "?")
             boxes += 1
-            classes[box.get("cls_name") or "?"] += 1
+            classes[cls_name] += 1
+            if trainable:
+                trainable_classes[cls_name] += 1
+            else:
+                blocked_classes[cls_name] += 1
     return {
         "images": len(images),
         "boxes": boxes,
         "classes": classes,
+        "trainable_classes": trainable_classes,
+        "blocked_classes": blocked_classes,
         "sources": sources,
         "auto": sources.get("auto_low_conf", 0),
         "manual": _sum_sources(
             sources,
             "manual_import",
+            "manual_phone_import",
             "manual_camera_capture",
             "manual_web_import",
         ),
@@ -116,6 +123,67 @@ def import_manual_images(
                 "ts": datetime.now().isoformat(),
                 "source": "manual_import",
                 "original_file": str(src),
+                "boxes": [
+                    {
+                        "cls_id": class_id,
+                        "cls_name": class_name,
+                        "conf": 1.0,
+                        "xyxy": [0, 0, w, h],
+                    }
+                ],
+            }
+            img_path.with_suffix(".json").write_text(
+                json.dumps(meta, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            if catalog is not None:
+                catalog.upsert_item(img_path, meta)
+            added += 1
+        return added
+    finally:
+        if catalog is not None:
+            catalog.close()
+
+
+def import_manual_phone_images(
+    image_paths: list[str] | tuple[str, ...],
+    queue_dir: Path,
+    cls_name: str,
+    cls_id: int,
+    *,
+    catalog_path: Path | None = None,
+) -> int:
+    """Import phone/manual uploads as pending-review samples."""
+    from PIL import Image
+
+    class_name, class_id = _canonical_box_label(cls_name, cls_id)
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    catalog = DatasetCatalog(catalog_path) if catalog_path is not None else None
+    added = 0
+    try:
+        for raw in image_paths:
+            src = Path(raw)
+            if not src.exists():
+                continue
+            try:
+                with Image.open(src) as im:
+                    rgb = im.convert("RGB")
+                    w, h = rgb.size
+                    uid = uuid.uuid4().hex[:12]
+                    img_path = queue_dir / f"manual_phone_{uid}.jpg"
+                    rgb.save(img_path, format="JPEG", quality=92)
+            except Exception:
+                continue
+
+            meta = {
+                "ts": datetime.now().isoformat(),
+                "source": "manual_phone_import",
+                "original_file": str(src),
+                "reviewed": False,
+                "bbox_reviewed": False,
+                "needs_annotation": True,
+                "recognition_enabled": False,
+                "annotation_hint": "Draw and approve a bbox before training this phone/manual sample.",
                 "boxes": [
                     {
                         "cls_id": class_id,
@@ -204,6 +272,43 @@ def import_manual_camera_frame(
         finally:
             catalog.close()
     return img_path
+
+
+def save_reviewed_camera_annotation(
+    frame_bgr,
+    queue_dir: Path,
+    cls_name: str,
+    cls_id: int,
+    xyxy: list[float] | tuple[float, float, float, float],
+    *,
+    catalog_path: Path | None = None,
+    extra_meta: dict[str, Any] | None = None,
+) -> Path:
+    """Save a camera frame with an operator-reviewed bbox that is trainable immediately."""
+    reviewed_at = datetime.now().isoformat()
+    meta = {
+        "reviewed": True,
+        "bbox_reviewed": True,
+        "needs_annotation": False,
+        "training_excluded": False,
+        "recognition_enabled": True,
+        "capture_mode": "desktop_reviewed_camera_annotation",
+        "review_decision": "desktop_bbox_approved",
+        "review_reason": "desktop_manual_annotation",
+        "reviewed_by": "admin",
+        "reviewed_at": reviewed_at,
+    }
+    if extra_meta:
+        meta.update(extra_meta)
+    return import_manual_camera_frame(
+        frame_bgr,
+        queue_dir,
+        cls_name,
+        cls_id,
+        xyxy=xyxy,
+        catalog_path=catalog_path,
+        extra_meta=meta,
+    )
 
 
 def import_manual_image_urls(
@@ -424,11 +529,12 @@ def save_item_annotations(
         clean_boxes = [_clean_box(box, width, height) for box in boxes]
         clean_boxes = [box for box in clean_boxes if box is not None]
         meta["boxes"] = clean_boxes
-        meta["reviewed"] = True
-        meta["needs_annotation"] = False
-        meta["reviewed_at"] = datetime.now().isoformat()
+        meta["annotation_updated_at"] = datetime.now().isoformat()
         if str(meta.get("source") or "") == DOWNLOADED_ANCHOR_BOOTSTRAP_SOURCE:
             if has_downloaded_bootstrap_source_metadata(meta):
+                meta["reviewed"] = True
+                meta["bbox_reviewed"] = True
+                meta["needs_annotation"] = False
                 meta["training_excluded"] = False
                 meta["phase17_reviewed_train_support"] = True
                 meta["split"] = "train"
@@ -436,8 +542,17 @@ def save_item_annotations(
                 meta["recognition_enabled"] = False
                 meta["training_exclusion_reason_previous"] = meta.pop("training_exclusion_reason", "")
             else:
+                meta["reviewed"] = False
+                meta["bbox_reviewed"] = False
+                meta["needs_annotation"] = True
                 meta["training_excluded"] = True
                 meta["training_exclusion_reason"] = "missing_downloaded_source_metadata"
+        else:
+            meta["reviewed"] = False
+            meta["bbox_reviewed"] = False
+            meta["needs_annotation"] = True
+            meta["training_excluded"] = True
+            meta["training_exclusion_reason"] = "bbox_saved_pending_review"
         meta.pop("unknown_labels", None)
         meta_file.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
         catalog.upsert_item(img, meta)
@@ -488,19 +603,11 @@ def mark_items_trusted(
 
 
 def is_trusted_meta(meta: dict) -> bool:
-    source = str(meta.get("source") or "unknown")
-    if source in {"unknown", "untrusted"}:
-        return False
-    return not meta.get("unknown_labels")
+    return _trust_is_trusted_meta(meta)
 
 
 def is_trainable_meta(meta: dict) -> bool:
-    if not is_trusted_meta(meta):
-        return False
-    if meta.get("training_excluded") is True:
-        return False
-    source = str(meta.get("source") or "unknown")
-    return not (source in REVIEW_REQUIRED_SOURCES and not meta.get("reviewed"))
+    return _trust_is_trainable_meta(meta)
 
 
 def _sum_sources(sources: Counter[str], prefix: str, *exact: str) -> int:
@@ -604,6 +711,7 @@ __all__ = [
     "import_manual_camera_frame",
     "import_manual_image_urls",
     "import_manual_images",
+    "import_manual_phone_images",
     "is_trainable_meta",
     "is_trusted_meta",
     "mark_items_trusted",
@@ -611,5 +719,6 @@ __all__ = [
     "quarantine_untrusted_items",
     "relabel_images",
     "save_item_annotations",
+    "save_reviewed_camera_annotation",
     "summarize_queue",
 ]
