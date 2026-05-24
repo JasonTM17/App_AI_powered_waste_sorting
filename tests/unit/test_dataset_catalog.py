@@ -23,6 +23,7 @@ def _make_item(
         "ts": "2026-05-22T08:00:00",
         "source": source,
         "reviewed": reviewed,
+        "bbox_reviewed": reviewed,
         "boxes": [
             {
                 "cls_id": 18,
@@ -113,6 +114,24 @@ def test_catalog_sync_removes_stale_items(tmp_path: Path):
         assert catalog.count_boxes_total() == 1
         assert catalog.count_by_source() == {"manual_import": 1}
         assert keep.exists()
+    finally:
+        catalog.close()
+
+
+def test_catalog_empty_scan_does_not_wipe_existing_items(tmp_path: Path):
+    qdir = tmp_path / "queue"
+    _make_item(qdir, "manual_keep")
+
+    catalog = DatasetCatalog(tmp_path / "dataset.db")
+    try:
+        assert catalog.index_queue(qdir) == 1
+        empty_dir = tmp_path / "empty-queue"
+        empty_dir.mkdir()
+
+        assert catalog.index_queue(empty_dir) == 0
+        assert catalog.count_total() == 1
+        assert catalog.count_boxes_total() == 1
+        assert catalog.get_item("manual_keep") is not None
     finally:
         catalog.close()
 

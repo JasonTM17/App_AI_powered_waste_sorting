@@ -188,6 +188,15 @@ def _local_context_answer(
     message: str,
     context: Mapping[str, object],
 ) -> str:
+    intent = local_chat_intent(message)
+    if intent == "map":
+        return _local_map_answer(role, context)
+    if intent == "runtime":
+        return _local_runtime_answer(role, context)
+    return ""
+
+
+def local_chat_intent(message: str) -> Literal["map", "runtime", ""]:
     intent = _fold_text(message)
     if _has_any(
         intent,
@@ -203,9 +212,9 @@ def _local_context_answer(
             "vi tri thung",
         ),
     ):
-        return _local_map_answer(role, context)
+        return "map"
     if _has_any(intent, ("thiet bi", "camera", "uart", "model", "bat thuong", "trang thai local")):
-        return _local_runtime_answer(role, context)
+        return "runtime"
     return ""
 
 
@@ -497,9 +506,9 @@ def _model() -> str:
 
 def _timeout_s() -> float:
     try:
-        return max(1.0, min(float(os.getenv(DEEPSEEK_TIMEOUT_ENV, "30")), 120.0))
+        return max(1.0, min(float(os.getenv(DEEPSEEK_TIMEOUT_ENV, "75")), 180.0))
     except ValueError:
-        return 30.0
+        return 75.0
 
 
 def deepseek_available() -> bool:
@@ -519,4 +528,5 @@ __all__ = [
     "USER_QUICK_PROMPTS",
     "build_chat_response",
     "deepseek_available",
+    "local_chat_intent",
 ]

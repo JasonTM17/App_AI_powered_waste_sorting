@@ -165,7 +165,11 @@ def _max_box_coverage(meta: dict[str, Any], width: int, height: int) -> float:
 
 
 def _is_reviewed_web(meta: dict[str, Any]) -> bool:
-    return str(meta.get("source") or "") == "manual_web_import" and meta.get("reviewed") is True
+    return (
+        str(meta.get("source") or "") == "manual_web_import"
+        and meta.get("reviewed") is True
+        and meta.get("bbox_reviewed") is True
+    )
 
 
 def _read_meta(path: Path) -> dict[str, Any]:
