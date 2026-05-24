@@ -96,6 +96,7 @@ def main() -> int:
                     "phase19_kaggle_train_support": True,
                     "recognition_enabled": False,
                     "reviewed": True,
+                    "bbox_reviewed": True,
                     "needs_annotation": False,
                     "split_lock": True,
                 },

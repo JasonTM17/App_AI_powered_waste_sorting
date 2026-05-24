@@ -11,6 +11,7 @@ def _write_item(queue, name: str, *, holdout: bool) -> None:
     meta = {
         "source": "manual_camera_capture",
         "reviewed": True,
+        "bbox_reviewed": True,
         "capture_session_id": "session-1",
         "split": "test" if holdout else "train",
         "split_lock": True,
@@ -41,6 +42,7 @@ def _write_alias_item(
     meta = {
         "source": "manual_camera_capture",
         "reviewed": True,
+        "bbox_reviewed": True,
         "generated": generated,
         "camera_blur_augmented": augmented,
         "source_type": "generated" if generated else "camera_blur_augmented" if augmented else "camera",
