@@ -29,6 +29,7 @@ def test_common_aliases_canonicalize_to_training_classes():
     assert canonical_class_name("hop sua giay") == "Tetra pack"
     assert canonical_class_name("but bi") == "Pen"
     assert canonical_class_name("but chi") == "Pen"
+    assert canonical_class_name("vải") == "Textile"
     assert canonical_class_name("khau trang") == "Textile"
     assert canonical_class_name("lon do hop") == "Tin"
     assert canonical_class_name("chai dau goi") == "Plastic bottle"
