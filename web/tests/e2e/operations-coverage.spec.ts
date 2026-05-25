@@ -10,10 +10,13 @@ import {
 
 test("user map falls back cleanly when OSM tiles fail", async ({ page }) => {
   await page.route("**tile.openstreetmap.org/**", (route) => route.abort());
-  await openAppAs(page, "user", "/user/map");
+  const session = await openAppAs(page, "user", "/user/map");
+  const mapData = await agentJson<{ stations: Array<unknown> }>("/api/user/bin-map", session.token);
 
   await expect(page.locator("body")).toContainText(/Bản đồ thùng rác|Trạm gần bạn/i);
-  await expect(page.locator(".operations-station-row")).toHaveCount(10);
+  expect(mapData.stations.length).toBeGreaterThan(0);
+  expect(mapData.stations.length).toBeLessThan(10);
+  await expect(page.locator(".operations-station-row")).toHaveCount(mapData.stations.length);
   await expect(page.locator(".alert.compact-alert")).toContainText(/Tile bản đồ chưa tải được/i);
 
   await assertNoHorizontalOverflow(page);

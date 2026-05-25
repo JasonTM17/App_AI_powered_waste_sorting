@@ -24,7 +24,7 @@ export function ActuationTestModePanel({
         <div>
           <span className="eyebrow">Actuation Test Mode</span>
           <strong>{enabled ? "Đang bật" : "Đang tắt"}</strong>
-          <p className="muted">{"Kiem chung camera -> group -> bin -> payload -> ACK -> history."}</p>
+          <p className="muted">{"Kiểm chứng camera -> group -> bin -> payload -> ACK -> history."}</p>
         </div>
         <button
           className={enabled ? "danger-button" : "primary-button"}
@@ -44,7 +44,7 @@ export function ActuationTestModePanel({
       ) : (
         <div className="success">
           <CheckCircle2 size={16} />
-          <span>UART connected, san sang ghi nhan ACK khi co dispatch.</span>
+          <span>UART connected, sẵn sàng ghi nhận ACK khi có dispatch.</span>
         </div>
       )}
       <div className="device-list">

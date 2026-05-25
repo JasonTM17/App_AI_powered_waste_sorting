@@ -98,12 +98,7 @@ export function ChatPanel({
         </div>
 
         <div className="stitch-chat-body" aria-live="polite" ref={bodyRef}>
-          {persona === "admin" ? (
-            <div className="stitch-chat-context-row" aria-label="Trạng thái trợ lý AI">
-              <span>{answer?.available ? "Bộ nhớ dự án đang bật" : "Chế độ local an toàn"}</span>
-              <span>{answer?.model || "deepseek-v4-flash"}</span>
-            </div>
-          ) : userQuotaText ? (
+          {userQuotaText ? (
             <div className="stitch-chat-context-row user-quota-row" aria-label="Lượt hỏi EcoPet">
               <span>{userQuotaText}</span>
             </div>

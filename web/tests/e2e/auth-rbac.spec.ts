@@ -18,6 +18,33 @@ test("login screen renders Vietnamese production auth and admin can sign in", as
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /Đăng nhập hệ thống/i })).toBeVisible();
+
+  const stylesheets = await page.locator('link[rel="stylesheet"]').evaluateAll((links) =>
+    links.map((link) => (link as HTMLLinkElement).href).filter(Boolean)
+  );
+  expect(stylesheets.length).toBeGreaterThan(0);
+  const authStyles = await page.locator(".auth-panel").evaluate((panel) => {
+    const screen = panel.closest(".auth-screen");
+    const logo = panel.querySelector(".trash-sorter-logo-image");
+    const panelStyle = window.getComputedStyle(panel);
+    const screenStyle = screen ? window.getComputedStyle(screen) : null;
+    const panelBox = panel.getBoundingClientRect();
+    const logoBox = logo?.getBoundingClientRect();
+    return {
+      panelDisplay: panelStyle.display,
+      panelMaxWidth: panelStyle.maxWidth,
+      panelWidth: panelBox.width,
+      screenDisplay: screenStyle?.display ?? "",
+      logoHeight: logoBox?.height ?? 0,
+      logoWidth: logoBox?.width ?? 0
+    };
+  });
+  expect(authStyles.screenDisplay).toBe("grid");
+  expect(authStyles.panelDisplay).toBe("grid");
+  expect(authStyles.panelWidth).toBeLessThanOrEqual(460);
+  expect(authStyles.logoWidth).toBeLessThanOrEqual(260);
+  expect(authStyles.logoHeight).toBeLessThanOrEqual(160);
+
   await page.getByLabel(/Tên đăng nhập/i).fill(state.accounts.admin.username);
   await page.getByLabel(/^Mật khẩu$/i).fill(state.accounts.admin.password);
   await page.getByRole("button", { name: /^Đăng nhập$/i }).click();
@@ -60,6 +87,22 @@ test("admin tabs keep the existing operational surfaces reachable", async ({ pag
     await assertNoHorizontalOverflow(page);
   }
 
+  expectNoConsoleErrors(consoleErrors);
+});
+
+test("training tab requires a canonical label before phone/manual upload", async ({ page }) => {
+  const consoleErrors = collectConsoleErrors(page);
+  await openAppAs(page, "admin", "/admin?tab=training");
+
+  await expect(page.locator(".page-heading h1")).toHaveText("Huấn luyện");
+  const labelInput = page.getByLabel(/^Nhãn$/i);
+  const fileInput = page.locator('input[type="file"][accept="image/*"]').last();
+  await labelInput.fill("");
+  await expect(fileInput).toBeDisabled();
+  await labelInput.fill("vải");
+  await expect(page.locator(".path-line").filter({ hasText: /Textile/i }).first()).toBeVisible();
+  await expect(fileInput).toBeEnabled();
+  await assertNoHorizontalOverflow(page);
   expectNoConsoleErrors(consoleErrors);
 });
 

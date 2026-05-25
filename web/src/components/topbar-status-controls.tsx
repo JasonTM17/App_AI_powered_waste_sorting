@@ -1,7 +1,7 @@
 "use client";
 
 import { BrainCircuit, Camera, FileText, Play, Settings, Square, Video, Wifi } from "lucide-react";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { AGENT_URL, type AuthMe, type RuntimeStatus, type TrainingStatus } from "@/lib/agent";
 
@@ -39,6 +39,15 @@ export function TopbarStatusControls({
     onNavigate(tab);
     close();
   };
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, close]);
 
   return (
     <div className="status-action-group">

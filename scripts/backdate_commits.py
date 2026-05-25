@@ -3,6 +3,7 @@ import random
 import subprocess
 from datetime import datetime, timedelta
 
+
 def run(cmd):
     subprocess.run(cmd, shell=True, check=True)
 

@@ -143,10 +143,10 @@ export function SettingsIoPanel({ busy, config, status, onChange, onRefreshDevic
       </div>
 
       <div className="panel">
-        <span className="eyebrow">ROI / chong lap vong</span>
+        <span className="eyebrow">ROI / chống lặp vòng</span>
         <div className="capture-warning">
           <AlertTriangle size={16} />
-          <span>Camera chi gui UART khi ROI hop le, khay da trong on dinh va het cooldown.</span>
+          <span>Camera chỉ gửi UART khi ROI hợp lệ, khay đã trống ổn định và hết cooldown.</span>
         </div>
         <div className="form-grid two-col">
           <label className="check-field">
@@ -208,7 +208,7 @@ export function SettingsIoPanel({ busy, config, status, onChange, onRefreshDevic
             }
           />
           <NumberField
-            label="Cach moi lan do (s)"
+            label="Cách mỗi lần đo (s)"
             min={0}
             step={0.5}
             value={config.dispatch_guard.min_sort_interval_seconds}
@@ -220,7 +220,7 @@ export function SettingsIoPanel({ busy, config, status, onChange, onRefreshDevic
             }
           />
           <NumberField
-            label="Khay trong de re-arm (s)"
+            label="Khay trống để re-arm (s)"
             min={0}
             step={0.5}
             value={config.dispatch_guard.empty_rearm_seconds}

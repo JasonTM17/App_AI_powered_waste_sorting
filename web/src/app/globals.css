@@ -1,4 +1,6 @@
 @import "leaflet/dist/leaflet.css";
+@import "leaflet.markercluster/dist/MarkerCluster.css";
+@import "leaflet.markercluster/dist/MarkerCluster.Default.css";
 
 :root {
   --background: #f7f9fb;
@@ -49,6 +51,44 @@ button {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
   min-height: 100vh;
+  transition: grid-template-columns 0.3s ease;
+}
+
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 80px minmax(0, 1fr);
+}
+
+.app-shell.sidebar-collapsed .sidebar .brand > div:not(.brand-mark),
+.app-shell.sidebar-collapsed .sidebar .nav-item span,
+.app-shell.sidebar-collapsed .sidebar .agent-card,
+.app-shell.sidebar-collapsed .sidebar .user-nav-divider {
+  display: none;
+}
+
+.app-shell.sidebar-collapsed .sidebar .nav-item {
+  justify-content: center;
+  padding: 12px;
+}
+
+.sidebar-toggle {
+  background: transparent;
+  border: none;
+  color: #a0aec0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.sidebar-toggle:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+}
+
+.app-shell.sidebar-collapsed .sidebar-toggle {
+  margin-top: auto;
 }
 
 .sidebar {
@@ -1000,6 +1040,134 @@ input[type="file"] {
   outline: 3px solid rgba(37, 99, 235, 0.32);
 }
 
+.operations-map-popup-root {
+  min-width: 260px;
+}
+
+.leaflet-popup-content {
+  margin: 0;
+}
+
+.operations-map-popup-card {
+  background: #ffffff;
+  border-radius: 8px;
+  color: var(--text);
+  display: grid;
+  gap: 12px;
+  min-width: 260px;
+  padding: 14px;
+}
+
+.operations-map-popup-card header {
+  align-items: flex-start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.operations-map-popup-card strong {
+  display: block;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.operations-map-popup-card small,
+.operations-map-popup-card p,
+.operations-map-popup-card dt {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+  margin: 0;
+}
+
+.popup-status-dot {
+  border-radius: 999px;
+  height: 10px;
+  margin-top: 5px;
+  width: 10px;
+}
+
+.popup-status-dot.ok {
+  background: #059669;
+}
+
+.popup-status-dot.pending {
+  background: var(--orange);
+}
+
+.popup-status-dot.danger {
+  background: var(--red);
+}
+
+.popup-meta-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+.popup-meta-grid div {
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 0;
+  padding: 8px;
+}
+
+.popup-meta-grid dd {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.popup-bin-list {
+  display: grid;
+  gap: 8px;
+}
+
+.popup-bin-row {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 26px minmax(0, 1fr) 42px;
+}
+
+.popup-bin-row > span,
+.popup-bin-row > strong {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.popup-bin-row > strong {
+  text-align: right;
+}
+
+.popup-fill-track {
+  background: #e2e8f0;
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.popup-fill-bar {
+  display: block;
+  height: 100%;
+}
+
+.popup-fill-bar.ok {
+  background: #10b981;
+}
+
+.popup-fill-bar.warning {
+  background: #f59e0b;
+}
+
+.popup-fill-bar.danger {
+  background: #ef4444;
+}
+
 .operations-map-list,
 .operations-list,
 .operations-role-grid,
@@ -1327,6 +1495,23 @@ table {
   font-size: 12px;
   font-weight: 700;
   padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.trust-cell {
+  display: grid;
+  gap: 4px;
+  max-width: 170px;
+}
+
+.trust-cell small {
+  color: var(--muted);
+  display: block;
+  font-size: 11px;
+  line-height: 14px;
+  max-width: 170px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -1708,11 +1893,32 @@ td {
 }
 
 .account-chip {
-  background: #ffffff;
-  border: 1px solid #c5c6ca;
-  color: #1a1c1e;
-  gap: 9px;
-  padding: 6px 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbf8 100%);
+  border: 1px solid rgba(112, 146, 112, 0.38);
+  box-shadow: 0 8px 22px rgba(35, 57, 41, 0.08);
+  color: #18221b;
+  gap: 10px;
+  padding: 5px 12px 5px 6px;
+}
+
+.account-avatar-frame {
+  align-items: center;
+  background: #eef7ef;
+  border: 1px solid rgba(93, 131, 95, 0.26);
+  border-radius: 6px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 32px;
+  justify-content: center;
+  overflow: hidden;
+  width: 32px;
+}
+
+.account-avatar-frame img {
+  display: block;
+  height: 24px;
+  object-fit: contain;
+  width: 24px;
 }
 
 .account-chip div {

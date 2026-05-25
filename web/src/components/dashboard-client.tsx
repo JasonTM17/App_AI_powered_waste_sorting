@@ -218,6 +218,7 @@ export function DashboardClient() {
   const [active, setActive] = useState<TabId>("live");
   const [userView, setUserView] = useState<UserView>("dashboard");
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [agentToken, setAgentToken] = useState("");
   const [auth, setAuth] = useState<AuthMe | null>(null);
   const [loginUsername, setLoginUsername] = useState("admin");
@@ -621,7 +622,8 @@ export function DashboardClient() {
         body: JSON.stringify({
           range_days: userRangeDays,
           question: userAdvisorQuestion.trim()
-        })
+        }),
+        timeoutMs: 90_000
       });
       setUserAdvisor(data);
       setAgentError("");
@@ -640,7 +642,7 @@ export function DashboardClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
-        timeoutMs: 45_000
+        timeoutMs: 90_000
       });
       setUserChat(data);
       setUserChatQuestion("");
@@ -998,7 +1000,7 @@ export function DashboardClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
-        timeoutMs: 45_000
+        timeoutMs: 90_000
       });
       setAdminChat(data);
       setAdminChatQuestion("");
@@ -1312,13 +1314,14 @@ export function DashboardClient() {
   }, [agentToken, auth?.role, auth?.password_default, userRangeDays]);
 
   useEffect(() => {
-    if (!hasHydrated || auth?.role !== "admin") {
+    if (!hasHydrated || auth?.role !== "admin" || auth.password_default) {
       return;
     }
-    const url = new URL(window.location.href);
-    url.searchParams.set("tab", active);
-    window.history.replaceState(null, "", url.toString());
-  }, [active, auth?.role, hasHydrated]);
+    const nextPath = `/admin?tab=${encodeURIComponent(active)}`;
+    if (window.location.pathname !== "/admin" || window.location.search !== `?tab=${active}`) {
+      window.history.replaceState(null, "", nextPath);
+    }
+  }, [active, auth?.role, auth?.password_default, hasHydrated]);
 
   useEffect(() => {
     if (!hasHydrated || auth?.role !== "user" || auth.password_default) {
@@ -2138,7 +2141,7 @@ export function DashboardClient() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -2173,6 +2176,13 @@ export function DashboardClient() {
             <span>{agentError ? "Agent offline" : "Hệ thống đang chạy"}</span>
           </div>
         </div>
+        <button
+          className="sidebar-toggle"
+          onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          title={isSidebarCollapsed ? "Mở rộng" : "Thu gọn"}
+        >
+          {isSidebarCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
+        </button>
       </aside>
 
       <main className="workspace">
@@ -2411,9 +2421,9 @@ export function DashboardClient() {
             busy={busy}
             classOptions={classOptions}
             imageToken={agentToken}
-            selectedClass={manualClass}
+            selectedClass={trainingManualClass}
             onBoxesChange={setAnnotationBoxes}
-            onClassChange={setManualClass}
+            onClassChange={setTrainingManualClass}
             onClose={() => setAnnotation(null)}
             onApprove={() => void approveAnnotation()}
             onSave={() => void saveAnnotation()}

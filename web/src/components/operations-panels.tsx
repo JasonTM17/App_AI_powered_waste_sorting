@@ -255,9 +255,13 @@ export function AdminBinMapPanel({
   return (
     <section className="content-grid operations-grid">
       <OperationsBinMap
+        editable
         busy={busy}
         map={map}
         selectedStationId={selected?.station_id}
+        onMoveStation={(stationId, latitude, longitude) =>
+          onPatchStation(stationId, { coordinate_verified: true, latitude, longitude })
+        }
         onRefresh={onRefresh}
         onSelectStation={(station) => setSelectedId(station.station_id)}
       />
@@ -607,6 +611,12 @@ function StationDetail({ station }: { station: BinStation }) {
   return (
     <div className="operations-station-detail">
       <p>{station.address}</p>
+      <p className="helper-text">
+        {station.owner_username ? `Phụ trách: ${station.owner_username}` : "Chưa gán người phụ trách"}
+        {station.latitude != null && station.longitude != null
+          ? ` - ${station.latitude.toFixed(5)}, ${station.longitude.toFixed(5)}`
+          : ""}
+      </p>
       <div className="operations-mini-metrics">
         <span>
           <strong>{station.bins.length}</strong>
@@ -628,7 +638,10 @@ function StationDetail({ station }: { station: BinStation }) {
               <MapPin size={16} />
               <div>
                 <strong>{bin.label}</strong>
-                <small>{bin.command}/bin{bin.bin_index} - đầy {bin.fill_percent}%</small>
+                <small>
+                  {bin.command}/bin{bin.bin_index} - đầy {Math.round(Number(bin.fill_percent ?? 0))}%
+                  {bin.updated_at ? ` - cập nhật ${bin.updated_at}` : ""}
+                </small>
               </div>
             </div>
             <span className={bin.status === "full" ? "status-chip danger" : bin.status === "warning" ? "status-chip warning" : "status-chip"}>

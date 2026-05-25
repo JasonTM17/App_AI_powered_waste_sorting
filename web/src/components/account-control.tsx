@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, LogOut, ShieldCheck, UserRound } from "lucide-react";
+import { AlertTriangle, LogOut } from "lucide-react";
 
 import type { AuthMe } from "@/lib/agent";
 
@@ -11,15 +11,17 @@ type AccountControlProps = {
 };
 
 export function AccountControl({ auth, busy, onLogout }: AccountControlProps) {
-  const roleLabel = auth?.role === "admin" ? "Quản trị viên" : "Người dùng";
-  const Icon = auth?.role === "admin" ? ShieldCheck : UserRound;
+  const roleLabel = auth?.role === "admin" ? "Quản trị viên" : "Tài khoản người dùng";
+  const displayName = displayAccountName(auth);
 
   return (
-    <div className="account-control" aria-label="Tài khoản đăng nhập">
-      <div className="account-chip">
-        <Icon size={17} />
+    <div className="account-control" aria-label={`Tài khoản đăng nhập: ${displayName}`}>
+      <div className="account-chip" title={auth?.username ? `Username: ${auth.username}` : roleLabel}>
+        <span className="account-avatar-frame" aria-hidden="true">
+          <img alt="" src="/brand/trash-sorter-pro-mark.png" />
+        </span>
         <div>
-          <strong>{auth?.username || roleLabel}</strong>
+          <strong>{displayName}</strong>
           <span>{roleLabel}</span>
         </div>
       </div>
@@ -35,4 +37,23 @@ export function AccountControl({ auth, busy, onLogout }: AccountControlProps) {
       </button>
     </div>
   );
+}
+
+function displayAccountName(auth: AuthMe | null) {
+  const username = auth?.username?.trim();
+  if (!username) {
+    return auth?.role === "admin" ? "Quản trị EcoSort" : "Thành viên EcoSort";
+  }
+  const normalized = username.toLowerCase();
+  if (auth?.role === "admin" && normalized === "admin") {
+    return "Quản trị EcoSort";
+  }
+  if (auth?.role === "user" && normalized === "user") {
+    return "Thành viên EcoSort";
+  }
+  return username
+    .split(/[-_.\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }

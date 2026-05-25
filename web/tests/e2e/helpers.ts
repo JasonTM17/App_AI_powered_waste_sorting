@@ -48,6 +48,7 @@ export const adminTabs = [
   { tab: "devices", nav: /Thiết bị/i, title: "Thiết bị" },
   { tab: "roles", nav: /Role/i, title: "Role" },
   { tab: "data", nav: /Dữ liệu/i, title: "Dữ liệu" },
+  { tab: "training", nav: /Huấn luyện/i, title: "Huấn luyện" },
   { tab: "mapping", nav: /Mapping/i, title: "Mapping" },
   { tab: "model", nav: /Model AI/i, title: "Model AI" },
   { tab: "audio", nav: /Audio/i, title: "Audio" },

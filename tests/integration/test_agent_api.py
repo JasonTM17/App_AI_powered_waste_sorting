@@ -1604,7 +1604,7 @@ def test_user_chat_uses_owned_context_and_knowledge_pack(tmp_path, monkeypatch):
         res = client.post(
             "/api/user/chat",
             headers={"Authorization": f"Bearer {token}"},
-            json={"message": "Giai thich Eco Score va rac tai che cua toi"},
+            json={"message": "Giai thich Eco Score va lich thu gom cua toi"},
         )
         body = res.json()
         request_body = capture["body"]
@@ -1795,6 +1795,56 @@ def test_admin_chat_timeout_returns_local_fallback(tmp_path, monkeypatch):
         runtime.close()
 
 
+def test_admin_chat_generic_summary_omits_heavy_operations_context(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRASH_SORTER_AUTH_DB", str(tmp_path / "auth.db"))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "api-key")
+    AuthService().create_account("admin", "admin-pass-123", "admin")
+    capture: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "He thong on dinh."}}]}
+
+    class FakeClient:
+        def __init__(self, timeout):
+            capture["timeout"] = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def post(self, url, headers, json):
+            capture["body"] = json
+            return FakeResponse()
+
+    monkeypatch.setattr("app.agent.ai_chat_service.httpx.Client", FakeClient)
+    client, runtime = _client(tmp_path)
+    try:
+        token = client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "admin-pass-123"},
+        ).json()["token"]
+        response = client.post(
+            "/api/admin/chat",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"message": "Tom tat he thong"},
+        )
+        payload = json.loads(capture["body"]["messages"][1]["content"])
+
+        assert response.status_code == 200
+        assert "analytics" in payload["context"]
+        assert "runtime" in payload["context"]
+        assert "operations" not in payload["context"]
+        assert "operations_map" not in payload["context"]
+    finally:
+        runtime.close()
+
+
 def test_user_chat_malformed_provider_response_returns_local_fallback(tmp_path, monkeypatch):
     monkeypatch.setenv("TRASH_SORTER_AUTH_DB", str(tmp_path / "auth.db"))
     monkeypatch.setenv("DEEPSEEK_API_KEY", "api-key")
@@ -1975,7 +2025,7 @@ def test_admin_chat_uses_sanitized_system_context_and_blocks_user(tmp_path, monk
         res = client.post(
             "/api/admin/chat",
             headers={"Authorization": f"Bearer {admin_token}"},
-            json={"message": "Tom tat he thong"},
+            json={"message": "Tom tat lich thu gom he thong"},
         )
         body = res.json()
         assert res.status_code == 200

@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import unicodedata
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -471,8 +472,9 @@ def create_app(
         else:
             analytics = build_user_analytics(rt, 30, **_owner_scope(context))
             chat_context = _analytics_chat_context(analytics)
-            chat_context["operations"] = _operations_summary_context(rt, owner_username=owner_username)
-            chat_context["operations_map"] = _operations_map_chat_context(rt, owner_username=owner_username)
+            if _message_needs_operations_context(payload.message):
+                chat_context["operations"] = _operations_summary_context(rt, owner_username=owner_username)
+                chat_context["operations_map"] = _operations_map_chat_context(rt, owner_username=owner_username)
             knowledge_snippets = retrieve_knowledge_snippets(
                 role="user",
                 question=payload.message,
@@ -796,7 +798,11 @@ def create_app(
     @router.post("/admin/chat", response_model=AiChatResponse)
     def admin_chat(payload: AiChatRequest) -> AiChatResponse:
         intent = local_chat_intent(payload.message)
-        chat_context = _admin_light_chat_context(rt, intent) if intent else _admin_chat_context(rt)
+        chat_context = (
+            _admin_light_chat_context(rt, intent)
+            if intent
+            else _admin_chat_context(rt, include_operations=_message_needs_operations_context(payload.message))
+        )
         knowledge_snippets = [] if intent else retrieve_knowledge_snippets(
             role="admin",
             question=payload.message,
@@ -1762,14 +1768,12 @@ def _analytics_chat_context(analytics: UserAnalyticsResponse) -> dict[str, objec
     }
 
 
-def _admin_chat_context(runtime: AgentRuntime) -> dict[str, object]:
+def _admin_chat_context(runtime: AgentRuntime, *, include_operations: bool = True) -> dict[str, object]:
     analytics = build_user_analytics(runtime, 30)
     status = runtime.status(include_devices=False)
-    return {
+    context: dict[str, object] = {
         "scope": "admin_all_history",
         "analytics": _analytics_chat_context(analytics),
-        "operations": _operations_summary_context(runtime, owner_username=None),
-        "operations_map": _operations_map_chat_context(runtime, owner_username=None),
         "runtime": {
             "camera": _device_state_context(status.camera),
             "uart": _device_state_context(status.uart),
@@ -1780,6 +1784,10 @@ def _admin_chat_context(runtime: AgentRuntime) -> dict[str, object]:
         },
         "logs": _log_summary(),
     }
+    if include_operations:
+        context["operations"] = _operations_summary_context(runtime, owner_username=None)
+        context["operations_map"] = _operations_map_chat_context(runtime, owner_username=None)
+    return context
 
 
 def _admin_light_chat_context(runtime: AgentRuntime, intent: str) -> dict[str, object]:
@@ -1817,6 +1825,34 @@ def _user_light_chat_context(runtime: AgentRuntime, intent: str, *, owner_userna
         }
     analytics = build_user_analytics(runtime, 30, owner_username=owner_username)
     return _analytics_chat_context(analytics)
+
+
+OPERATIONS_CONTEXT_TERMS = (
+    "alert",
+    "bin map",
+    "canh bao",
+    "collection",
+    "diem dat",
+    "issue",
+    "lich thu gom",
+    "nguoi phu trach",
+    "owner",
+    "schedule",
+    "station",
+    "su co",
+    "thu gom",
+    "tram",
+)
+
+
+def _message_needs_operations_context(message: str) -> bool:
+    folded = _fold_chat_text(message)
+    return any(term in folded for term in OPERATIONS_CONTEXT_TERMS)
+
+
+def _fold_chat_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFD", str(value or ""))
+    return "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn").casefold()
 
 
 def _operations_summary_context(

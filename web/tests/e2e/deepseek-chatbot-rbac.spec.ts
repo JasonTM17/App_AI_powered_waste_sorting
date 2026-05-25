@@ -64,8 +64,13 @@ test("Stitch pet chatbot is draggable, opens as popup, and handles missing DeepS
   await dock.getByRole("button", { name: /Gửi câu hỏi cho AI/i }).click();
   await expect(dock.locator(".stitch-chat-bubble.user")).toContainText("Giải thích Eco Score của tôi.");
   await expect(dock.locator(".stitch-chat-bubble.assistant")).toContainText(
-    /Chưa cấu hình DeepSeek|DEEPSEEK_API_KEY|gợi ý có sẵn|trợ lý trực tuyến/i
+    /trợ lý AI|gợi ý có sẵn|trợ lý trực tuyến|chưa trả lời được/i
   );
+  const assistantText = (await dock.locator(".stitch-chat-bubble.assistant").textContent()) ?? "";
+  expect(assistantText).not.toContain("DEEPSEEK_API_KEY");
+  expect(assistantText).not.toContain(".env.local");
+  expect(assistantText).not.toContain("sk-");
+  expect(assistantText.toLowerCase()).not.toContain("powershell");
 
   await page.keyboard.press("Escape");
   await expect(dock).toHaveCount(0);

@@ -7,6 +7,8 @@ import {
   Bot,
   CalendarCheck,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   FileDown,
   HeartPulse,
   History,
@@ -18,6 +20,8 @@ import {
   Users,
   type LucideIcon
 } from "lucide-react";
+
+import { useState } from "react";
 
 import { AccountControl } from "@/components/account-control";
 import { TrashSorterLogo } from "@/components/brand/trash-sorter-logo";
@@ -47,11 +51,12 @@ const userNav: Array<{ id: UserView; href: string; label: string; icon: LucideIc
 ];
 
 export function UserDashboardPanel(props: UserDashboardPanelProps) {
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const { agentError, analytics, auth, busy, chatAnswer, chatBusy, chatQuestion, notice, rangeDays, view } = props;
   const primaryNav = userNav.slice(0, 5);
   const secondaryNav = userNav.slice(5);
   return (
-    <div className="app-shell user-shell polished-user-shell">
+    <div className={`app-shell user-shell polished-user-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar user-sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -75,6 +80,13 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
             <span>{agentError ? "Cần tải lại dữ liệu" : "Đang đồng bộ"}</span>
           </div>
         </div>
+        <button
+          className="sidebar-toggle"
+          onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          title={isSidebarCollapsed ? "Mở rộng" : "Thu gọn"}
+        >
+          {isSidebarCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
+        </button>
       </aside>
 
       <main className="workspace user-workspace">
