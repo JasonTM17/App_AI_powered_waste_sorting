@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import ClassVar
 
@@ -129,7 +130,7 @@ class HistoryPage(QWidget):
         filter_grid.setVerticalSpacing(8)
         self.date_from = QDateEdit()
         self.date_from.setCalendarPopup(True)
-        self.date_from.setDate(_today_qdate())
+        self.date_from.setDate(_recent_start_qdate())
         self.date_to = QDateEdit()
         self.date_to.setCalendarPopup(True)
         self.date_to.setDate(_today_qdate())
@@ -213,7 +214,7 @@ class HistoryPage(QWidget):
         table_layout.addWidget(self.table)
         outer.addWidget(table_card, 1)
 
-        self.reload()
+        QTimer.singleShot(0, self.request_reload)
 
     def request_reload(self) -> None:
         """Debounce UI refresh requests from filters or image actions."""
@@ -242,19 +243,24 @@ class HistoryPage(QWidget):
                 until_qdate.year, until_qdate.month, until_qdate.day,
                 23, 59, 59, tzinfo=timezone.utc,
             )
-            rows = self.history.query(limit=500, cls_name=cls, since=since_dt)
-            rows = [
-                r for r in rows
-                if (ts := getattr(r, "ts", "")) and ts <= until_dt.isoformat()
-            ]
-            if ack and ack != "Tất cả":
-                rows = [r for r in rows if getattr(r, "ack_status", None) == ack]
-            class_counts = self.history.count_by_class()
-            today = datetime.now(timezone.utc)
-            hourly_counts = self.history.count_by_hour(today)
+            ack_filter = ack if ack and ack != "Tất cả" else None
+            rows = self.history.query(
+                limit=500,
+                cls_name=cls,
+                since=since_dt,
+                until=until_dt,
+                ack_status=ack_filter,
+            )
+            filter_counts = self.history.count_by_class(
+                since=since_dt,
+                until=until_dt,
+                ack_status=ack_filter,
+            )
+            class_counts = _count_rows_by_class(rows)
+            hourly_counts = _count_rows_by_hour(rows)
             self.model.set_rows(rows)
             self.empty_label.setVisible(not rows)
-            self._refresh_class_filter(class_counts)
+            self._refresh_class_filter(filter_counts)
             self._draw_bar(class_counts)
             self._draw_area(hourly_counts)
         finally:
@@ -332,11 +338,42 @@ class HistoryPage(QWidget):
         print(f"exported {n} rows to {path}")
 
 
+def _recent_start_qdate(days: int = 30):
+    from PySide6.QtCore import QDate
+
+    n = datetime.now() - timedelta(days=days)
+    return QDate(n.year, n.month, n.day)
+
+
 def _today_qdate():
     from PySide6.QtCore import QDate
 
     n = datetime.now()
     return QDate(n.year, n.month, n.day)
+
+
+def _count_rows_by_class(rows) -> dict[str, int]:
+    names = (
+        str(getattr(row, "cls_name", "") or "")
+        for row in rows
+        if getattr(row, "cls_name", "")
+    )
+    return dict(Counter(names))
+
+
+def _count_rows_by_hour(rows) -> dict[int, int]:
+    out: dict[int, int] = {h: 0 for h in range(24)}
+    for row in rows:
+        raw = str(getattr(row, "ts", "") or "")
+        try:
+            hour = datetime.fromisoformat(raw).hour
+        except ValueError:
+            try:
+                hour = int(raw[11:13])
+            except (ValueError, IndexError):
+                continue
+        out[hour] = out.get(hour, 0) + 1
+    return out
 
 
 def _short_axis_label(label: str) -> str:
