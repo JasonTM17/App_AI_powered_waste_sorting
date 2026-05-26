@@ -151,6 +151,7 @@ def audit_camera_anchor_readiness(queue_dir: Path, *, threshold: float = WHOLE_I
 def _mark_reviewed(meta: dict[str, Any], class_name: str, cls_id: int, bbox: list[int], threshold: float) -> None:
     meta["boxes"] = [{"cls_id": cls_id, "cls_name": class_name, "conf": 1.0, "xyxy": bbox}]
     meta["reviewed"] = True
+    meta["bbox_reviewed"] = True
     meta["needs_annotation"] = False
     meta["training_excluded"] = False
     meta["recognition_enabled"] = False
