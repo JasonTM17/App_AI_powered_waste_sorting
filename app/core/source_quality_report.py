@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PIL import Image, ImageStat
 
-from app.core.dataset_queue import is_trainable_meta
+from app.core.dataset_trust import classify_dataset_item
 from app.core.licensed_source_ingestion import (
     GENERATED_CAP_RATIO,
     REFERENCE_MIN_REVIEWED,
@@ -29,6 +29,7 @@ def build_source_quality_report(queue_dir: Path) -> dict[str, object]:
     class_stats: dict[str, Counter[str]] = defaultdict(Counter)
     sources: Counter[str] = Counter()
     issues: list[dict[str, object]] = []
+    issue_counts: Counter[str] = Counter()
     image_hashes: Counter[str] = Counter()
     duplicate_images = 0
     blurry_images = 0
@@ -37,13 +38,18 @@ def build_source_quality_report(queue_dir: Path) -> dict[str, object]:
         total_images += 1
         meta = _read_meta(image_path.with_suffix(".json"))
         sources[str(meta.get("source") or "unknown")] += 1
-        duplicate_images += _duplicate_increment(image_path, image_hashes)
+        duplicate_increment = _duplicate_increment(image_path, image_hashes)
+        duplicate_images += duplicate_increment
+        if duplicate_increment:
+            issue_counts["duplicate_image"] += duplicate_increment
         blur_score = _blur_score(image_path)
         if blur_score is not None and blur_score < BLUR_VARIANCE_MIN:
             blurry_images += 1
+            issue_counts["blurry_image"] += 1
             issues.append({"image": str(image_path), "reason": "blurry_image", "score": blur_score})
         item_issues = source_manifest_issues(meta)
         for reason in item_issues:
+            issue_counts[reason] += 1
             issues.append({"image": str(image_path), "reason": reason})
         _count_classes(meta, allowed, class_stats, item_issues)
     rows = [_class_report_row(name, class_stats[name]) for name in VIETNAM_TARGET_CLASSES]
@@ -56,6 +62,7 @@ def build_source_quality_report(queue_dir: Path) -> dict[str, object]:
         "invalid_source_images": len({issue["image"] for issue in issues if issue["reason"] != "blurry_image"}),
         "duplicate_images": duplicate_images,
         "blurry_images": blurry_images,
+        "issue_counts": dict(sorted(issue_counts.items())),
         "sources": dict(sources),
         "classes": rows,
         "issues": issues[:100],
@@ -68,8 +75,9 @@ def _count_classes(
     class_stats: dict[str, Counter[str]],
     item_issues: list[str],
 ) -> None:
-    trainable = is_trainable_meta(meta)
-    reviewed = meta.get("reviewed") is True
+    decision = classify_dataset_item(meta)
+    trainable = decision.trainable
+    reviewed = meta.get("reviewed") is True and meta.get("bbox_reviewed") is True
     holdout = meta.get("holdout") is True or str(meta.get("split") or "").lower() == "test"
     for class_name in _classes_from_meta(meta, allowed):
         row = class_stats[class_name]

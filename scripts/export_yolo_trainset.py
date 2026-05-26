@@ -60,9 +60,15 @@ def _export_queue(
     valid_ratio: float,
 ) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
+    input_class_names = dict(class_names)
+    class_names = _canonical_training_class_names()
     stats: dict[str, Any] = {
         "images": 0,
         "boxes": 0,
+        "class_count": len(class_names),
+        "class_map_source": "canonical_training_class_order_45",
+        "input_model_class_count": len(input_class_names),
+        "model_class_mismatches": _class_map_mismatches(input_class_names, class_names),
         "splits": {"train": 0, "valid": 0, "test": 0},
         "classes": {},
         "skipped_untrusted": 0,
@@ -75,12 +81,6 @@ def _export_queue(
     if not queue_dir.exists():
         _write_data_yaml(out_dir, class_names)
         return stats
-    class_names = _class_names_with_allowed_queue_extras(
-        queue_dir,
-        class_names,
-        allowed_names=TRAINING_CLASS_ORDER_45,
-    )
-    stats["class_count"] = len(class_names)
 
     for image_path in sorted(queue_dir.glob("*.jpg")):
         meta = _read_meta(image_path)
@@ -133,6 +133,27 @@ def _export_queue(
         stats["splits"][split] += 1
     _write_data_yaml(out_dir, class_names)
     return stats
+
+
+def _canonical_training_class_names() -> dict[int, str]:
+    return {idx: name for idx, name in enumerate(TRAINING_CLASS_ORDER_45)}
+
+
+def _class_map_mismatches(
+    input_class_names: dict[int, str],
+    canonical_class_names: dict[int, str],
+) -> list[dict[str, Any]]:
+    if not input_class_names:
+        return []
+    mismatches: list[dict[str, Any]] = []
+    for idx, expected in canonical_class_names.items():
+        actual = input_class_names.get(idx)
+        if actual is not None and actual != expected:
+            mismatches.append({"cls_id": idx, "model": actual, "canonical": expected})
+    for idx, actual in input_class_names.items():
+        if idx not in canonical_class_names:
+            mismatches.append({"cls_id": idx, "model": actual, "canonical": None})
+    return mismatches
 
 
 def _class_names_with_allowed_queue_extras(
