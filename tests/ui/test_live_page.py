@@ -38,11 +38,19 @@ def test_live_page_actuation_button_emits_and_syncs_state(qtbot):
     assert blocker.args == [True]
     assert page.btn_actuation.isChecked() is True
     assert page.btn_actuation.text() == "Dừng gửi Arduino"
+    assert page.dispatch_mode_label.text() == "Chờ UART"
+    assert "UART chưa kết nối" in page.warning.text()
+    assert page.warning.isVisibleTo(page) is True
+
+    page.set_uart_status(True, protocol="plain_group")
+    assert page.dispatch_mode_label.text() == "Gửi xuống Arduino"
+    assert "Format: huuco / voco / taiche" in page.dispatch_status_detail.text()
 
     page.set_actuation_test_mode(False)
     assert page.btn_actuation.isChecked() is False
-    assert page.btn_actuation.text() == "Cho phép gửi Arduino"
+    assert page.btn_actuation.text() == "Bật gửi Arduino"
     assert "Chỉ nhận diện" in page.dispatch_mode_label.text()
+    assert page.warning.isVisibleTo(page) is False
 
 
 def test_live_page_speaker_selector_emits_and_syncs_state(qtbot):
