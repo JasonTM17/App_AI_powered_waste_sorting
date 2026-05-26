@@ -91,6 +91,7 @@ def _write_item(queue: Path, name: str, cls_name: str, source: str) -> None:
     meta = {
         "source": source,
         "reviewed": True,
+        "bbox_reviewed": True,
         "needs_annotation": False,
         "canonical_class": cls_name,
         "source_type": "wikimedia",
