@@ -68,14 +68,14 @@ def select_single_usb_serial_port(ports: list[dict]) -> UartAutoSelectResult:
         )
     if not eligible:
         return UartAutoSelectResult(
-            message="UART OFF, khong gui xuong phan cung: chua thay cong USB/Arduino.",
+            message="UART OFF, không gửi xuống phần cứng: chưa thấy cổng USB/Arduino.",
             eligible_count=0,
         )
     names = ", ".join(str(p.get("device") or "") for p in eligible)
     return UartAutoSelectResult(
         message=(
-            "Co nhieu cong USB/Arduino "
-            f"({names}); vui long chon thu cong truoc khi gui xuong phan cung."
+            "Có nhiều cổng USB/Arduino "
+            f"({names}); vui lòng chọn thủ công trước khi gửi xuống phần cứng."
         ),
         eligible_count=len(eligible),
     )

@@ -524,11 +524,13 @@
   "speaker": {
     "enabled": false,
     "output_mode": "hardware",
+    "voice_gender": "female",
     "cooldown_seconds": 2.5
   },
   "unknown_fallback": {
     "enabled": true,
     "class_name": "Unknown object",
+    "dispatch_enabled": false,
     "command": "R",
     "bin_index": 2,
     "min_raw_confidence": 0.05,
@@ -543,9 +545,10 @@
     "empty_rearm_seconds": 2.0,
     "empty_rearm_frames": 10,
     "require_roi_for_dispatch": true,
+    "max_objects_per_dispatch": 1,
     "max_classes_per_dispatch": 1,
     "multi_class_warning_cooldown_seconds": 5.0,
-    "multi_class_warning_text": "Số lượng rác bạn đặt chỉ nên là 1 loại.",
+    "multi_class_warning_text": "Chỉ đặt 1 vật trong khay. Đang thấy nhiều loại/vật nên không phân loại.",
     "multi_class_warning_audio_track": 8
   },
   "manual_reference_recognition": {
