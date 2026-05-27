@@ -107,7 +107,10 @@ def test_settings_audio_output_defaults_to_hardware(qtbot):
     assert "Loa laptop" in page.audio_section.status_label.text()
     assert out.speaker.output_mode == "hardware"
     assert out.speaker.enabled is False
+    assert out.speaker.voice_gender == "female"
     assert not page.audio_section.speaker_cooldown.isEnabled()
+    assert page.audio_section.female_voice_button.isEnabled()
+    assert page.audio_section.male_voice_button.isEnabled()
 
 
 def test_settings_collect_saves_computer_speaker_output(qtbot):
@@ -115,15 +118,19 @@ def test_settings_collect_saves_computer_speaker_output(qtbot):
     page = SettingsPage(cfg)
     qtbot.addWidget(page)
     page.audio_section.set_output_mode("computer_speaker")
+    page.audio_section.set_voice_gender("male")
     page.audio_section.speaker_cooldown.setValue(4.5)
 
     out = page._collect()
 
     assert out.speaker.output_mode == "computer_speaker"
     assert out.speaker.enabled is True
+    assert out.speaker.voice_gender == "male"
     assert out.speaker.cooldown_seconds == 4.5
     assert page.audio_section.computer_button.isChecked() is True
     assert page.audio_section.speaker_cooldown.isEnabled()
+    assert page.audio_section.male_voice_button.isChecked() is True
+    assert page.audio_section.male_voice_button.isEnabled()
 
 
 def test_settings_voice_test_buttons_emit_requested_command(qtbot):
@@ -136,7 +143,30 @@ def test_settings_voice_test_buttons_emit_requested_command(qtbot):
 
     button.click()
 
-    assert captured == ["O"]
+    assert captured == ["sort_O"]
+
+
+def test_settings_voice_test_buttons_cover_all_audio_events(qtbot):
+    cfg = AppConfig()
+    page = SettingsPage(cfg)
+    qtbot.addWidget(page)
+    captured = []
+    page.test_voice_requested.connect(lambda command: captured.append(command))
+    labels = {
+        "Test khởi động": "startup",
+        "Test hữu cơ": "sort_O",
+        "Test vô cơ": "sort_R",
+        "Test tái chế": "sort_I",
+        "Test hữu cơ đầy": "bin_full_O",
+        "Test vô cơ đầy": "bin_full_R",
+        "Test tái chế đầy": "bin_full_I",
+        "Test cảnh báo": "multi_object_warning",
+    }
+
+    buttons = {btn.text(): btn for btn in page.audio_section.findChildren(QPushButton)}
+    for label, event_key in labels.items():
+        buttons[label].click()
+        assert captured[-1] == event_key
 
 
 def test_settings_hardware_test_button_emits_command(qtbot):
@@ -152,7 +182,7 @@ def test_settings_hardware_test_button_emits_command(qtbot):
     button = next(
         btn
         for btn in page.findChildren(QPushButton)
-        if btn.text() == "Test Huu co" and not _is_descendant(btn, page.audio_section)
+        if btn.text() == "Test Hữu cơ" and not _is_descendant(btn, page.audio_section)
     )
 
     button.click()
