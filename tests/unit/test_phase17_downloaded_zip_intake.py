@@ -160,6 +160,7 @@ def _write_item(queue: Path, name: str, cls_name: str, source: str, *, reviewed:
     meta = {
         "source": source,
         "reviewed": reviewed,
+        "bbox_reviewed": reviewed,
         "needs_annotation": False,
         "training_excluded": False,
         "canonical_class": cls_name,
