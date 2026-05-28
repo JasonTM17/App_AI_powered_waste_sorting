@@ -42,6 +42,7 @@ dataset_items = Table(
     Column("ts", String),
     Column("reviewed", Integer, nullable=False, default=0),
     Column("trusted", Integer, nullable=False, default=1),
+    Column("trust_state", String),
     Column("updated_at", String, nullable=False),
 )
 
@@ -74,6 +75,7 @@ class DatasetCatalog:
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_source ON dataset_items(source)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_cls ON dataset_items(cls_name)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_trusted ON dataset_items(trusted)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_trust_state ON dataset_items(trust_state)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_reviewed ON dataset_items(reviewed)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_boxes_item ON dataset_boxes(item_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_boxes_cls ON dataset_boxes(cls_name)"))
@@ -116,6 +118,7 @@ class DatasetCatalog:
         source: str | None = None,
         cls_name: str | None = None,
         trusted: bool | None = None,
+        trust_state: str | None = None,
         search: str | None = None,
     ) -> tuple[list[dict[str, Any]], int]:
         conditions = []
@@ -127,6 +130,8 @@ class DatasetCatalog:
             conditions.append(dataset_items.c.trusted == 1)
         elif trusted is False:
             conditions.append(dataset_items.c.trusted == 0)
+        if trust_state:
+            conditions.append(dataset_items.c.trust_state == trust_state)
         if search:
             pattern = f"%{search}%"
             conditions.append(
@@ -189,6 +194,15 @@ class DatasetCatalog:
             "needs_review": raw.get(0, 0),
         }
 
+    def count_by_trust_state(self) -> dict[str, int]:
+        stmt = select(dataset_items.c.trust_state, func.count()).group_by(dataset_items.c.trust_state)
+        with self._engine.begin() as conn:
+            return {
+                str(state): int(count)
+                for state, count in conn.execute(stmt).all()
+                if state is not None
+            }
+
     def count_boxes_total(self) -> int:
         stmt = select(func.count()).select_from(dataset_boxes)
         with self._engine.begin() as conn:
@@ -233,8 +247,6 @@ class DatasetCatalog:
 
     def _delete_missing_queue_items(self, conn: Connection, seen_item_ids: list[str]) -> None:
         if not seen_item_ids:
-            conn.execute(dataset_boxes.delete())
-            conn.execute(dataset_items.delete())
             return
         seen = set(seen_item_ids)
         existing = {
@@ -265,6 +277,7 @@ class DatasetCatalog:
             "ts": meta.get("ts"),
             "reviewed": 1 if _meta_reviewed(meta) else 0,
             "trusted": 1 if _meta_trusted(meta) else 0,
+            "trust_state": _meta_trust_state(meta),
             "updated_at": datetime.now().isoformat(),
         }
 
@@ -341,6 +354,8 @@ class DatasetCatalog:
             conn.execute(text("ALTER TABLE dataset_items ADD COLUMN reviewed INTEGER NOT NULL DEFAULT 0"))
         if "trusted" not in existing:
             conn.execute(text("ALTER TABLE dataset_items ADD COLUMN trusted INTEGER NOT NULL DEFAULT 1"))
+        if "trust_state" not in existing:
+            conn.execute(text("ALTER TABLE dataset_items ADD COLUMN trust_state VARCHAR(255)"))
 
 
 def _chunks(values: list[str], size: int) -> list[list[str]]:
@@ -352,12 +367,15 @@ def _meta_reviewed(meta: dict[str, Any]) -> bool:
 
 
 def _meta_trusted(meta: dict[str, Any]) -> bool:
-    source = str(meta.get("source") or "unknown")
-    if source in {"unknown", "untrusted"}:
-        return False
-    if source == "auto_low_conf" and not _meta_reviewed(meta):
-        return False
-    return not meta.get("unknown_labels")
+    from app.core.dataset_trust import classify_dataset_item
+
+    return classify_dataset_item(meta).trainable
+
+
+def _meta_trust_state(meta: dict[str, Any]) -> str:
+    from app.core.dataset_trust import classify_dataset_item
+
+    return classify_dataset_item(meta).state.value
 
 
 __all__ = ["DatasetCatalog", "dataset_boxes", "dataset_items"]

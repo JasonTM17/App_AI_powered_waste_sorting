@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
     QSlider,
     QSpinBox,
     QVBoxLayout,
@@ -92,7 +91,7 @@ class _CameraScan(QThread):
                             friendly = dshow_names[i]
                         lname = friendly.lower()
                         if "obs" in lname or "virtual" in lname:
-                            tag = "Camera ao"
+                            tag = "Camera ảo"
                             prio = 8
                         elif any(c.get("name") == friendly for c in externals):
                             tag = "USB"
@@ -175,11 +174,6 @@ class SettingsPage(QWidget):
         page.setContentsMargins(0, 0, 0, 0)
         page.setSpacing(0)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-
         body = QWidget()
         outer = QVBoxLayout(body)
         outer.setContentsMargins(24, 20, 24, 28)
@@ -212,18 +206,18 @@ class SettingsPage(QWidget):
         self.cam_mirror.setChecked(self._cfg.camera.mirror)
         self.cam_rotation = QComboBox()
         for label, value in [
-            ("0 deg - moc ban dau", 0),
-            ("90 deg phai", 90),
-            ("180 deg", 180),
-            ("90 deg trai", 270),
+            ("0 độ - mốc ban đầu", 0),
+            ("90 độ phải", 90),
+            ("180 độ", 180),
+            ("90 độ trái", 270),
         ]:
             self.cam_rotation.addItem(label, value)
         rotation_idx = self.cam_rotation.findData(self._cfg.camera.rotation)
         self.cam_rotation.setCurrentIndex(max(rotation_idx, 0))
         cam_form.addRow("Nguồn", self.cam_source)
         cam_form.addRow("Thiết bị", self.cam_hint)
-        cam_form.addRow("Width", self.cam_w)
-        cam_form.addRow("Height", self.cam_h)
+        cam_form.addRow("Chiều rộng", self.cam_w)
+        cam_form.addRow("Chiều cao", self.cam_h)
         cam_form.addRow("", self.cam_mirror)
         cam_form.addRow("Xoay", self.cam_rotation)
         cam_btns = QHBoxLayout()
@@ -248,8 +242,8 @@ class SettingsPage(QWidget):
         self._cam_scan: _CameraScan | None = None
         self._camera_scan_started = False
 
-        roi_box, roi_form = _section("ROI vung khay")
-        self.roi_enabled = QCheckBox("Bat ROI cho lenh do tu camera")
+        roi_box, roi_form = _section("ROI vùng khay")
+        self.roi_enabled = QCheckBox("Bật ROI cho lệnh dò từ camera")
         self.roi_enabled.setChecked(self._cfg.roi.enabled)
         self.roi_x = QSpinBox()
         self.roi_x.setRange(0, 7680)
@@ -264,17 +258,17 @@ class SettingsPage(QWidget):
         self.roi_h.setRange(0, 4320)
         self.roi_h.setValue(self._cfg.roi.height)
         self.roi_hint = QLabel(
-            "Bat ROI va dat vung khay truoc khi bat Actuation Test Mode. "
-            "Neu ROI tat hoac rong, camera van hien box nhung khong gui UART."
+            "Bật ROI và đặt vùng khay trước khi bật chế độ test cơ cấu. "
+            "Nếu ROI tắt hoặc rỗng, camera vẫn hiện box nhưng không gửi UART."
         )
         self.roi_hint.setWordWrap(True)
         self.roi_hint.setObjectName("muted")
         roi_form.addRow("", self.roi_enabled)
         roi_form.addRow("X", self.roi_x)
         roi_form.addRow("Y", self.roi_y)
-        roi_form.addRow("Width", self.roi_w)
-        roi_form.addRow("Height", self.roi_h)
-        roi_form.addRow("Ghi chu", self.roi_hint)
+        roi_form.addRow("Chiều rộng", self.roi_w)
+        roi_form.addRow("Chiều cao", self.roi_h)
+        roi_form.addRow("Ghi chú", self.roi_hint)
         outer.addWidget(roi_box)
 
         # model
@@ -335,14 +329,14 @@ class SettingsPage(QWidget):
         self.uart_baud = QComboBox()
         self.uart_baud.addItems(["9600", "19200", "38400", "57600", "115200"])
         self.uart_baud.setCurrentText(str(self._cfg.uart.baud))
-        self.uart_auto = QCheckBox("Auto reconnect")
+        self.uart_auto = QCheckBox("Tự kết nối lại")
         self.uart_auto.setChecked(self._cfg.uart.auto_reconnect)
         self.uart_timeout = QSpinBox()
         self.uart_timeout.setRange(50, 5000)
         self.uart_timeout.setSuffix(" ms")
         self.uart_timeout.setValue(self._cfg.uart.ack_timeout_ms)
         self.uart_protocol = QComboBox()
-        self.uart_protocol.addItem("Block: huuco / voco / taiche", "plain_group")
+        self.uart_protocol.addItem("Block: hữu cơ / vô cơ / tái chế", "plain_group")
         self.uart_protocol.addItem("Firmware: SORT:O/R/I", "sort_line")
         idx_protocol = self.uart_protocol.findData(self._cfg.uart.protocol)
         self.uart_protocol.setCurrentIndex(idx_protocol if idx_protocol >= 0 else 0)
@@ -377,7 +371,7 @@ class SettingsPage(QWidget):
         # populate port list immediately on first show so user sees real ports
         QTimer.singleShot(0, self._scan_ports)
 
-        hw_box, hw_form = _section("Mapping phan cung")
+        hw_box, hw_form = _section("Mapping phần cứng")
         hw_form.addRow("Profile", QLabel(PROFILE_ID))
         hw_form.addRow(
             "GD5800",
@@ -387,7 +381,7 @@ class SettingsPage(QWidget):
         hw_form.addRow("Servo wait", QLabel(wait))
         for pins in PROXIMITY_SENSORS:
             hw_form.addRow(
-                f"Tiem can {pins.label}",
+                f"Tiệm cận {pins.label}",
                 QLabel(f"pin {pins.pin}, active {pins.active_level}, track {pins.gd5800_track}"),
             )
         for route in ROUTES:
@@ -395,14 +389,15 @@ class SettingsPage(QWidget):
             positions = ", ".join(
                 f"{pin}={angle}" for pin, angle in route.servo_positions.items()
             )
+            display_label = _route_display_label(route.label)
             row.addWidget(
                 QLabel(
-                    f"{route.label}: {route.command} -> {route.serial_payload}\\n -> "
-                    f"thung {route.bin_index}, servo {route.servo_pin} ({positions}), "
+                    f"{display_label}: {route.command} -> {route.serial_payload}\\n -> "
+                    f"thùng {route.bin_index}, servo {route.servo_pin} ({positions}), "
                     f"track {route.gd5800_track}"
                 )
             )
-            btn = QPushButton(f"Test {route.label}")
+            btn = QPushButton(f"Test {display_label}")
             btn.setObjectName("secondary")
             btn.clicked.connect(
                 lambda _checked=False, cmd=route.command: self.test_hardware_requested.emit(
@@ -416,12 +411,12 @@ class SettingsPage(QWidget):
             row_w = QWidget()
             row_w.setLayout(row)
             hw_form.addRow("", row_w)
-        self.uart_test_result = QLabel("Chua test phan cung.")
+        self.uart_test_result = QLabel("Chưa test phần cứng.")
         self.uart_test_result.setWordWrap(True)
         self.uart_test_result.setObjectName("muted")
-        hw_form.addRow("Ket qua", self.uart_test_result)
-        self.actuation_mode = QCheckBox("Bat Actuation Test Mode")
-        self.actuation_mode_hint = QLabel("Dang tat. Bat truoc khi dua mau rac vao camera de theo doi luong do.")
+        hw_form.addRow("Kết quả", self.uart_test_result)
+        self.actuation_mode = QCheckBox("Bật chế độ test cơ cấu")
+        self.actuation_mode_hint = QLabel("Đang tắt. Bật trước khi đưa mẫu rác vào camera để theo dõi luồng dò.")
         self.actuation_mode_hint.setWordWrap(True)
         self.actuation_mode_hint.setObjectName("muted")
         self.actuation_mode.toggled.connect(self._on_actuation_mode_toggled)
@@ -429,7 +424,7 @@ class SettingsPage(QWidget):
         hw_form.addRow("Camera E2E", self.actuation_mode_hint)
         outer.addWidget(hw_box)
 
-        audio_box, audio_form = _section("Am thanh")
+        audio_box, audio_form = _section("Âm thanh")
         self.audio_section = AudioSettingsSection(self._cfg)
         self.audio_section.voice_test_requested.connect(self.test_voice_requested.emit)
         self.speaker_cooldown = self.audio_section.speaker_cooldown
@@ -468,8 +463,7 @@ class SettingsPage(QWidget):
         save_row.addWidget(btn_save)
         outer.addLayout(save_row)
 
-        scroll.setWidget(body)
-        page.addWidget(scroll)
+        page.addWidget(body)
 
     def showEvent(self, event):  # noqa: N802
         super().showEvent(event)
@@ -619,6 +613,7 @@ class SettingsPage(QWidget):
             audio_output_mode = "hardware"
         cfg.speaker.output_mode = audio_output_mode
         cfg.speaker.enabled = audio_output_mode == "computer_speaker"
+        cfg.speaker.voice_gender = self.audio_section.voice_gender()
         cfg.speaker.cooldown_seconds = float(self.speaker_cooldown.value())
         cfg.theme = self.theme_select.currentText()
         cfg.language = self.lang_select.currentText()
@@ -630,7 +625,7 @@ class SettingsPage(QWidget):
         self.config_saved.emit(self._collect())
 
     def set_uart_test_result(self, ok: bool, message: str) -> None:
-        prefix = "OK" if ok else "LOI"
+        prefix = "OK" if ok else "LỖI"
         self.uart_test_result.setText(f"{prefix}: {message}")
 
     def set_actuation_test_mode(self, enabled: bool) -> None:
@@ -645,12 +640,20 @@ class SettingsPage(QWidget):
 
     def _set_actuation_mode_hint(self, enabled: bool) -> None:
         text = (
-            "Dang bat. Dat lan luot Organic, Plastic bottle/Paper, "
-            "Disposable tableware/Ceramic de xem class -> bin -> payload -> ACK."
+            "Đang bật. Đặt lần lượt Organic, Plastic bottle/Paper, "
+            "Disposable tableware/Ceramic để xem class -> thùng -> payload -> ACK."
             if enabled
-            else "Dang tat. Bat truoc khi dua mau rac vao camera de theo doi luong do."
+            else "Đang tắt. Bật trước khi đưa mẫu rác vào camera để theo dõi luồng dò."
         )
         self.actuation_mode_hint.setText(text)
 
     def _reset(self):
         self._cfg = self._cfg.model_copy(deep=True)
+
+
+def _route_display_label(label: str) -> str:
+    return {
+        "Huu co": "Hữu cơ",
+        "Vo co": "Vô cơ",
+        "Tai che": "Tái chế",
+    }.get(label, label)
