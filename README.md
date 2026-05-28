@@ -67,6 +67,18 @@ python -m uv run python scripts/manage_auth_accounts.py set-password owner
 python -m uv run python scripts/manage_auth_accounts.py create viewer --role user --force-change
 ```
 
+Quick account notes:
+
+- `admin` / `admin-pass-123` - current local admin account after password change
+- `user` / `user-pass-123` - current local user account after password change
+- `admin` / `admin123` - initial local dev default admin before forced password change
+- `user` / `user123` - initial local dev default user before forced password change
+- `owner` - bootstrap/admin account for production-style setup, set password locally
+- `viewer` - bootstrap/user account for production-style setup, set password locally
+
+Passwords for non-default accounts are intentionally not stored in this repo.
+Reset or rotate them locally with `scripts/manage_auth_accounts.py set-password <username>`.
+
 Auth configuration:
 
 - `TRASH_SORTER_AUTH_DATABASE_URL`: preferred PostgreSQL URL for account/session storage.
@@ -97,19 +109,23 @@ User data ownership:
 
 Local operations map:
 
-- The local agent creates `%APPDATA%/TrashSorter/operations.db` for role-safe
-  operations data: devices, bin stations, child bins, schedules, collection
-  events, alerts, and device issues.
+- The local agent stores role-safe operations data in the shared PostgreSQL DB
+  when `TRASH_SORTER_OPERATIONS_DATABASE_URL`, `TRASH_SORTER_AUTH_DATABASE_URL`,
+  or `DATABASE_URL` is configured. If no URL is configured, it falls back to
+  `%APPDATA%/TrashSorter/operations.db`.
 - Startup seeds 10 editable Thu Duc candidate stations. Each station creates
   three child bins: `O/bin1`, `R/bin2`, and `I/bin3`. Seed coordinates are
   starter data; `coordinate_verified=false` until Admin verifies them on the map.
+- The first two seed stations are assigned to `device.owner_username` or the
+  local default user `user`; user sessions only see stations assigned to their
+  username. Admin still sees the full map.
+- UART bin fullness messages such as `BIN:2:95` update the matching child bin,
+  then web alerts derive warning/full states from the persisted DB value.
 - Admin APIs manage roles, devices, bin map, alerts, collection schedules, model,
   audio, and reports. User APIs are scoped to map, alerts, schedule, mark-collected,
   device issue reporting, own history, and own account.
-- Supabase schema/RLS/realtime is intentionally not implemented in this phase.
-  Keep local core stable first, then connect Supabase after the app and tests pass.
-  The handoff contract for later cloud work is in
-  `docs/operations-map-local-first.md`.
+- Supabase Realtime push notifications are still a later enhancement; the current
+  web UI refreshes/polls the local agent APIs.
 
 Full Stitch User screens:
 
@@ -147,7 +163,7 @@ DeepSeek AI chatbot/advisor:
 - Model is fixed to `deepseek-v4-flash` in this phase. Do not use
   `DEEPSEEK_MODEL` to switch runtime models; keeping one model avoids V4
   thinking-mode/empty-content drift.
-- Optional: set `DEEPSEEK_TIMEOUT_SECONDS`; default is `30`.
+- Optional: set `DEEPSEEK_TIMEOUT_SECONDS`; default is `75`.
 - This is domain-trained through backend prompt profiles plus local EcoSort
   Knowledge/RAG (`trash_sorter_user`, `trash_sorter_admin`), not hosted
   fine-tuning. Seed knowledge lives in
@@ -159,6 +175,8 @@ DeepSeek AI chatbot/advisor:
 - The chatbot sends only aggregate counts, chart summaries, scoped history DTOs,
   device status, and sanitized log counts. It does not send camera frames, dataset
   images, file paths, raw logs, passwords, hashes, salts, or session tokens.
+- Map questions use a sanitized `operations_map` context. Admin sees all active
+  stations/bins/alerts; User sees only stations assigned to that account.
 - Advice is general wellness/lifestyle guidance, not medical diagnosis.
 
 ## Quy Tắc Camera Và UART
@@ -179,12 +197,15 @@ Model vẫn nhận diện 42 class chi tiết, nhưng app điều khiển máy t
 
 Khi pipeline emit một object mới, app lưu lịch sử, gửi lệnh UART tương ứng và phát loa theo nhóm rác. Loa có cooldown mặc định `2.5s` để không đọc lặp liên tục khi camera thấy cùng một loại rác.
 
-Nếu chọn `Loa máy tính`, app phát MP3 từ `assets/audio/gd5800/Giọng nữ` ngay lúc lệnh UART được chấp nhận và chuẩn bị gửi, không chờ ACK. Ánh xạ hiện tại:
+Mặc định app dùng `Loa phần cứng` khi có OPEN-SMART/GD5800. Nếu Admin chọn
+`Loa máy tính`, app phát MP3 từ voice pack đang chọn
+`assets/audio/gd5800/Giọng nữ` hoặc `assets/audio/gd5800/Giọng nam` ngay lúc
+lệnh UART được chấp nhận và chuẩn bị gửi, không chờ ACK. Ánh xạ hiện tại:
 
-- `O` -> `Phân loại hữu cơ.mp3`
-- `R` -> `Phân loại Vô cơ.mp3`
-- `I` -> `Phân loại rác tái chế.mp3`
-- cảnh báo nhiều object -> `Xin chỉ bỏ 1 loại rác thôi.mp3`
+- `O` -> voice pack hữu cơ.
+- `R` -> voice pack vô cơ.
+- `I` -> voice pack tái chế.
+- Cảnh báo nhiều object -> voice pack "chỉ 1 loại rác" hoặc GD5800 track `8`.
 
 ## Data Và Train
 
@@ -378,9 +399,9 @@ The current real hardware profile follows the user-provided block diagram and re
 
 - Wait/upright position after every dump: D6=90, D7=85.
 - Audio output defaults to the OPEN-SMART hardware speaker. Admin can switch
-  Settings -> Am thanh / Loa phan loai to `Loa may tinh` for bundled MP3
-  playback from `assets/audio/gd5800/Giọng nữ`. PC speech fires at UART send
-  time, not after ACK.
+  Settings -> Am thanh / Loa phan loai to `Loa may tinh` and choose `Giong nu`
+  or `Giong nam` for bundled MP3 playback. PC speech fires at UART send time,
+  not after ACK.
 - Startup audio: OPEN-SMART track `1`.
 - OPEN-SMART Serial MP3 Player A wiring after real probe: Arduino TX `D5` to MP3 RX, Arduino RX `D4` from MP3 TX (`MP3:MODE:REVERSE`, `MP3RX` confirmed). Original D4/D5 primary mode remains available for diagnostics.
 - Audio protocol: select TF `7E 03 35 01 EF`, set volume `7E 03 31 <volume> EF`, play track `7E 04 41 00 <track> EF`.

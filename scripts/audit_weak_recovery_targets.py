@@ -62,7 +62,7 @@ def _build_report(queue_dir: Path, threshold: float) -> dict[str, Any]:
         if reason:
             rejection_reasons[reason] += 1
         holdout = meta.get("holdout") is True or str(meta.get("split") or "").lower() == "test"
-        trainable_reviewed = is_trainable_meta(meta) and meta.get("reviewed") is True
+        trainable_reviewed = is_trainable_meta(meta) and meta.get("reviewed") is True and meta.get("bbox_reviewed") is True
         for class_name, coverage in bbox_coverages(meta, image_path):
             if class_name not in PHASE15_FOCUS_CLASSES:
                 continue
@@ -154,6 +154,7 @@ def _apply_repair(meta: dict[str, Any], bbox: list[int], class_name: str) -> Non
             box["cls_name"] = class_name
             box["conf"] = 1.0
     meta["reviewed"] = True
+    meta["bbox_reviewed"] = True
     meta["needs_annotation"] = False
     meta["training_excluded"] = False
     meta["recognition_enabled"] = True
