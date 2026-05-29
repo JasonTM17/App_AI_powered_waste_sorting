@@ -3,11 +3,11 @@ import json
 import numpy as np
 from PIL import Image
 
-from app.core.dataset_queue import import_manual_camera_frame
+from app.core.dataset_queue import import_manual_camera_frame, save_reviewed_camera_annotation
 from scripts.export_yolo_trainset import _export_queue
 
 
-def test_export_queue_skips_unknown_label_boxes(tmp_path):
+def test_export_queue_blocks_item_with_unknown_label_boxes(tmp_path):
     queue = tmp_path / "queue"
     out = tmp_path / "out"
     queue.mkdir()
@@ -18,7 +18,7 @@ def test_export_queue_skips_unknown_label_boxes(tmp_path):
             {
                 "source": "manual_import",
                 "boxes": [
-                    {"cls_id": 0, "cls_name": "Known", "xyxy": [10, 10, 50, 50]},
+                    {"cls_id": 18, "cls_name": "Paper", "xyxy": [10, 10, 50, 50]},
                     {"cls_id": 99, "cls_name": "Mystery", "xyxy": [1, 1, 10, 10]},
                 ],
             }
@@ -29,15 +29,14 @@ def test_export_queue_skips_unknown_label_boxes(tmp_path):
     stats = _export_queue(
         queue,
         out,
-        {0: "Known"},
+        {18: "Paper"},
         train_ratio=1.0,
         valid_ratio=0.0,
     )
 
-    label = (out / "labels" / "train" / "sample.txt").read_text(encoding="utf-8")
-    assert label.startswith("0 ")
-    assert "99 " not in label
-    assert stats["skipped_unknown_boxes"] == 1
+    assert stats["images"] == 0
+    assert stats["skipped_untrusted"] == 1
+    assert not (out / "labels" / "train" / "sample.txt").exists()
 
 
 def test_export_queue_remaps_known_name_to_model_class_id(tmp_path):
@@ -69,6 +68,7 @@ def test_export_queue_remaps_known_name_to_model_class_id(tmp_path):
     label = (out / "labels" / "train" / "sample.txt").read_text(encoding="utf-8")
     assert label.startswith("19 ")
     assert stats["remapped_boxes"] == 1
+    assert stats["class_count"] == 45
 
 
 def test_export_queue_appends_allowed_pen_class(tmp_path):
@@ -99,8 +99,9 @@ def test_export_queue_appends_allowed_pen_class(tmp_path):
 
     label = (out / "labels" / "train" / "pen.txt").read_text(encoding="utf-8")
     yaml = (out / "data.yaml").read_text(encoding="utf-8")
-    assert label.startswith("1 ")
-    assert "1: Pen" in yaml
+    assert label.startswith("42 ")
+    assert "42: Pen" in yaml
+    assert "nc: 45" in yaml
     assert stats["classes"]["Pen"] == 1
     assert stats["remapped_boxes"] == 1
 
@@ -133,8 +134,9 @@ def test_export_queue_maps_common_vietnam_waste_alias_into_fixed_taxonomy(tmp_pa
 
     label = (out / "labels" / "train" / "foam_box.txt").read_text(encoding="utf-8")
     yaml = (out / "data.yaml").read_text(encoding="utf-8")
-    assert label.startswith("1 ")
-    assert "1: Disposable tableware" in yaml
+    assert label.startswith("8 ")
+    assert "8: Disposable tableware" in yaml
+    assert "nc: 45" in yaml
     assert stats["classes"]["Disposable tableware"] == 1
 
 
@@ -169,4 +171,85 @@ def test_manual_camera_capture_requires_review_before_export(tmp_path):
         valid_ratio=0.0,
     )
 
+    assert stats["images"] == 0
+    assert stats["skipped_untrusted"] == 1
+
+    meta["bbox_reviewed"] = True
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    stats = _export_queue(
+        queue,
+        out,
+        {0: "Known"},
+        train_ratio=1.0,
+        valid_ratio=0.0,
+    )
+
     assert stats["classes"]["Pen"] == 1
+
+
+def test_reviewed_camera_annotation_exports_textile_with_fixed_class_id(tmp_path):
+    queue = tmp_path / "queue"
+    out = tmp_path / "out"
+    frame = np.zeros((64, 80, 3), dtype=np.uint8)
+    img_path = save_reviewed_camera_annotation(
+        frame,
+        queue,
+        "miếng vải",
+        0,
+        [10, 8, 70, 52],
+    )
+
+    meta = json.loads(img_path.with_suffix(".json").read_text(encoding="utf-8"))
+    assert meta["reviewed"] is True
+    assert meta["bbox_reviewed"] is True
+    assert meta["needs_annotation"] is False
+    assert meta["boxes"][0]["cls_name"] == "Textile"
+    assert meta["boxes"][0]["cls_id"] == 37
+
+    stats = _export_queue(
+        queue,
+        out,
+        {0: "Known"},
+        train_ratio=1.0,
+        valid_ratio=0.0,
+    )
+
+    label = (out / "labels" / "train" / f"{img_path.stem}.txt").read_text(encoding="utf-8")
+    yaml = (out / "data.yaml").read_text(encoding="utf-8")
+    assert label.startswith("37 ")
+    assert "37: Textile" in yaml
+    assert "nc: 45" in yaml
+    assert stats["classes"]["Textile"] == 1
+
+
+def test_export_queue_skips_holdout_items(tmp_path):
+    queue = tmp_path / "queue"
+    out = tmp_path / "out"
+    queue.mkdir()
+    image_path = queue / "holdout.jpg"
+    Image.new("RGB", (100, 100), "white").save(image_path)
+    image_path.with_suffix(".json").write_text(
+        json.dumps(
+            {
+                "source": "manual_import",
+                "holdout": True,
+                "split": "test",
+                "boxes": [
+                    {"cls_id": 18, "cls_name": "Paper", "xyxy": [10, 10, 50, 50]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    stats = _export_queue(
+        queue,
+        out,
+        {18: "Paper"},
+        train_ratio=1.0,
+        valid_ratio=0.0,
+    )
+
+    assert stats["images"] == 0
+    assert stats["skipped_untrusted"] == 1

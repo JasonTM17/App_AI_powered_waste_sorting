@@ -67,8 +67,30 @@ def test_admin_and_user_operations_routes_work_and_stay_scoped(monkeypatch, tmp_
 
         bin_map = client.get("/api/user/bin-map", headers=user_headers)
         assert bin_map.status_code == 200
-        assert bin_map.json()["total"] == 10
-        assert len(bin_map.json()["stations"]) == 10
+        assert bin_map.json()["total"] == 2
+        assert {station["station_id"] for station in bin_map.json()["stations"]} == {"td-bin-001", "td-bin-002"}
+
+        forbidden_issue = client.post(
+            "/api/user/device-issues",
+            headers=user_headers,
+            json={
+                "station_id": "td-bin-003",
+                "bin_id": "td-bin-003-R",
+                "device_id": "dev-thu-duc-001",
+                "issue_type": "camera_problem",
+                "severity": "warning",
+                "description": "should not be allowed for unassigned station",
+            },
+        )
+        assert forbidden_issue.status_code == 404
+
+        runtime.update_bin_fullness(2, 95)
+        full_alerts = client.get("/api/user/alerts?include_resolved=false", headers=user_headers)
+        assert full_alerts.status_code == 200
+        assert any(
+            item["source"] == "derived_fullness" and item["severity"] == "danger"
+            for item in full_alerts.json()["alerts"]
+        )
 
         schedules = client.get("/api/user/collection-schedule", headers=user_headers)
         assert schedules.status_code == 200

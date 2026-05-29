@@ -5,12 +5,12 @@ from __future__ import annotations
 from app.core.config import normalize_multi_class_warning_text
 
 MULTI_OBJECT_DISPATCH_STATUS = "multiple waste types"
-TEST_OFF_ACK_TEXT = "TEST OFF, khong gui xuong phan cung"
-UART_OFF_ACK_TEXT = "UART OFF, khong gui xuong phan cung"
+TEST_OFF_ACK_TEXT = "TEST OFF, không gửi xuống phần cứng"
+UART_OFF_ACK_TEXT = "UART OFF, không gửi xuống phần cứng"
 
 
 def multi_object_warning_text(dispatch_status: str, warning_text: str) -> str:
-    if str(dispatch_status or "").strip() == MULTI_OBJECT_DISPATCH_STATUS:
+    if str(dispatch_status or "").strip().startswith(MULTI_OBJECT_DISPATCH_STATUS):
         return normalize_multi_class_warning_text(warning_text)
     return ""
 
