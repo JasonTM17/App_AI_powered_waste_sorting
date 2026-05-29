@@ -39,6 +39,7 @@ from app.agent.ai_chat_service import (
     DEFAULT_ADMIN_PROFILE,
     DEFAULT_USER_PROFILE,
     build_chat_response,
+    local_chat_intent,
 )
 from app.agent.auth import (
     AuthContext,
@@ -462,21 +463,27 @@ def create_app(
         quota = _consume_user_chat_quota(context)
         if quota and quota.exceeded:
             return _user_chat_quota_response(quota)
-        analytics = build_user_analytics(rt, 30, **_owner_scope(context))
-        chat_context = _analytics_chat_context(analytics)
+        intent = local_chat_intent(payload.message)
         owner_username = _operations_owner_username(context)
-        chat_context["operations"] = _operations_summary_context(rt, owner_username=owner_username)
-        chat_context["operations_map"] = _operations_map_chat_context(rt, owner_username=owner_username)
+        if intent:
+            chat_context = _user_light_chat_context(rt, intent, owner_username=owner_username)
+            knowledge_snippets = []
+        else:
+            analytics = build_user_analytics(rt, 30, **_owner_scope(context))
+            chat_context = _analytics_chat_context(analytics)
+            chat_context["operations"] = _operations_summary_context(rt, owner_username=owner_username)
+            chat_context["operations_map"] = _operations_map_chat_context(rt, owner_username=owner_username)
+            knowledge_snippets = retrieve_knowledge_snippets(
+                role="user",
+                question=payload.message,
+                context=chat_context,
+            )
         response = build_chat_response(
             role="user",
             message=payload.message,
             context=chat_context,
             profile=DEFAULT_USER_PROFILE,
-            knowledge_snippets=retrieve_knowledge_snippets(
-                role="user",
-                question=payload.message,
-                context=chat_context,
-            ),
+            knowledge_snippets=knowledge_snippets,
             conversation_style="Ngắn gọn, thân thiện, giải thích bằng dữ liệu trong dashboard User.",
         )
         return _attach_quota(response, quota)
@@ -788,17 +795,19 @@ def create_app(
 
     @router.post("/admin/chat", response_model=AiChatResponse)
     def admin_chat(payload: AiChatRequest) -> AiChatResponse:
-        chat_context = _admin_chat_context(rt)
+        intent = local_chat_intent(payload.message)
+        chat_context = _admin_light_chat_context(rt, intent) if intent else _admin_chat_context(rt)
+        knowledge_snippets = [] if intent else retrieve_knowledge_snippets(
+            role="admin",
+            question=payload.message,
+            context=chat_context,
+        )
         return build_chat_response(
             role="admin",
             message=payload.message,
             context=chat_context,
             profile=DEFAULT_ADMIN_PROFILE,
-            knowledge_snippets=retrieve_knowledge_snippets(
-                role="admin",
-                question=payload.message,
-                context=chat_context,
-            ),
+            knowledge_snippets=knowledge_snippets,
             conversation_style="Ưu tiên checklist vận hành, nguyên nhân có thể kiểm chứng, và bước tiếp theo an toàn.",
         )
 
@@ -1771,6 +1780,43 @@ def _admin_chat_context(runtime: AgentRuntime) -> dict[str, object]:
         },
         "logs": _log_summary(),
     }
+
+
+def _admin_light_chat_context(runtime: AgentRuntime, intent: str) -> dict[str, object]:
+    if intent == "runtime":
+        status = runtime.status(include_devices=False)
+        return {
+            "scope": "admin_runtime_snapshot",
+            "runtime": {
+                "camera": _device_state_context(status.camera),
+                "uart": _device_state_context(status.uart),
+                "model": _device_state_context(status.model),
+                "three_bin_classifier": _device_state_context(status.three_bin_classifier),
+                "fps": status.fps,
+                "latency_ms": status.latency_ms,
+            },
+        }
+    if intent == "map":
+        return {
+            "scope": "admin_operations_map",
+            "operations_map": _operations_map_chat_context(runtime, owner_username=None),
+        }
+    return _admin_chat_context(runtime)
+
+
+def _user_light_chat_context(runtime: AgentRuntime, intent: str, *, owner_username: str | None) -> dict[str, object]:
+    if intent == "map":
+        return {
+            "scope": "user_operations_map",
+            "operations_map": _operations_map_chat_context(runtime, owner_username=owner_username),
+        }
+    if intent == "runtime":
+        return {
+            "scope": "user_operations_status",
+            "operations": _operations_summary_context(runtime, owner_username=owner_username),
+        }
+    analytics = build_user_analytics(runtime, 30, owner_username=owner_username)
+    return _analytics_chat_context(analytics)
 
 
 def _operations_summary_context(

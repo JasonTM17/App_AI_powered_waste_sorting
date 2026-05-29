@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 
 from app.core.dataset_catalog import DatasetCatalog
-from app.core.dataset_queue import is_trainable_meta
+from app.core.dataset_queue import import_manual_phone_images, is_trainable_meta
 from app.ui.pages.capture import (
     delete_queue_items,
     export_yolo_dataset,
@@ -24,6 +24,7 @@ def _make_frame(qdir: Path, uid: str, boxes, *, reviewed=True):
         "ts": "2026-05-21T10:00:00",
         "source": "auto_low_conf",
         "reviewed": reviewed,
+        "bbox_reviewed": reviewed,
         "boxes": boxes,
     }
     (qdir / f"{uid}.json").write_text(json.dumps(meta), encoding="utf-8")
@@ -43,18 +44,18 @@ def test_export_writes_data_yaml_and_labels(tmp_path):
         qdir,
         "def",
         [
-            {"cls_id": 1, "cls_name": "plastic", "conf": 0.4, "xyxy": [10, 10, 50, 50]},
+            {"cls_id": 24, "cls_name": "Plastic bottle", "conf": 0.4, "xyxy": [10, 10, 50, 50]},
         ],
     )
     n = export_yolo_dataset(qdir, out)
     assert n == 2
     assert (out / "data.yaml").exists()
     yaml = (out / "data.yaml").read_text(encoding="utf-8")
-    assert "paper" in yaml and "plastic" in yaml
+    assert "Paper" in yaml and "Plastic bottle" in yaml
     assert (out / "images" / "abc.jpg").exists()
     label_text = (out / "labels" / "abc.txt").read_text(encoding="utf-8")
     parts = label_text.strip().split()
-    assert parts[0] == "0"
+    assert parts[0] == "18"
     cx, _cy, _w, _h = (float(x) for x in parts[1:])
     assert abs(cx - 0.234375) < 0.01
     assert 0 <= cx <= 1
@@ -91,6 +92,32 @@ def test_manual_import_creates_full_image_box(tmp_path):
         catalog.close()
 
 
+def test_manual_phone_import_starts_pending_review(tmp_path):
+    src = tmp_path / "phone.png"
+    img = np.full((24, 32, 3), 120, dtype=np.uint8)
+    cv2.imwrite(str(src), img)
+
+    qdir = tmp_path / "queue"
+    catalog_path = tmp_path / "dataset.db"
+    n = import_manual_phone_images([str(src)], qdir, "Paper", 18, catalog_path=catalog_path)
+
+    assert n == 1
+    jpgs = list(qdir.glob("manual_phone_*.jpg"))
+    assert len(jpgs) == 1
+    meta = json.loads(jpgs[0].with_suffix(".json").read_text(encoding="utf-8"))
+    assert meta["source"] == "manual_phone_import"
+    assert meta["reviewed"] is False
+    assert meta["bbox_reviewed"] is False
+    assert meta["needs_annotation"] is True
+    assert meta["recognition_enabled"] is False
+    catalog = DatasetCatalog(catalog_path)
+    try:
+        assert catalog.count_total() == 1
+        assert catalog.count_by_source() == {"manual_phone_import": 1}
+    finally:
+        catalog.close()
+
+
 def test_queue_summary_relabel_and_delete(tmp_path):
     qdir = tmp_path / "queue"
     _make_frame(
@@ -103,6 +130,8 @@ def test_queue_summary_relabel_and_delete(tmp_path):
     assert summary["images"] == 1
     assert summary["boxes"] == 1
     assert summary["classes"]["Paper"] == 1
+    assert summary["trainable_classes"]["Paper"] == 1
+    assert summary["blocked_classes"]["Paper"] == 0
 
     img = qdir / "abc.jpg"
     catalog_path = tmp_path / "dataset.db"
@@ -157,6 +186,9 @@ def test_export_skips_auto_low_conf_until_reviewed(tmp_path):
     assert export_yolo_dataset(qdir, tmp_path / "out") == 0
     meta = json.loads((qdir / "raw_auto.json").read_text(encoding="utf-8"))
     assert is_trainable_meta(meta) is False
+    summary = summarize_queue(qdir)
+    assert summary["trainable_classes"]["Paper"] == 0
+    assert summary["blocked_classes"]["Paper"] == 1
 
 
 def test_training_excluded_meta_is_not_trainable(tmp_path):
@@ -175,7 +207,31 @@ def test_training_excluded_meta_is_not_trainable(tmp_path):
     assert export_yolo_dataset(qdir, tmp_path / "out_excluded") == 0
 
 
-def test_quarantine_moves_untrusted_items(tmp_path):
+def test_hard_negative_is_not_exported_to_yolo_train_labels(tmp_path):
+    qdir = tmp_path / "queue"
+    _make_frame(qdir, "hand_only", [])
+    meta_path = qdir / "hand_only.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta.update(
+        {
+            "source": "hard_negative",
+            "hard_negative": True,
+            "hard_negative_reason": "hand_only",
+            "expected_outcome": "no_dispatch",
+            "training_excluded": True,
+            "evaluation_enabled": True,
+            "boxes": [],
+        }
+    )
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    out = tmp_path / "out_hard_negative"
+    assert is_trainable_meta(meta) is False
+    assert export_yolo_dataset(qdir, out) == 0
+    assert not list((out / "labels").glob("*.txt"))
+
+
+def test_quarantine_marks_untrusted_items_in_place(tmp_path):
     qdir = tmp_path / "queue"
     _make_frame(
         qdir,
@@ -194,5 +250,7 @@ def test_quarantine_moves_untrusted_items(tmp_path):
 
     assert quarantine_untrusted_items(qdir) == 1
     assert (qdir / "trusted.jpg").exists()
-    assert not (qdir / "unknown.jpg").exists()
-    assert list((qdir.parent / "quarantine").glob("*/*.jpg"))
+    assert (qdir / "unknown.jpg").exists()
+    meta = json.loads((qdir / "unknown.json").read_text(encoding="utf-8"))
+    assert meta["quarantined"] is True
+    assert meta["quarantine_reason"] == "desktop_untrusted_quarantine"

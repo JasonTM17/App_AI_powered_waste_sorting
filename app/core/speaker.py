@@ -10,7 +10,13 @@ import time
 from pathlib import Path
 from typing import Protocol
 
-from app.core.voice_pack import sort_voice_path, warning_voice_path
+from app.core.voice_pack import (
+    AUDIO_EVENT_LABELS,
+    audio_event_path,
+    normalize_voice_gender,
+    sort_voice_path,
+    warning_voice_path,
+)
 from app.core.waste_categories import category_for_command
 from app.utils.logging import logger
 
@@ -46,16 +52,30 @@ class NoopSpeaker:
 
 
 class WasteSpeaker:
-    def __init__(self, *, enabled: bool = True, cooldown_seconds: float = 2.5):
+    def __init__(
+        self,
+        *,
+        enabled: bool = True,
+        cooldown_seconds: float = 2.5,
+        voice_gender: str = "female",
+    ):
         self.enabled = enabled
         self.cooldown_seconds = cooldown_seconds
+        self.voice_gender = normalize_voice_gender(voice_gender)
         self._lock = threading.Lock()
         self._last_spoken_at: dict[str, float] = {}
 
-    def configure(self, *, enabled: bool, cooldown_seconds: float) -> None:
+    def configure(
+        self,
+        *,
+        enabled: bool,
+        cooldown_seconds: float,
+        voice_gender: str = "female",
+    ) -> None:
         with self._lock:
             self.enabled = enabled
             self.cooldown_seconds = cooldown_seconds
+            self.voice_gender = normalize_voice_gender(voice_gender)
 
     def speak(
         self,
@@ -74,7 +94,7 @@ class WasteSpeaker:
         self._queue(
             text=category.voice_text,
             key=category.code,
-            audio_path=sort_voice_path(category.code),
+            audio_path=sort_voice_path(category.code, self.voice_gender),
             cooldown_seconds=None,
             require_enabled=True,
         )
@@ -90,7 +110,7 @@ class WasteSpeaker:
         self._queue(
             text=text,
             key=key,
-            audio_path=warning_voice_path(key),
+            audio_path=warning_voice_path(key, self.voice_gender),
             cooldown_seconds=cooldown_seconds,
             require_enabled=True,
         )
@@ -99,20 +119,24 @@ class WasteSpeaker:
         category = category_for_command(command)
         if category is None:
             return False
-        self._queue(
-            text=category.voice_text,
-            key=f"preview:{category.code}",
-            audio_path=sort_voice_path(category.code),
-            cooldown_seconds=0.0,
-            require_enabled=False,
-        )
-        return True
+        return self.preview_event(f"sort_{category.code}", text=category.voice_text)
 
     def preview_warning(self) -> bool:
-        self._queue(
+        return self.preview_event(
+            "multi_object_warning",
             text="Chỉ đặt một loại rác trong khay.",
-            key="preview:multi_class_dispatch_blocked",
-            audio_path=warning_voice_path("multi_class_dispatch_blocked"),
+        )
+
+    def preview_event(self, event_key: str, *, text: str = "") -> bool:
+        clean_key = str(event_key or "").strip()
+        audio_path = audio_event_path(clean_key, self.voice_gender)
+        if audio_path is None:
+            return False
+        label = text.strip() or AUDIO_EVENT_LABELS.get(clean_key, clean_key)
+        self._queue(
+            text=label,
+            key=f"preview:{clean_key}",
+            audio_path=audio_path,
             cooldown_seconds=0.0,
             require_enabled=False,
         )
