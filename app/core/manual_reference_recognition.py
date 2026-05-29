@@ -7,11 +7,12 @@ import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 
 import numpy as np
 from PIL import Image
 
-from app.core.dataset_queue import is_trainable_meta
+from app.core.dataset_trust import classify_dataset_item
 from app.core.events import Detection
 from app.core.image_embedding import (
     ImageEmbedder,
@@ -23,6 +24,7 @@ from app.utils.logging import logger
 MANUAL_REFERENCE_SOURCES = {
     "manual_camera_capture",
     "manual_import",
+    "manual_phone_import",
     "manual_web_import",
 }
 
@@ -64,6 +66,7 @@ class ManualReferenceRecognizer:
     ) -> None:
         self.queue_dir = queue_dir
         self.embedder = embedder or create_image_embedder()
+        self._lock = RLock()
         self._references: list[_Reference] = []
         self._last_refresh = 0.0
         self._last_signature: tuple[int, float] = (0, 0.0)
@@ -83,7 +86,8 @@ class ManualReferenceRecognizer:
 
     @property
     def reference_count(self) -> int:
-        return len(self._references)
+        with self._lock:
+            return len(self._references)
 
     def configure(
         self,
@@ -99,49 +103,65 @@ class ManualReferenceRecognizer:
         query_cache_seconds: float,
         refresh: bool = True,
     ) -> None:
-        self.enabled = bool(enabled)
-        self.min_similarity = float(min_similarity)
-        self.min_consensus_similarity = float(min_consensus_similarity)
-        self.min_margin = float(min_margin)
-        self.top_k = max(1, int(top_k))
-        self.min_votes = max(1, min(int(min_votes), self.top_k))
-        self.max_references_per_class = max(1, int(max_references_per_class))
-        self.refresh_seconds = max(0.0, float(refresh_seconds))
-        self.query_cache_seconds = max(0.0, float(query_cache_seconds))
+        with self._lock:
+            self.enabled = bool(enabled)
+            self.min_similarity = float(min_similarity)
+            self.min_consensus_similarity = float(min_consensus_similarity)
+            self.min_margin = float(min_margin)
+            self.top_k = max(1, int(top_k))
+            self.min_votes = max(1, min(int(min_votes), self.top_k))
+            self.max_references_per_class = max(1, int(max_references_per_class))
+            self.refresh_seconds = max(0.0, float(refresh_seconds))
+            self.query_cache_seconds = max(0.0, float(query_cache_seconds))
         if refresh:
             self.refresh(force=True)
 
     def refresh_if_needed(self) -> None:
-        if self.enabled and time.monotonic() - self._last_refresh >= self.refresh_seconds:
+        with self._lock:
+            should_refresh = self.enabled and time.monotonic() - self._last_refresh >= self.refresh_seconds
+        if should_refresh:
             self.refresh()
 
     def refresh(self, *, force: bool = False) -> None:
-        self._last_refresh = time.monotonic()
+        now = time.monotonic()
         signature = self._signature()
-        if not force and signature == self._last_signature:
-            return
-        self._last_signature = signature
-        self._references = self._load_references()
-        self._query_cache.clear()
+        with self._lock:
+            self._last_refresh = now
+            if not force and signature == self._last_signature:
+                return
+            self._last_signature = signature
+        references = self._load_references()
+        with self._lock:
+            self._references = references
+            self._query_cache.clear()
 
     def classify(self, frame_bgr: np.ndarray, detection: Detection) -> ManualReferenceMatch | None:
-        if not self.enabled:
+        with self._lock:
+            enabled = self.enabled
+        if not enabled:
             return None
         self.refresh_if_needed()
         crops = _candidate_rgb_crops_from_bgr(frame_bgr, detection.xyxy)
-        if not crops or not self._references:
+        with self._lock:
+            references = tuple(self._references)
+        if not crops or not references:
             return None
         now = time.monotonic()
         best_match: ManualReferenceMatch | None = None
         for crop in crops:
-            match = self._classify_crop(crop, now)
+            match = self._classify_crop(crop, now, references)
             if match is None:
                 continue
             if best_match is None or match.similarity > best_match.similarity:
                 best_match = match
         return best_match
 
-    def _classify_crop(self, crop: np.ndarray, now: float) -> ManualReferenceMatch | None:
+    def _classify_crop(
+        self,
+        crop: np.ndarray,
+        now: float,
+        references: tuple[_Reference, ...],
+    ) -> ManualReferenceMatch | None:
         cache_key = _difference_hash(crop)
         cache_hit, cached = self._cached_match(cache_key, now)
         if cache_hit:
@@ -150,16 +170,22 @@ class ManualReferenceRecognizer:
         if query is None:
             self._store_cached_match(cache_key, None, now)
             return None
+        with self._lock:
+            top_k = self.top_k
+            min_votes = self.min_votes
+            min_similarity = self.min_similarity
+            min_consensus_similarity = self.min_consensus_similarity
+            min_margin = self.min_margin
         ranked = sorted(
-            ((reference, cosine_similarity(query, reference.vector)) for reference in self._references),
+            ((reference, cosine_similarity(query, reference.vector)) for reference in references),
             key=lambda item: item[1],
             reverse=True,
-        )[: self.top_k]
+        )[:top_k]
         votes = Counter(reference.cls_name for reference, _score in ranked)
         if not votes:
             return None
         winner_name, winner_votes = votes.most_common(1)[0]
-        if winner_votes < self.min_votes:
+        if winner_votes < min_votes:
             self._store_cached_match(cache_key, None, now)
             return None
         class_scores: dict[str, list[float]] = defaultdict(list)
@@ -167,17 +193,17 @@ class ManualReferenceRecognizer:
             class_scores[reference.cls_name].append(score)
         winner_scores = sorted(class_scores[winner_name], reverse=True)
         best_score = winner_scores[0]
-        consensus_score = winner_scores[self.min_votes - 1]
-        winner_score = float(np.mean(winner_scores[: self.min_votes]))
+        consensus_score = winner_scores[min_votes - 1]
+        winner_score = float(np.mean(winner_scores[:min_votes]))
         runner_up = max(
             (float(np.mean(scores)) for name, scores in class_scores.items() if name != winner_name),
             default=-1.0,
         )
         margin = winner_score - runner_up if runner_up >= 0 else 1.0
         if (
-            best_score < self.min_similarity
-            or consensus_score < self.min_consensus_similarity
-            or margin < self.min_margin
+            best_score < min_similarity
+            or consensus_score < min_consensus_similarity
+            or margin < min_margin
         ):
             self._store_cached_match(cache_key, None, now)
             return None
@@ -201,18 +227,19 @@ class ManualReferenceRecognizer:
         cache_key: int,
         now: float,
     ) -> tuple[bool, ManualReferenceMatch | None]:
-        if self.query_cache_seconds <= 0:
-            return False, None
-        expired = [
-            key
-            for key, (created_at, _match) in self._query_cache.items()
-            if now - created_at > self.query_cache_seconds
-        ]
-        for key in expired:
-            self._query_cache.pop(key, None)
-        for key, (_created_at, match) in self._query_cache.items():
-            if (key ^ cache_key).bit_count() <= 4:
-                return True, match
+        with self._lock:
+            if self.query_cache_seconds <= 0:
+                return False, None
+            expired = [
+                key
+                for key, (created_at, _match) in self._query_cache.items()
+                if now - created_at > self.query_cache_seconds
+            ]
+            for key in expired:
+                self._query_cache.pop(key, None)
+            for key, (_created_at, match) in self._query_cache.items():
+                if (key ^ cache_key).bit_count() <= 4:
+                    return True, match
         return False, None
 
     def _store_cached_match(
@@ -221,12 +248,13 @@ class ManualReferenceRecognizer:
         match: ManualReferenceMatch | None,
         now: float,
     ) -> None:
-        if self.query_cache_seconds <= 0:
-            return
-        if len(self._query_cache) >= 32:
-            oldest = min(self._query_cache, key=lambda key: self._query_cache[key][0])
-            self._query_cache.pop(oldest, None)
-        self._query_cache[cache_key] = (now, match)
+        with self._lock:
+            if self.query_cache_seconds <= 0:
+                return
+            if len(self._query_cache) >= 32:
+                oldest = min(self._query_cache, key=lambda key: self._query_cache[key][0])
+                self._query_cache.pop(oldest, None)
+            self._query_cache[cache_key] = (now, match)
 
     def _signature(self) -> tuple[int, float]:
         if not self.queue_dir.exists():
@@ -285,7 +313,7 @@ def _can_use_as_reference(meta: dict) -> bool:
     source = str(meta.get("source") or "")
     if source not in MANUAL_REFERENCE_SOURCES:
         return False
-    if not is_trainable_meta(meta) or meta.get("reviewed") is not True:
+    if not classify_dataset_item(meta).trainable or meta.get("reviewed") is not True:
         return False
     if meta.get("holdout") is True:
         return False

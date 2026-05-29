@@ -25,7 +25,7 @@ PHASE16_ANCHOR_TARGETS = {
     "Unknown plastic": 30,
     "Pen": 10,
 }
-REAL_ANCHOR_SOURCES = {"manual_camera_capture", "manual_import", "capture_session"}
+REAL_ANCHOR_SOURCES = {"manual_camera_capture", "manual_import", "manual_phone_import", "capture_session"}
 WEB_SOURCE = "manual_web_import"
 TRAIN_SUPPORT_SOURCES = {WEB_SOURCE, DOWNLOADED_ANCHOR_BOOTSTRAP_SOURCE, *KAGGLE_TRAIN_SUPPORT_SOURCES}
 
