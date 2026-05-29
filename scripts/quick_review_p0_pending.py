@@ -159,6 +159,7 @@ def _review_item(
         return False, "unknown_class"
     meta["boxes"] = [{"cls_id": cls_id, "cls_name": class_name, "conf": 1.0, "xyxy": bbox}]
     meta["reviewed"] = True
+    meta["bbox_reviewed"] = True
     meta["needs_annotation"] = False
     meta["reviewed_at"] = datetime.now().isoformat()
     meta["review_method"] = REVIEW_METHOD
