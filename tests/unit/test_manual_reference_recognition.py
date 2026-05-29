@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from threading import Thread
 
 import numpy as np
 from PIL import Image
@@ -59,6 +60,7 @@ def _write_reference(
             "ts": datetime.now().isoformat(),
             "source": "manual_camera_capture",
             "reviewed": reviewed,
+            "bbox_reviewed": reviewed,
             "recognition_enabled": True,
             "holdout": holdout,
             "boxes": [
@@ -92,6 +94,7 @@ def _write_full_pen_references(queue_dir) -> None:
             "ts": datetime.now().isoformat(),
             "source": "manual_camera_capture",
             "reviewed": True,
+            "bbox_reviewed": True,
             "recognition_enabled": True,
             "boxes": [
                 {
@@ -218,6 +221,42 @@ def test_manual_reference_caches_stable_query_crop(tmp_path):
     assert first is not None
     assert second == first
     assert embedder.calls == calls_after_first
+
+
+def test_manual_reference_refresh_and_classify_are_thread_safe(tmp_path):
+    queue_dir = tmp_path / "queue"
+    _write_reference(queue_dir, reviewed=True)
+    recognizer = ManualReferenceRecognizer(
+        queue_dir,
+        min_similarity=0.9,
+        refresh_seconds=0,
+        query_cache_seconds=0.2,
+        embedder=LegacyImageEmbedder(),
+    )
+    detection = Detection(999, "Unknown object", 0.39, (15, 12, 65, 28))
+    errors: list[BaseException] = []
+
+    def classify_loop() -> None:
+        try:
+            for _ in range(12):
+                recognizer.classify(_query_frame(), detection)
+        except BaseException as exc:  # pragma: no cover - test assertion handles thread failures
+            errors.append(exc)
+
+    def refresh_loop() -> None:
+        try:
+            for _ in range(12):
+                recognizer.refresh(force=True)
+        except BaseException as exc:  # pragma: no cover - test assertion handles thread failures
+            errors.append(exc)
+
+    workers = [Thread(target=classify_loop), Thread(target=refresh_loop)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+
+    assert errors == []
 
 
 def test_manual_reference_expands_narrow_pen_body_bbox(tmp_path):
