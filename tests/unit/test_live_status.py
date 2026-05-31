@@ -7,8 +7,12 @@ from app.ui.live_status import (
 )
 
 
-def test_multi_object_warning_text_requires_exact_dispatch_status():
+def test_multi_object_warning_text_accepts_detailed_dispatch_status():
     assert multi_object_warning_text("multiple waste types", "only one") == MULTI_CLASS_WARNING_TEXT
+    assert (
+        multi_object_warning_text("multiple waste types (2 visible objects)", "only one")
+        == MULTI_CLASS_WARNING_TEXT
+    )
     assert multi_object_warning_text("TEST OFF", "only one") == ""
 
 
