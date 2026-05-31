@@ -11,6 +11,11 @@ from app.core.waste_categories import (
 )
 
 
+def test_plastic_container_alias_routes_to_recyclable_canister():
+    assert canonical_class_name("hop nhua") == "Plastic canister"
+    assert category_for_class("hop nhua") == RECYCLABLE
+
+
 def test_three_bin_mapping_covers_default_classes():
     mappings = make_three_bin_mappings()
 
@@ -61,6 +66,9 @@ def test_pen_mapping_routes_to_inorganic_bin():
 def test_default_class_id_supports_extended_camera_labels():
     assert default_class_id_for_name("Pen") is not None
     assert default_class_id_for_name("pen") == default_class_id_for_name("Pen")
+    assert default_class_id_for_name("Textile") == 37
+    assert default_class_id_for_name("vải") == 37
+    assert default_class_id_for_name("mieng vai") == 37
     assert default_class_id_for_name("Battery") is not None
     assert default_class_id_for_name("Toothbrush") is not None
     assert default_class_id_for_name("Battery") == 43
@@ -72,3 +80,14 @@ def test_vietnamese_aliases_resolve_to_existing_training_classes():
     assert canonical_class_name("vỏ chuối") == "Organic"
     assert canonical_class_name("lon nước ngọt") == "Aluminum can"
     assert canonical_class_name("khẩu trang") == "Textile"
+
+
+def test_textile_aliases_cover_common_cloth_names():
+    assert canonical_class_name("vải") == "Textile"
+    assert canonical_class_name("mieng vai") == "Textile"
+    assert canonical_class_name("miếng vải") == "Textile"
+    assert canonical_class_name("vai cu") == "Textile"
+    assert canonical_class_name("vải cũ") == "Textile"
+    assert canonical_class_name("khau trang") == "Textile"
+    assert canonical_class_name("khẩu trang") == "Textile"
+    assert category_for_class("mieng vai") == INORGANIC
