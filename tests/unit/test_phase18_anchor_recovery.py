@@ -92,6 +92,7 @@ def _write_meta(image_path: Path, class_name: str, source: str, *, reviewed: boo
     meta = {
         "source": source,
         "reviewed": reviewed,
+        "bbox_reviewed": reviewed,
         "needs_annotation": not reviewed,
         "training_excluded": excluded,
         "recognition_enabled": False,

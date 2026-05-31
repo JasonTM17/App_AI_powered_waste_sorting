@@ -23,7 +23,10 @@ from app.core.dispatch_guard import DispatchGuard
 from app.core.events import Detection, TrackedDetection
 from app.core.history import HistoryService
 from app.core.manual_reference_recognition import ManualReferenceRecognizer
-from app.core.multi_object_dispatch import evaluate_single_class_dispatch
+from app.core.multi_object_dispatch import (
+    evaluate_foreground_multi_object_dispatch,
+    evaluate_single_class_dispatch,
+)
 from app.core.speaker import NoopSpeaker, Speaker
 from app.core.three_bin_classifier import (
     THREE_BIN_SOURCE,
@@ -602,16 +605,49 @@ class Pipeline:
         detections_for_render = [t.detection for t in tracked]
         now_mono = time.monotonic()
         roi_ready = self._roi_ready_for_dispatch(frame_bgr)
-        visible_in_roi = bool(roi_ready and any(self._in_roi(t.detection.xyxy) for t in tracked))
+        foreground_multi = (
+            evaluate_foreground_multi_object_dispatch(
+                frame_bgr,
+                roi=self.cfg.roi,
+                max_objects=self.cfg.dispatch_guard.max_objects_per_dispatch,
+                min_area_ratio=self.cfg.unknown_fallback.min_area_ratio,
+            )
+            if roi_ready
+            else None
+        )
+        if roi_ready and foreground_multi is not None and foreground_multi.allowed:
+            frame_foreground_multi = evaluate_foreground_multi_object_dispatch(
+                frame_bgr,
+                roi=None,
+                max_objects=self.cfg.dispatch_guard.max_objects_per_dispatch,
+                min_area_ratio=max(self.cfg.unknown_fallback.min_area_ratio, 0.005),
+            )
+            if not frame_foreground_multi.allowed:
+                foreground_multi = frame_foreground_multi
+        visible_in_roi = bool(
+            roi_ready
+            and (
+                any(self._in_roi(t.detection.xyxy) for t in tracked)
+                or (foreground_multi is not None and foreground_multi.object_count > 0)
+            )
+        )
         self._dispatch_guard.observe_frame(
             has_visible_object=visible_in_roi,
             roi_ready=roi_ready,
             now=now_mono,
         )
         self.dispatch_status = self._dispatch_guard.last_reason
+        if foreground_multi is not None and not foreground_multi.allowed:
+            self.dispatch_status = foreground_multi.reason
+            self._speak_multi_class_warning(foreground_multi.class_names)
+            if not self._hardware_dispatch_enabled:
+                for t in tracked:
+                    self.tracker.mark_emitted(t.track_id)
+            return detections_for_render
         multi_class = evaluate_single_class_dispatch(
             tracked,
             in_roi=lambda xyxy: bool(roi_ready and self._in_roi(xyxy)),
+            max_objects=self.cfg.dispatch_guard.max_objects_per_dispatch,
             max_classes=self.cfg.dispatch_guard.max_classes_per_dispatch,
         )
         if not multi_class.allowed:
@@ -627,6 +663,18 @@ class Pipeline:
                 self.tracker.mark_emitted(t.track_id)
             return detections_for_render
         for t in tracked:
+            if self._unknown_dispatch_blocked(t.detection):
+                should_log = self.tracker.should_emit(t.track_id)
+                self.tracker.mark_emitted(t.track_id)
+                self.dispatch_status = "unknown object review required"
+                if should_log:
+                    logger.info(
+                        "dispatch blocked unknown object track={} conf={:.2f} source={}",
+                        t.track_id,
+                        t.detection.conf,
+                        t.detection.source,
+                    )
+                continue
             if not self.tracker.should_emit(t.track_id):
                 continue
             decision = self._dispatch_guard.evaluate(
@@ -766,6 +814,14 @@ class Pipeline:
             )
         except Exception as e:
             logger.warning("speaker dispatch failed: {}", e)
+
+    def _unknown_dispatch_blocked(self, detection: Detection) -> bool:
+        fallback = self.cfg.unknown_fallback
+        if detection.cls_name != fallback.class_name:
+            return False
+        if detection.cls_name in self._mapping:
+            return False
+        return not bool(fallback.dispatch_enabled)
 
     def on_ack(self, track_id: int, command: str, status: str, rtt_ms):
         self._dispatch_guard.complete_dispatch(track_id=track_id, now=time.monotonic())
