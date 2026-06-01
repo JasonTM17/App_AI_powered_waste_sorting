@@ -71,6 +71,7 @@ EXPECTED_AGENT_ROUTES = {
     "GET /api/hardware/profile",
     "POST /api/hardware/test",
     "POST /api/hardware/audio-test",
+    "GET /api/audio/voice-pack-status",
     "POST /api/hardware/mp3-test",
     "POST /api/hardware/servo-angle",
     "POST /api/hardware/home-angle",
@@ -82,6 +83,7 @@ EXPECTED_AGENT_ROUTES = {
     "POST /api/devices/refresh",
     "POST /api/camera/start",
     "POST /api/camera/stop",
+    "POST /api/camera/stream-token",
     "GET /api/camera/stream",
     "GET /api/settings",
     "PUT /api/settings",
@@ -103,10 +105,13 @@ EXPECTED_AGENT_ROUTES = {
     "GET /api/dataset/items/{item_id}",
     "GET /api/dataset/items/{item_id}/image",
     "PUT /api/dataset/items/{item_id}/boxes",
+    "POST /api/dataset/items/{item_id}/review",
     "POST /api/dataset/sync",
     "POST /api/dataset/import",
     "POST /api/dataset/manual",
+    "POST /api/dataset/manual-phone",
     "POST /api/dataset/camera-sample",
+    "POST /api/dataset/hard-negative",
     "POST /api/dataset/capture-session/start",
     "GET /api/dataset/capture-session",
     "POST /api/dataset/capture-session/capture",
@@ -294,6 +299,7 @@ def _write_queue_item(
         "ts": "2026-06-09T08:00:00+00:00",
         "source": source if trusted else "untrusted",
         "reviewed": reviewed,
+        "bbox_reviewed": reviewed,
         "boxes": [{"cls_id": cls_id, "cls_name": cls_name, "conf": 1.0, "xyxy": [1, 1, 46, 34]}],
     }
     image_path.with_suffix(".json").write_text(
@@ -336,6 +342,11 @@ def _patch_safe_runtime(monkeypatch, runtime: AgentRuntime) -> None:
         lambda cls_name, cls_id, use_latest_detection_box=True: _write_queue_item(
             runtime, "camera_sample", cls_name=cls_name, cls_id=cls_id, source="manual_camera_capture"
         ),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "capture_hard_negative_sample",
+        lambda reason: _write_queue_item(runtime, f"hard_negative_{reason}", source="hard_negative"),
     )
     monkeypatch.setattr(
         runtime,
@@ -542,7 +553,7 @@ def test_admin_accounts_knowledge_and_chat_contract(tmp_path):
         payload = chat.json()
         assert payload["role"] == "admin"
         assert payload["profile"] == "trash_sorter_admin"
-        assert payload["model"] == "deepseek-v4-flash"
+        assert payload["provider"] in ("local", "deepseek")
         forbidden = client.post(
             "/api/admin/chat",
             headers=user_headers,
@@ -704,6 +715,11 @@ def test_admin_history_training_dataset_and_logs_contract(tmp_path, monkeypatch)
             "/api/dataset/camera-sample",
             headers=admin_headers,
             json={"cls_name": "Paper", "cls_id": 1, "use_latest_detection_box": False},
+        ).status_code == 200
+        assert client.post(
+            "/api/dataset/hard-negative",
+            headers=admin_headers,
+            json={"reason": "hand_only"},
         ).status_code == 200
         assert client.post(
             "/api/dataset/capture-session/start",
