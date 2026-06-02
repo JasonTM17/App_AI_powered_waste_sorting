@@ -79,6 +79,7 @@ def _can_augment(meta: dict) -> bool:
     holdout = meta.get("holdout") is True or str(meta.get("split") or "").lower() == "test"
     return (
         meta.get("reviewed") is True
+        and meta.get("bbox_reviewed") is True
         and is_trainable_meta(meta)
         and not holdout
         and not is_train_only_supplemental_meta(meta)
@@ -110,6 +111,7 @@ def _write_augmented(
             "generated": False,
             "recognition_enabled": False,
             "reviewed": True,
+            "bbox_reviewed": True,
             "needs_annotation": False,
             "split": "train",
             "split_lock": True,

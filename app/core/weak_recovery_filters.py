@@ -7,7 +7,7 @@ from typing import Any
 
 from PIL import Image
 
-from app.core.dataset_queue import REVIEW_REQUIRED_SOURCES, is_trainable_meta
+from app.core.dataset_trust import REVIEW_REQUIRED_SOURCES, is_trainable_meta
 from app.core.downloaded_zip_intake import (
     DOWNLOADED_ANCHOR_BOOTSTRAP_SOURCE,
     has_downloaded_bootstrap_source_metadata,

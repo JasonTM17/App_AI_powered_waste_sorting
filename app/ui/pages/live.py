@@ -7,7 +7,6 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -20,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.events import Detection
-from app.core.voice_pack import voice_pack_status
+from app.core.voice_pack import normalize_voice_gender, voice_gender_label, voice_pack_status
 from app.ui.widgets.stat_card import StatCard
 from app.ui.widgets.video_view import VideoView
 from app.utils.paths import resource_path
@@ -47,20 +46,29 @@ class LivePage(QWidget):
         super().__init__(parent)
         self._paused = False
         self._cam_on = False
+        self._uart_ok = False
+        self._uart_protocol = ""
         self._actuation_test_mode = False
+        self._dispatch_status = ""
         self._speaker_output_mode = "hardware"
+        self._speaker_voice_gender = "female"
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 24)
         root.setSpacing(16)
 
-        header = QHBoxLayout()
-        header.setSpacing(12)
+        header = QVBoxLayout()
+        header.setSpacing(10)
+        title_row = QHBoxLayout()
         title = QLabel("Live Detection")
         title.setObjectName("h1")
         title.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        header.addWidget(title)
-        header.addSpacing(16)
+        title_row.addWidget(title)
+        title_row.addStretch()
+        header.addLayout(title_row)
+
+        from app.ui.widgets.flow_layout import FlowLayout
+        controls = FlowLayout(margin=0, h_spacing=12, v_spacing=12)
 
         self.btn_camera = QPushButton("Bật camera")
         self.btn_camera.setObjectName("primary")
@@ -70,16 +78,19 @@ class LivePage(QWidget):
         _set_button_icon(self.btn_camera, "play")
         self.btn_camera.clicked.connect(self._toggle_camera)
 
-        self.btn_actuation = QPushButton("Cho phép gửi Arduino")
+        self.btn_actuation = QPushButton("Bật gửi Arduino")
         self.btn_actuation.setObjectName("secondary")
         self.btn_actuation.setCheckable(True)
-        self.btn_actuation.setMinimumWidth(168)
+        self.btn_actuation.setMinimumWidth(150)
         self.btn_actuation.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.btn_actuation.setToolTip(
+            "Bật công tắc này mới cho phép app gửi lệnh phân loại xuống Arduino."
+        )
         _set_button_icon(self.btn_actuation, "hardware")
         self.btn_actuation.clicked.connect(self._toggle_actuation_test_mode)
 
         self.dispatch_mode_label = QLabel("")
-        self.dispatch_mode_label.setMinimumWidth(192)
+        self.dispatch_mode_label.setMinimumWidth(150)
         self.dispatch_mode_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.dispatch_mode_label.setToolTip(
             "Trạng thái gửi lệnh phân loại xuống Arduino khi AI nhận diện rác."
@@ -101,11 +112,17 @@ class LivePage(QWidget):
         _set_button_icon(self.btn_snap, "snapshot")
         self.btn_snap.clicked.connect(self.snapshot_requested.emit)
 
-        header.addWidget(self.btn_camera)
-        header.addWidget(self.btn_actuation)
-        header.addWidget(self.dispatch_mode_label)
-        header.addWidget(self.btn_pause)
-        header.addWidget(self.btn_snap)
+        controls.addWidget(self.btn_camera)
+        controls.addWidget(self.btn_actuation)
+        controls.addWidget(self.dispatch_mode_label)
+        controls.addWidget(self.btn_pause)
+        controls.addWidget(self.btn_snap)
+        header.addLayout(controls)
+
+        self.dispatch_status_detail = QLabel("")
+        self.dispatch_status_detail.setObjectName("muted")
+        self.dispatch_status_detail.setWordWrap(True)
+        header.addWidget(self.dispatch_status_detail)
         root.addLayout(header)
 
         speaker_bar = QFrame()
@@ -191,18 +208,17 @@ class LivePage(QWidget):
         stream_title.setObjectName("mono")
         stream_layout.addWidget(stream_title)
         self.stream = QListWidget()
-        self.stream.setMinimumWidth(280)
+        self.stream.setMinimumWidth(260)
         stream_layout.addWidget(self.stream, 1)
         body.addWidget(stream_card, 1)
 
         root.addLayout(body, 1)
 
-        cards = QGridLayout()
-        cards.setSpacing(12)
+        cards = FlowLayout(margin=0, h_spacing=12, v_spacing=12)
         self.card_today = StatCard("TODAY", "0", "items")
         self.card_fps = StatCard("FPS", "0", "render")
         self.card_latency = StatCard("LATENCY", "0", "ms infer")
-        self.card_uart = StatCard("UART", "—", "status")
+        self.card_uart = StatCard("UART", "OFF", "disconnected")
         self.card_total = StatCard("TOTAL", "0", "all-time")
         self.card_acc = StatCard("AVG CONF", "0.00", "running")
         all_cards = [
@@ -213,10 +229,8 @@ class LivePage(QWidget):
             self.card_total,
             self.card_acc,
         ]
-        for i, c in enumerate(all_cards):
-            cards.addWidget(c, i // 3, i % 3)
-        for col in range(3):
-            cards.setColumnStretch(col, 1)
+        for c in all_cards:
+            cards.addWidget(c)
         root.addLayout(cards)
         self.set_speaker_output_mode("hardware")
         self.set_actuation_test_mode(False)
@@ -268,28 +282,37 @@ class LivePage(QWidget):
         if emit:
             self.speaker_output_mode_changed.emit(normalized)
 
+    def set_speaker_voice_gender(self, gender: str) -> None:
+        self._speaker_voice_gender = normalize_voice_gender(gender)
+        self.speaker_status.setText(self._speaker_status_text())
+
     def _speaker_status_text(self) -> str:
-        status = voice_pack_status()
+        status = voice_pack_status(self._speaker_voice_gender)
         ready = sum(1 for ok in status.values() if ok)
         total = len(status)
         missing = [name for name, ok in status.items() if not ok]
+        label = voice_gender_label(self._speaker_voice_gender)
         if self._speaker_output_mode == "computer_speaker":
             if not missing:
-                return f"Loa laptop: sẵn sàng ({ready}/{total} file)."
-            return f"Loa laptop: thiếu {len(missing)} file: {', '.join(missing)}."
+                return f"Loa laptop {label}: sẵn sàng ({ready}/{total} file)."
+            return f"Loa laptop {label}: thiếu {len(missing)} file: {', '.join(missing)}."
         if not missing:
-            return f"Loa laptop sẵn sàng ({ready}/{total} file)."
-        return f"Loa laptop thiếu {len(missing)} file: {', '.join(missing)}."
+            return f"Loa phần cứng đang ưu tiên. Loa laptop {label} sẵn sàng ({ready}/{total} file)."
+        return f"Loa phần cứng đang ưu tiên. Loa laptop {label} thiếu {len(missing)} file: {', '.join(missing)}."
 
     def _toggle_actuation_test_mode(self, checked: bool) -> None:
         self.set_actuation_test_mode(bool(checked), emit=True)
 
     def set_actuation_test_mode(self, enabled: bool, emit: bool = False) -> None:
         self._actuation_test_mode = bool(enabled)
+        if self._actuation_test_mode and not self._uart_ok:
+            self.set_warning("UART chưa kết nối, lệnh phân loại sẽ không được gửi xuống phần cứng.")
+        elif not self._actuation_test_mode:
+            self.set_warning("")
         self.btn_actuation.blockSignals(True)
         self.btn_actuation.setChecked(self._actuation_test_mode)
         self.btn_actuation.setText(
-            "Dừng gửi Arduino" if self._actuation_test_mode else "Cho phép gửi Arduino"
+            "Dừng gửi Arduino" if self._actuation_test_mode else "Bật gửi Arduino"
         )
         self.btn_actuation.setObjectName("danger" if self._actuation_test_mode else "secondary")
         _set_button_icon(self.btn_actuation, "hardware")
@@ -300,21 +323,38 @@ class LivePage(QWidget):
         if emit:
             self.actuation_test_mode_toggled.emit(self._actuation_test_mode)
 
+    def set_dispatch_status(self, status: str) -> None:
+        self._dispatch_status = str(status or "").strip()
+        self._sync_dispatch_mode_label()
+
     def _sync_dispatch_mode_label(self) -> None:
         if self._actuation_test_mode:
-            self.dispatch_mode_label.setText("Đang gửi Arduino")
+            if self._uart_ok:
+                self.dispatch_mode_label.setText("Gửi xuống Arduino")
+                detail = "Đã bật gửi lệnh; ROI, mapping và guard vẫn quyết định từng lần gửi."
+                if self._uart_protocol == "plain_group":
+                    detail += " Format: huuco / voco / taiche."
+                elif self._uart_protocol == "sort_line":
+                    detail += " Format: SORT:<cmd>:<conf>."
+            else:
+                self.dispatch_mode_label.setText("Chờ UART")
+                detail = "Đã bật gửi nhưng chưa thấy Arduino/COM; app chưa gửi được lệnh thật."
             self.dispatch_mode_label.setStyleSheet(
                 "padding: 6px 10px; border-radius: 6px;"
                 " color: #FBBF24; border: 1px solid rgba(251,191,36,0.42);"
                 " background: rgba(251,191,36,0.10); font-weight: 700;"
             )
-            return
-        self.dispatch_mode_label.setText("Chỉ nhận diện")
-        self.dispatch_mode_label.setStyleSheet(
-            "padding: 6px 10px; border-radius: 6px;"
-            " color: #67E8F9; border: 1px solid rgba(103,232,249,0.32);"
-            " background: rgba(103,232,249,0.08); font-weight: 700;"
-        )
+        else:
+            self.dispatch_mode_label.setText("Chỉ nhận diện")
+            detail = "Không gửi lệnh xuống Arduino. Bật gửi Arduino chỉ khi đã kiểm tra ROI và mapping."
+            self.dispatch_mode_label.setStyleSheet(
+                "padding: 6px 10px; border-radius: 6px;"
+                " color: #67E8F9; border: 1px solid rgba(103,232,249,0.32);"
+                " background: rgba(103,232,249,0.08); font-weight: 700;"
+            )
+        if self._dispatch_status:
+            detail = f"{detail} Trạng thái guard: {self._dispatch_status}."
+        self.dispatch_status_detail.setText(detail)
 
     def _toggle_pause(self) -> None:
         self._paused = not self._paused
@@ -335,7 +375,7 @@ class LivePage(QWidget):
 
     def append_detection(self, cls_name: str, conf: float, ts: str, detail: str = "") -> None:
         suffix = f"\n    {detail}" if detail else ""
-        item = QListWidgetItem(f"•  {cls_name:<10} {conf:.2f}    {ts}{suffix}")
+        item = QListWidgetItem(f"*  {cls_name:<10} {conf:.2f}    {ts}{suffix}")
         item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.stream.insertItem(0, item)
         while self.stream.count() > 50:
@@ -357,9 +397,12 @@ class LivePage(QWidget):
     def set_total(self, n: int) -> None:
         self.card_total.set_value(str(n))
 
-    def set_uart_status(self, ok: bool) -> None:
+    def set_uart_status(self, ok: bool, protocol: str = "") -> None:
+        self._uart_ok = bool(ok)
+        self._uart_protocol = protocol
         self.card_uart.set_value("OK" if ok else "OFF")
         self.card_uart.set_sub("connected" if ok else "disconnected")
+        self._sync_dispatch_mode_label()
 
     def set_avg_conf(self, conf: float) -> None:
         self.card_acc.set_value(f"{conf:.2f}")
