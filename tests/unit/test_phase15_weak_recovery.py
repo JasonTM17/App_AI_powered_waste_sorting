@@ -32,6 +32,7 @@ def _write_web_item(
         "source_author": "Example",
         "canonical_class": cls_name,
         "reviewed": True,
+        "bbox_reviewed": True,
         "needs_annotation": needs_annotation,
         "training_excluded": training_excluded,
         "boxes": [{"cls_id": 42, "cls_name": cls_name, "conf": 1.0, "xyxy": xyxy}],
