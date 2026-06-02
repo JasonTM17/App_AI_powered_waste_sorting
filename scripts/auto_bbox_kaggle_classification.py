@@ -213,6 +213,7 @@ def _import_auto_bbox(
         "canonical_class": canonical,
         "bin_code": row.get("bin_code"),
         "reviewed": True,
+        "bbox_reviewed": True,
         "needs_annotation": False,
         "recognition_enabled": False,
         "split": "train",

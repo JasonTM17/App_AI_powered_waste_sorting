@@ -74,12 +74,14 @@ class CaptureConfig(BaseModel):
 class SpeakerConfig(BaseModel):
     enabled: bool = False
     output_mode: Literal["hardware", "computer_speaker"] = "hardware"
+    voice_gender: Literal["female", "male"] = "female"
     cooldown_seconds: float = Field(2.5, ge=0.0, le=60.0)
 
 
 class UnknownObjectFallbackConfig(BaseModel):
     enabled: bool = True
     class_name: str = "Unknown object"
+    dispatch_enabled: bool = False
     command: str = Field("R", min_length=1, max_length=1)
     bin_index: int = Field(2, ge=1, le=9)
     min_raw_confidence: float = Field(0.05, ge=0.0, le=1.0)
@@ -95,6 +97,7 @@ class DispatchGuardConfig(BaseModel):
     empty_rearm_seconds: float = Field(2.0, ge=0.0, le=60.0)
     empty_rearm_frames: int = Field(10, ge=1, le=300)
     require_roi_for_dispatch: bool = True
+    max_objects_per_dispatch: int = Field(1, ge=1, le=5)
     max_classes_per_dispatch: int = Field(1, ge=1, le=5)
     multi_class_warning_cooldown_seconds: float = Field(5.0, ge=0.0, le=120.0)
     multi_class_warning_text: str = MULTI_CLASS_WARNING_TEXT
@@ -130,6 +133,7 @@ def default_unknown_object_fallback_config() -> UnknownObjectFallbackConfig:
     return UnknownObjectFallbackConfig(
         enabled=True,
         class_name="Unknown object",
+        dispatch_enabled=False,
         command="R",
         bin_index=2,
         min_raw_confidence=0.05,
@@ -147,6 +151,7 @@ def default_dispatch_guard_config() -> DispatchGuardConfig:
         empty_rearm_seconds=2.0,
         empty_rearm_frames=10,
         require_roi_for_dispatch=True,
+        max_objects_per_dispatch=1,
         max_classes_per_dispatch=1,
         multi_class_warning_cooldown_seconds=5.0,
         multi_class_warning_text=MULTI_CLASS_WARNING_TEXT,
@@ -201,6 +206,7 @@ class AppConfig(BaseModel):
         default_factory=lambda: SpeakerConfig(
             enabled=False,
             output_mode="hardware",
+            voice_gender="female",
             cooldown_seconds=2.5,
         )
     )
@@ -228,8 +234,17 @@ def normalize_speaker_output_config(cfg: AppConfig) -> AppConfig:
     clean = cfg.model_copy(deep=True)
     if clean.speaker.output_mode == "computer_speaker":
         clean.speaker.enabled = True
-    elif clean.speaker.enabled:
-        clean.speaker.output_mode = "computer_speaker"
+    else:
+        clean.speaker.output_mode = "hardware"
+        clean.speaker.enabled = False
+    return clean
+
+
+def startup_hardware_speaker_config(cfg: AppConfig) -> AppConfig:
+    """Use hardware speaker as the app startup default while preserving voice choice."""
+    clean = cfg.model_copy(deep=True)
+    clean.speaker.output_mode = "hardware"
+    clean.speaker.enabled = False
     return clean
 
 
@@ -292,6 +307,21 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     return cfg, changed
 
 
+def _missing_default_config_fields(raw: object) -> bool:
+    if not isinstance(raw, dict):
+        return False
+    checks = (
+        ("speaker", "voice_gender"),
+        ("unknown_fallback", "dispatch_enabled"),
+        ("dispatch_guard", "max_objects_per_dispatch"),
+    )
+    for section, key in checks:
+        value = raw.get(section)
+        if not isinstance(value, dict) or key not in value:
+            return True
+    return False
+
+
 def _repair_known_class_mappings(cfg: AppConfig) -> tuple[AppConfig, bool]:
     try:
         from app.core.waste_categories import (
@@ -347,9 +377,10 @@ def load_config(path: Path) -> AppConfig:
         return cfg
     try:
         raw = json.loads(path.read_text(encoding="utf-8-sig"))
+        missing_default_fields = _missing_default_config_fields(raw)
         cfg = AppConfig.model_validate(raw)
         cfg, changed = _repair_config(cfg, path)
-        if changed:
+        if changed or missing_default_fields:
             save_config(cfg, path)
         return cfg
     except Exception:
