@@ -195,7 +195,7 @@ class _ModelLoadWorker(QThread):
 
 class AppController(QObject):
     camera_status = Signal(bool)
-    uart_status = Signal(bool)
+    uart_status = Signal(bool, str)
     model_status = Signal(bool)
     frame_processed = Signal(object, list, float, float)
     test_camera_result = Signal(bool, str)
@@ -379,7 +379,7 @@ class AppController(QObject):
                 self._schedule_uart_retry()
             if self._pipeline is not None:
                 self._pipeline.set_uart(None)
-            self.uart_status.emit(False)
+            self.uart_status.emit(False, "")
             return
 
         try:
@@ -388,7 +388,7 @@ class AppController(QObject):
             logger.warning("uart start refused: {}", e)
             if self._pipeline is not None:
                 self._pipeline.set_uart(None)
-            self.uart_status.emit(False)
+            self.uart_status.emit(False, "")
             self._schedule_uart_retry()
             return
         worker = UartWorker(
@@ -398,7 +398,7 @@ class AppController(QObject):
             auto_reconnect=self.cfg.uart.auto_reconnect,
             protocol=self.cfg.uart.protocol,
         )
-        worker.connected.connect(self.uart_status.emit)
+        worker.connected.connect(self._on_uart_connected)
         worker.ack_received.connect(self._on_uart_ack)
         if self._pipeline is not None:
             self._pipeline.set_uart(worker)
@@ -440,13 +440,13 @@ class AppController(QObject):
             if self._uart_lock is not None:
                 self._uart_lock.release()
                 self._uart_lock = None
-            self.uart_status.emit(False)
+            self.uart_status.emit(False, "")
             return
         worker = self._uart
         self._uart = None
         self._uart_retry_scheduled = False
         with suppress(RuntimeError, TypeError):
-            worker.connected.disconnect(self.uart_status.emit)
+            worker.connected.disconnect(self._on_uart_connected)
         with suppress(RuntimeError, TypeError):
             worker.ack_received.disconnect(self._on_uart_ack)
         if self._pipeline is not None:
@@ -457,7 +457,7 @@ class AppController(QObject):
         if self._uart_lock is not None:
             self._uart_lock.release()
             self._uart_lock = None
-        self.uart_status.emit(False)
+        self.uart_status.emit(False, "")
         logger.info("uart stopped")
 
     def _restart_uart_if_needed(self) -> None:
@@ -468,6 +468,9 @@ class AppController(QObject):
         if self._pipeline is None:
             return
         self._pipeline.set_hardware_dispatch_enabled(self._actuation_test_enabled)
+
+    def _on_uart_connected(self, ok: bool) -> None:
+        self.uart_status.emit(ok, self.cfg.uart.protocol)
 
     def _on_uart_ack(self, track_id: int, command: str, status: str, rtt_ms) -> None:
         if track_id < 0:
