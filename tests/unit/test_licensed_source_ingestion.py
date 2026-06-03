@@ -16,6 +16,7 @@ def _write_item(queue, name: str, color=(80, 80, 80), **meta_extra):
     meta = {
         "source": "manual_web_import",
         "reviewed": True,
+        "bbox_reviewed": True,
         "source_url": "https://example.test/image.jpg",
         "source_page_url": "https://example.test/page",
         "source_license": "CC-BY-4.0",
@@ -74,6 +75,7 @@ def test_source_quality_report_flags_blur_duplicates_and_missing_manifest(tmp_pa
             {
                 "source": "manual_web_import",
                 "reviewed": True,
+                "bbox_reviewed": True,
                 "boxes": [{"cls_id": 42, "cls_name": "Pen", "conf": 1.0, "xyxy": [4, 4, 60, 44]}],
             }
         ),

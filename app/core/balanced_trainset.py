@@ -13,6 +13,7 @@ from pathlib import Path
 from PIL import Image
 
 from app.core.dataset_queue import is_trainable_meta
+from app.core.dataset_trust import DatasetTrustState, classify_dataset_item
 from app.core.licensed_source_ingestion import GENERATED_CAP_RATIO
 from app.core.training_source_flags import is_generated_meta, is_train_only_supplemental_meta
 from app.core.waste_categories import canonical_class_name
@@ -40,10 +41,12 @@ def export_balanced_trainset(
     seed: int = 42,
 ) -> dict[str, object]:
     blocked_labels: Counter[str] = Counter()
+    blocked_items: Counter[str] = Counter()
     items = _load_items(
         queue_dir,
         set(class_names),
         blocked_labels=blocked_labels,
+        blocked_items=blocked_items,
         require_reviewed=require_reviewed,
     )
     selected = _select_items(
@@ -72,6 +75,7 @@ def export_balanced_trainset(
         "skipped_small_boxes": 0,
         "skipped_unknown_boxes": 0,
         "blocked_labels": blocked_labels,
+        "blocked_items": blocked_items,
     }
     for item in selected:
         split = _split_for(item)
@@ -103,6 +107,7 @@ def _load_items(
     allowed: set[str],
     *,
     blocked_labels: Counter[str],
+    blocked_items: Counter[str],
     require_reviewed: bool,
 ) -> list[QueueItem]:
     items: list[QueueItem] = []
@@ -110,11 +115,12 @@ def _load_items(
         try:
             meta = json.loads(image_path.with_suffix(".json").read_text(encoding="utf-8"))
         except Exception:
+            blocked_items["invalid_json"] += 1
             continue
-        if not isinstance(meta, dict) or not is_trainable_meta(meta):
+        if not isinstance(meta, dict):
+            blocked_items["invalid_meta"] += 1
             continue
-        if require_reviewed and meta.get("reviewed") is not True:
-            continue
+        decision = classify_dataset_item(meta)
         class_names: set[str] = set()
         for box in meta.get("boxes") or []:
             raw_name = str(box.get("cls_name") or "").strip()
@@ -123,9 +129,19 @@ def _load_items(
                 class_names.add(class_name)
             elif raw_name:
                 blocked_labels[raw_name] += 1
+        if require_reviewed and (meta.get("reviewed") is not True or meta.get("bbox_reviewed") is not True):
+            blocked_items["review_required"] += 1
+            continue
+        supplemental = is_train_only_supplemental_meta(meta)
+        if not is_trainable_meta(meta) and decision.state is not DatasetTrustState.HOLDOUT and not supplemental:
+            for reason in decision.reasons or (decision.state.value,):
+                blocked_items[reason] += 1
+            continue
         classes = frozenset(class_names)
         if classes:
             items.append(QueueItem(image_path, meta, classes))
+        else:
+            blocked_items["no_allowed_classes"] += 1
     return items
 
 

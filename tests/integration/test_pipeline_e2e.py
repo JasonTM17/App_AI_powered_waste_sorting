@@ -148,6 +148,13 @@ class _SameClassPairInfer:
         ]
 
 
+class _OnePenInfer:
+    class_names: ClassVar[dict[int, str]] = {42: "Pen"}
+
+    def predict(self, frame):
+        return [Detection(42, "Pen", 0.93, (20, 30, 120, 160))]
+
+
 def _dispatch_ready_config(*, mappings=None) -> AppConfig:
     cfg = AppConfig(mappings=mappings or [])
     cfg.roi.enabled = True
@@ -185,6 +192,7 @@ def _write_manual_reference(
         meta = {
             "source": "manual_camera_capture",
             "reviewed": True,
+            "bbox_reviewed": True,
             "recognition_enabled": True,
             "boxes": [{"cls_id": cls_id, "cls_name": cls_name, "conf": 1.0, "xyxy": [15, 12, 65, 28]}],
         }
@@ -553,7 +561,7 @@ def test_pipeline_warns_on_computer_speaker_when_selected(tmp_path, monkeypatch)
     p.close()
 
 
-def test_pipeline_allows_two_objects_of_same_class_in_roi(tmp_path, monkeypatch):
+def test_pipeline_blocks_two_objects_of_same_class_in_roi(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config(
         mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
@@ -568,10 +576,61 @@ def test_pipeline_allows_two_objects_of_same_class_in_roi(tmp_path, monkeypatch)
     detections = p.process_frame(frame, ts=datetime.now(UTC))
 
     assert [item.cls_name for item in detections] == ["Pen", "Pen"]
-    assert p.dispatch_status == "TEST OFF"
+    assert p.dispatch_status == "multiple waste types"
     assert uart.sent == []
     assert p.history.query(limit=10) == []
     assert speaker.texts == []
+    p.close()
+
+
+def test_pipeline_blocks_two_foreground_objects_when_yolo_sees_one(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
+    )
+    uart = _StubUart()
+    speaker = _StubSpeaker()
+    p = Pipeline(cfg, _OnePenInfer(), uart, tmp_path / "h.db", speaker=speaker)
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.full((240, 320, 3), 245, dtype=np.uint8)
+    frame[24:164, 24:92] = (35, 35, 35)
+    frame[56:200, 160:280] = (210, 85, 35)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert [item.cls_name for item in detections] == ["Pen"]
+    assert p.dispatch_status == "multiple waste types (2 visible objects)"
+    assert uart.sent == []
+    assert p.history.query(limit=10) == []
+    assert speaker.texts == []
+    p.close()
+
+
+def test_pipeline_blocks_full_frame_multi_object_when_roi_misses_one(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
+    )
+    cfg.roi.x = 0
+    cfg.roi.y = 0
+    cfg.roi.width = 120
+    cfg.roi.height = 120
+    uart = _StubUart()
+    speaker = _StubSpeaker()
+    p = Pipeline(cfg, _OnePenInfer(), uart, tmp_path / "h.db", speaker=speaker)
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.full((240, 320, 3), 245, dtype=np.uint8)
+    frame[24:164, 24:92] = (35, 35, 35)
+    frame[56:200, 160:280] = (210, 85, 35)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert [item.cls_name for item in detections] == ["Pen"]
+    assert p.dispatch_status == "multiple waste types (2 visible objects)"
+    assert uart.sent == []
+    assert p.history.query(limit=10) == []
     p.close()
 
 
@@ -665,7 +724,7 @@ def test_pipeline_dispatch_cooldown_suppresses_new_tracks(tmp_path, monkeypatch)
     p.close()
 
 
-def test_pipeline_unknown_object_does_not_loop_while_visible(tmp_path, monkeypatch):
+def test_pipeline_unknown_object_does_not_dispatch_while_visible(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config()
     cfg.model.conf_threshold = 0.4
@@ -677,16 +736,16 @@ def test_pipeline_unknown_object_does_not_loop_while_visible(tmp_path, monkeypat
     _arm_dispatch(p)
     for _ in range(6):
         p.process_frame(frame, ts=datetime.now(UTC))
-    p.on_ack(uart.sent[0][0], uart.sent[0][1], "ok", 12)
     for _ in range(6):
         p.process_frame(frame, ts=datetime.now(UTC))
 
-    assert [item[1] for item in uart.sent] == ["R"]
-    assert len(p.history.query(limit=10)) == 1
+    assert uart.sent == []
+    assert p.history.query(limit=10) == []
+    assert p.dispatch_status == "unknown object review required"
     p.close()
 
 
-def test_pipeline_falls_back_for_low_conf_unknown_object(tmp_path, monkeypatch):
+def test_pipeline_detects_low_conf_unknown_object_without_dispatch(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config()
     cfg.model.conf_threshold = 0.4
@@ -701,7 +760,29 @@ def test_pipeline_falls_back_for_low_conf_unknown_object(tmp_path, monkeypatch):
     assert first == []
     assert len(second) == 1
     assert second[0].cls_name == "Unknown object"
-    assert p.uart.sent == [(1, "R", second[0].conf)]
+    assert p.uart.sent == []
+    assert p.history.query(limit=1) == []
+    assert p.dispatch_status == "unknown object review required"
+    p.close()
+
+
+def test_pipeline_dispatches_unknown_only_with_explicit_mapping(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Unknown object", command="R", bin_index=2)]
+    )
+    cfg.model.conf_threshold = 0.4
+    cfg.unknown_fallback.stable_frames = 2
+    p = Pipeline(cfg, _LowConfidencePenInfer(), _StubUart(), tmp_path / "h.db")
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+    _arm_dispatch(p)
+    p.process_frame(frame, ts=datetime.now(UTC))
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert len(detections) == 1
+    assert detections[0].cls_name == "Unknown object"
+    assert p.uart.sent == [(1, "R", detections[0].conf)]
     row = p.history.query(limit=1)[0]
     assert row.cls_name == "Unknown object"
     assert row.uart_command == "R"
@@ -709,7 +790,7 @@ def test_pipeline_falls_back_for_low_conf_unknown_object(tmp_path, monkeypatch):
     p.close()
 
 
-def test_pipeline_falls_back_when_yolo_returns_no_boxes(tmp_path, monkeypatch):
+def test_pipeline_detects_unknown_when_yolo_returns_no_boxes_without_dispatch(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config()
     cfg.unknown_fallback.warmup_frames = 1
@@ -726,8 +807,9 @@ def test_pipeline_falls_back_when_yolo_returns_no_boxes(tmp_path, monkeypatch):
     assert first == []
     assert len(second) == 1
     assert second[0].cls_name == "Unknown object"
-    assert p.uart.sent == [(1, "R", second[0].conf)]
-    assert p.history.query(limit=1)[0].uart_command == "R"
+    assert p.uart.sent == []
+    assert p.history.query(limit=1) == []
+    assert p.dispatch_status == "unknown object review required"
     p.close()
 
 
