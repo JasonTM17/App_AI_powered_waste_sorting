@@ -8,10 +8,13 @@ cycle than a queue that grows unbounded.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 import numpy as np
 from PySide6.QtCore import QMutex, QThread, QWaitCondition, Signal
+
+logger = logging.getLogger(__name__)
 
 
 class InferenceWorker(QThread):
@@ -68,15 +71,21 @@ class InferenceWorker(QThread):
 
             if frame is None or self._pipeline is None:
                 continue
-            t0 = time.time()
-            try:
-                detections = self._pipeline.process_frame(
-                    frame, datetime.now(timezone.utc)
-                )
-            except Exception:
+            if not self._process_frame(frame, time):
                 continue
-            latency_ms = (time.time() - t0) * 1000.0
-            self.processed.emit(frame, detections, latency_ms)
+
+    def _process_frame(self, frame: np.ndarray, time_module) -> bool:
+        t0 = time_module.time()
+        try:
+            detections = self._pipeline.process_frame(
+                frame, datetime.now(timezone.utc)
+            )
+        except Exception:
+            logger.exception("inference worker frame processing failed")
+            return False
+        latency_ms = (time_module.time() - t0) * 1000.0
+        self.processed.emit(frame, detections, latency_ms)
+        return True
 
 
 __all__ = ["InferenceWorker"]
