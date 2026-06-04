@@ -7,7 +7,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from app.core.common_waste_catalog import common_waste_class_names
-from app.core.dataset_queue import is_trainable_meta
+from app.core.dataset_queue import is_trainable_meta, is_trusted_meta
 from app.core.licensed_source_ingestion import (
     GENERATED_CAP_RATIO,
     STRONG_MIN_HOLDOUT,
@@ -52,11 +52,17 @@ def build_learn_now_status(queue_dir: Path, selected_class: str = "") -> dict[st
         total_images += 1
         source = str(meta.get("source") or "")
         trainable = is_trainable_meta(meta)
-        reviewed = meta.get("reviewed") is True
+        reviewed = meta.get("reviewed") is True and meta.get("bbox_reviewed") is True
         holdout = meta.get("holdout") is True or str(meta.get("split") or "").lower() == "test"
         generated = is_generated_meta(meta)
         train_only_supplemental = is_train_only_supplemental_meta(meta)
         source_issue_count = len(source_manifest_issues(meta))
+        eligible_reviewed = (
+            reviewed
+            and is_trusted_meta(meta)
+            and meta.get("training_excluded") is not True
+            and not train_only_supplemental
+        )
         reference_allowed = (
             trainable
             and reviewed
@@ -87,6 +93,10 @@ def build_learn_now_status(queue_dir: Path, selected_class: str = "") -> dict[st
             stats[class_name]["source_issues"] += source_issue_count
             if reviewed:
                 stats[class_name]["reviewed"] += 1
+            if reviewed and trainable:
+                stats[class_name]["trainable_reviewed"] += 1
+            if eligible_reviewed:
+                stats[class_name]["eligible_reviewed"] += 1
             if reviewed and source in MANUAL_REFERENCE_SOURCES:
                 stats[class_name]["manual_reviewed"] += 1
             if reference_allowed:
@@ -114,6 +124,8 @@ def build_learn_now_status(queue_dir: Path, selected_class: str = "") -> dict[st
 def _status_row(class_name: str, counts: Counter[str]) -> dict[str, object]:
     category = category_for_class(class_name)
     reviewed_count = int(counts["reviewed"])
+    trainable_reviewed_count = int(counts["trainable_reviewed"])
+    eligible_reviewed_count = int(counts["eligible_reviewed"])
     reference_count = int(counts["reference"])
     holdout_count = int(counts["holdout"])
     generated_count = int(counts["generated"])
@@ -121,9 +133,9 @@ def _status_row(class_name: str, counts: Counter[str]) -> dict[str, object]:
     generated_over_cap = generated_count > generated_cap
     source_issue_count = int(counts["source_issues"])
     ready_for_reference = reference_count >= REFERENCE_MIN_REVIEWED
-    ready_for_micro_train = reviewed_count >= MICRO_TRAIN_MIN_REVIEWED
+    ready_for_micro_train = eligible_reviewed_count >= MICRO_TRAIN_MIN_REVIEWED
     ready_for_strong_train = (
-        reviewed_count >= STRONG_TRAIN_MIN_REVIEWED
+        eligible_reviewed_count >= STRONG_TRAIN_MIN_REVIEWED
         and holdout_count >= STRONG_TRAIN_MIN_HOLDOUT
         and not generated_over_cap
         and source_issue_count == 0
@@ -136,7 +148,7 @@ def _status_row(class_name: str, counts: Counter[str]) -> dict[str, object]:
         message = "Ready for fast candidate micro-train."
     else:
         action = "reference_only"
-        missing = MICRO_TRAIN_MIN_REVIEWED - reviewed_count
+        missing = MICRO_TRAIN_MIN_REVIEWED - eligible_reviewed_count
         message = f"Need {missing} more reviewed image(s) before micro-train."
     return {
         "class_name": class_name,
@@ -148,6 +160,8 @@ def _status_row(class_name: str, counts: Counter[str]) -> dict[str, object]:
         "images": int(counts["images"]),
         "trainable_count": int(counts["trainable"]),
         "reviewed_count": reviewed_count,
+        "trainable_reviewed_count": trainable_reviewed_count,
+        "eligible_reviewed_count": eligible_reviewed_count,
         "manual_reviewed_count": int(counts["manual_reviewed"]),
         "reference_count": reference_count,
         "holdout_count": holdout_count,
@@ -156,8 +170,8 @@ def _status_row(class_name: str, counts: Counter[str]) -> dict[str, object]:
         "generated_over_cap": generated_over_cap,
         "source_issue_count": source_issue_count,
         "missing_for_reference": max(0, REFERENCE_MIN_REVIEWED - reference_count),
-        "missing_for_micro_train": max(0, MICRO_TRAIN_MIN_REVIEWED - reviewed_count),
-        "missing_for_strong_train": max(0, STRONG_TRAIN_MIN_REVIEWED - reviewed_count),
+        "missing_for_micro_train": max(0, MICRO_TRAIN_MIN_REVIEWED - eligible_reviewed_count),
+        "missing_for_strong_train": max(0, STRONG_TRAIN_MIN_REVIEWED - eligible_reviewed_count),
         "missing_holdout_for_strong": max(0, STRONG_TRAIN_MIN_HOLDOUT - holdout_count),
         "ready_for_reference": ready_for_reference,
         "ready_for_micro_train": ready_for_micro_train,
