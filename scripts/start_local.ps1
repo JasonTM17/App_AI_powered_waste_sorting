@@ -36,7 +36,13 @@ function Import-LocalEnvFile {
 Import-LocalEnvFile (Join-Path $Root ".env")
 Import-LocalEnvFile (Join-Path $Root ".env.local")
 
-if ([string]::IsNullOrWhiteSpace($env:TRASH_SORTER_AUTH_DEV_DEFAULTS)) {
+$AuthExplicitlyConfigured = -not [string]::IsNullOrWhiteSpace($env:TRASH_SORTER_AUTH_DATABASE_URL) -or
+  -not [string]::IsNullOrWhiteSpace($env:DATABASE_URL) -or
+  -not [string]::IsNullOrWhiteSpace($env:TRASH_SORTER_AUTH_DB) -or
+  -not [string]::IsNullOrWhiteSpace($env:TRASH_SORTER_BOOTSTRAP_ADMIN_USERNAME) -or
+  -not [string]::IsNullOrWhiteSpace($env:TRASH_SORTER_BOOTSTRAP_ADMIN_PASSWORD)
+
+if (-not $AuthExplicitlyConfigured -and [string]::IsNullOrWhiteSpace($env:TRASH_SORTER_AUTH_DEV_DEFAULTS)) {
   $env:TRASH_SORTER_AUTH_DEV_DEFAULTS = "1"
 }
 $PythonExe = Join-Path $Root ".venv\Scripts\python.exe"
