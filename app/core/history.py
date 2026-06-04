@@ -200,6 +200,8 @@ class HistoryService:
         offset=0,
         cls_name=None,
         since: datetime | None = None,
+        until: datetime | None = None,
+        ack_status: str | None = None,
         owner_account_id: int | None = None,
         owner_username: str | None = None,
     ):
@@ -208,6 +210,10 @@ class HistoryService:
             stmt = stmt.where(detections.c.cls_name == cls_name)
         if since:
             stmt = stmt.where(detections.c.ts >= since.isoformat())
+        if until:
+            stmt = stmt.where(detections.c.ts <= until.isoformat())
+        if ack_status:
+            stmt = stmt.where(detections.c.ack_status == ack_status)
         stmt = _owned_stmt(stmt, owner_account_id, owner_username)
         with self._engine.begin() as conn:
             rows = conn.execute(stmt).mappings().all()
@@ -232,8 +238,19 @@ class HistoryService:
             )
             return int(result.rowcount or 0)
 
-    def count_by_class(self) -> dict[str, int]:
+    def count_by_class(
+        self,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        ack_status: str | None = None,
+    ) -> dict[str, int]:
         stmt = select(detections.c.cls_name, func.count()).group_by(detections.c.cls_name)
+        if since:
+            stmt = stmt.where(detections.c.ts >= since.isoformat())
+        if until:
+            stmt = stmt.where(detections.c.ts <= until.isoformat())
+        if ack_status:
+            stmt = stmt.where(detections.c.ack_status == ack_status)
         with self._engine.begin() as conn:
             return {name: int(cnt) for name, cnt in conn.execute(stmt).all()}
 

@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from app.agent.operations_store import OperationsStore
 from app.agent.schemas import BinFullnessDTO, DetectionDTO, DeviceState, RuntimeStatus
 from app.core.capture_session import CaptureSessionManager
 from app.core.config import (
@@ -24,6 +25,7 @@ from app.core.config import (
 )
 from app.core.dataset_queue import import_manual_camera_frame
 from app.core.frame_transform import apply_camera_transform
+from app.core.hard_negative_dataset import capture_hard_negative_frame
 from app.core.hardware_profile import hardware_profile_payload, route_for_command
 from app.core.history import HistoryService
 from app.core.inference import InferenceEngine
@@ -76,6 +78,7 @@ STREAM_JPEG_MAX_WIDTH = 960
 BIN_FULLNESS_STALE_AFTER_S = 10.0
 BIN_COUNT = 3
 ARDUINO_SERIAL_RESET_SETTLE_S = 2.2
+UART_OFF_NO_SEND_TEXT = "UART OFF, không gửi xuống phần cứng"
 
 
 class ThreadUartSender:
@@ -205,7 +208,7 @@ class ThreadUartSender:
                 "port": self.port,
                 "ack_status": "uart_off",
                 "elapsed_ms": 0,
-                "message": self.message or "UART OFF, khong gui xuong phan cung.",
+                "message": self.message or f"{UART_OFF_NO_SEND_TEXT}.",
             }
         with self._lock:
             t0 = time.time()
@@ -271,7 +274,7 @@ class ThreadUartSender:
                 "port": self.port,
                 "ack_status": "uart_off",
                 "elapsed_ms": 0,
-                "message": self.message or "UART OFF, khong gui xuong phan cung.",
+                "message": self.message or f"{UART_OFF_NO_SEND_TEXT}.",
                 "d6": int(d6_angle),
                 "d7": int(d7_angle),
                 "label": label,
@@ -332,7 +335,7 @@ class ThreadUartSender:
                 "port": self.port,
                 "ack_status": "uart_off",
                 "elapsed_ms": 0,
-                "message": self.message or "UART OFF, khong gui xuong phan cung.",
+                "message": self.message or f"{UART_OFF_NO_SEND_TEXT}.",
                 "d6": int(d6_angle),
                 "d7": int(d7_angle),
                 "label": label,
@@ -395,7 +398,7 @@ class ThreadUartSender:
                 "port": self.port,
                 "ack_status": "uart_off",
                 "elapsed_ms": 0,
-                "message": self.message or "UART OFF, khong gui xuong phan cung.",
+                "message": self.message or f"{UART_OFF_NO_SEND_TEXT}.",
                 "d6": int(d6_angle),
                 "d7": int(d7_angle),
                 "label": label,
@@ -458,7 +461,7 @@ class ThreadUartSender:
                 "port": self.port,
                 "ack_status": "uart_off",
                 "elapsed_ms": 0,
-                "message": self.message or "UART OFF, khong gui xuong phan cung.",
+                "message": self.message or f"{UART_OFF_NO_SEND_TEXT}.",
             }
         with self._lock:
             t0 = time.time()
@@ -535,7 +538,7 @@ class ThreadUartSender:
                 "port": self.port,
                 "ack_status": "uart_off",
                 "elapsed_ms": 0,
-                "message": self.message or "UART OFF, khong gui xuong phan cung.",
+                "message": self.message or f"{UART_OFF_NO_SEND_TEXT}.",
             }
         with self._lock:
             t0 = time.time()
@@ -746,6 +749,7 @@ class AgentRuntime:
         self._speaker = WasteSpeaker(
             enabled=computer_speaker_enabled(self.cfg),
             cooldown_seconds=self.cfg.speaker.cooldown_seconds,
+            voice_gender=self.cfg.speaker.voice_gender,
         )
         self._model_class_cache: dict[int, str] | None = None
         self._capture_session = CaptureSessionManager(
@@ -863,7 +867,7 @@ class AgentRuntime:
             "current_tai_che": tai_che_route.servo_positions if tai_che_route is not None else {},
             "last_log": uart.last_log if uart is not None else "",
             "disconnect_reason": uart.disconnect_reason if uart is not None else self._uart_warning,
-            "warning": "" if status.uart.connected else "UART OFF, khong gui xuong phan cung",
+            "warning": "" if status.uart.connected else UART_OFF_NO_SEND_TEXT,
         }
 
     def reconnect_hardware(self) -> dict[str, object]:
@@ -890,7 +894,7 @@ class AgentRuntime:
                 "port": self.cfg.uart.port,
                 "ack_status": "uart_off",
                 "elapsed_ms": 0,
-                "message": self._uart_warning or "UART OFF, khong gui xuong phan cung.",
+                "message": self._uart_warning or f"{UART_OFF_NO_SEND_TEXT}.",
             }
         return self._uart.send_test(command)
 
@@ -906,7 +910,7 @@ class AgentRuntime:
                 "port": self.cfg.uart.port,
                 "ack_status": "uart_off",
                 "elapsed_ms": 0,
-                "message": self._uart_warning or "UART OFF, khong gui xuong phan cung.",
+                "message": self._uart_warning or f"{UART_OFF_NO_SEND_TEXT}.",
             }
         return self._uart.send_audio_test(track)
 
@@ -924,7 +928,7 @@ class AgentRuntime:
                 "port": self.cfg.uart.port,
                 "ack_status": "uart_off",
                 "elapsed_ms": 0,
-                "message": self._uart_warning or "UART OFF, khong gui xuong phan cung.",
+                "message": self._uart_warning or f"{UART_OFF_NO_SEND_TEXT}.",
             }
         return self._uart.send_mp3_test(command, value)
 
@@ -939,7 +943,7 @@ class AgentRuntime:
                 "port": self.cfg.uart.port,
                 "ack_status": "uart_off",
                 "elapsed_ms": 0,
-                "message": self._uart_warning or "UART OFF, khong gui xuong phan cung.",
+                "message": self._uart_warning or f"{UART_OFF_NO_SEND_TEXT}.",
                 "d6": int(d6_angle),
                 "d7": int(d7_angle),
                 "label": label,
@@ -957,7 +961,7 @@ class AgentRuntime:
                 "port": self.cfg.uart.port,
                 "ack_status": "uart_off",
                 "elapsed_ms": 0,
-                "message": self._uart_warning or "UART OFF, khong gui xuong phan cung.",
+                "message": self._uart_warning or f"{UART_OFF_NO_SEND_TEXT}.",
                 "d6": int(d6_angle),
                 "d7": int(d7_angle),
                 "label": label,
@@ -986,7 +990,7 @@ class AgentRuntime:
                 "port": self.cfg.uart.port,
                 "ack_status": "uart_off",
                 "elapsed_ms": 0,
-                "message": self._uart_warning or "UART OFF, khong gui xuong phan cung.",
+                "message": self._uart_warning or f"{UART_OFF_NO_SEND_TEXT}.",
                 "d6": int(d6_angle),
                 "d7": int(d7_angle),
                 "label": label,
@@ -996,7 +1000,7 @@ class AgentRuntime:
     def actuation_test_mode(self) -> dict[str, object]:
         status = self.status(include_devices=False)
         uart_connected = status.uart.connected
-        warning = "" if uart_connected else "UART OFF, khong gui xuong phan cung"
+        warning = "" if uart_connected else UART_OFF_NO_SEND_TEXT
         with self._state_lock:
             enabled = self._actuation_test_enabled
         return {
@@ -1093,6 +1097,7 @@ class AgentRuntime:
             self._speaker.configure(
                 enabled=computer_speaker_enabled(cfg),
                 cooldown_seconds=cfg.speaker.cooldown_seconds,
+                voice_gender=cfg.speaker.voice_gender,
             )
             if self._pipeline is not None:
                 self._pipeline.update_config(cfg)
@@ -1273,6 +1278,36 @@ class AgentRuntime:
             catalog_path=self.dataset_file,
         )
 
+    def capture_hard_negative_sample(self, reason: str) -> Path:
+        """Save latest camera frame as safety-eval data, never as train data."""
+        self.set_actuation_test_mode(False)
+        with self._state_lock:
+            if not self.is_camera_running() or self._latest_frame is None:
+                raise RuntimeError("Camera is not running or has no frame yet")
+            frame = self._latest_frame.copy()
+            detections = list(self._detections)
+            cfg = self.cfg.model_copy(deep=True)
+        extra_meta: dict[str, object] = {
+            "capture_mode": "hard_negative_camera",
+            "hardware_blocked": True,
+            "detection_context": _detection_context(detections),
+        }
+        if cfg.roi.enabled:
+            extra_meta["roi_context"] = {
+                "enabled": True,
+                "x": int(cfg.roi.x),
+                "y": int(cfg.roi.y),
+                "width": int(cfg.roi.width),
+                "height": int(cfg.roi.height),
+            }
+        return capture_hard_negative_frame(
+            frame,
+            self._queue_dir_for_config(cfg),
+            reason,
+            catalog_path=self.dataset_file,
+            extra_meta=extra_meta,
+        )
+
     def capture_unknown_learn_sample(
         self,
         cls_name: str,
@@ -1396,6 +1431,30 @@ class AgentRuntime:
                 time.monotonic(),
                 datetime.now().isoformat(),
             )
+        self._persist_bin_fullness(bin_index, clamped)
+
+    def _persist_bin_fullness(self, bin_index: int, percent: int) -> None:
+        try:
+            store = OperationsStore(
+                self.operations_file,
+                device_defaults={
+                    "device_id": self.cfg.device.device_id,
+                    "device_name": self.cfg.device.device_name,
+                    "location": self.cfg.device.location,
+                    "owner_username": self.cfg.device.owner_username,
+                },
+            )
+            try:
+                store.update_bin_fullness(
+                    bin_index,
+                    percent,
+                    device_id=self.cfg.device.device_id,
+                    owner_username=self.cfg.device.owner_username,
+                )
+            finally:
+                store.close()
+        except Exception as exc:
+            logger.warning("agent operations bin fullness persistence failed: {}", exc)
 
     def bin_fullness(self) -> list[BinFullnessDTO]:
         now = time.monotonic()
@@ -1462,9 +1521,17 @@ class AgentRuntime:
         if self._pipeline is not None:
             self._pipeline.close()
             self._pipeline = None
+        self._engine = None
+        self._model_class_cache = None
         if self._uart is not None:
             self._uart.close()
             self._uart = None
+        with self._state_lock:
+            self._latest_frame = None
+            self._latest_jpeg = None
+            self._detections = []
+            self._fps = 0.0
+        _release_inference_memory()
 
     def _camera_loop(self, source: str) -> None:
         cap = None
@@ -1657,7 +1724,11 @@ class AgentRuntime:
             None,
         )
         fallback = self.cfg.unknown_fallback
-        if mapping is None and detection.cls_name == fallback.class_name:
+        if (
+            mapping is None
+            and detection.cls_name == fallback.class_name
+            and fallback.dispatch_enabled
+        ):
             mapping = ClassMapping(
                 class_name=fallback.class_name,
                 command=fallback.command,
@@ -1773,7 +1844,7 @@ class AgentRuntime:
                 port = self.cfg.uart.port.strip()
             else:
                 self._uart_warning = (
-                    f"UART OFF, khong gui xuong phan cung: {port or 'configured port'} not visible."
+                    f"{UART_OFF_NO_SEND_TEXT}: chưa thấy cổng {port or 'đã cấu hình'}."
                 )
                 if self._pipeline is not None:
                     self._pipeline.set_uart(None)
@@ -1860,6 +1931,28 @@ def _bbox_area(bbox: tuple[int, int, int, int]) -> int:
     return max(0, int(bbox[2]) - int(bbox[0])) * max(0, int(bbox[3]) - int(bbox[1]))
 
 
+def _detection_context(detections: list[object]) -> list[dict[str, object]]:
+    context: list[dict[str, object]] = []
+    for detection in detections:
+        bbox = getattr(detection, "bbox", None)
+        if bbox is None:
+            bbox = getattr(detection, "xyxy", None)
+        try:
+            clean_bbox = [int(value) for value in list(bbox or [])[:4]]
+        except (TypeError, ValueError):
+            clean_bbox = []
+        context.append(
+            {
+                "cls_id": int(getattr(detection, "cls_id", -1) or -1),
+                "cls_name": str(getattr(detection, "cls_name", "")),
+                "conf": float(getattr(detection, "conf", 0.0) or 0.0),
+                "bbox": clean_bbox,
+                "source": str(getattr(detection, "source", "")),
+            }
+        )
+    return context
+
+
 def _open_capture(source: str, width: int, height: int) -> tuple[Any, str, FrameQuality] | None:
     import cv2
 
@@ -1898,6 +1991,23 @@ def _open_capture(source: str, width: int, height: int) -> tuple[Any, str, Frame
         )
         cap.release()
     return None
+
+
+def _release_inference_memory() -> None:
+    """Best-effort cleanup for model/GPU memory during agent shutdown."""
+    try:
+        import gc
+
+        gc.collect()
+    except Exception as exc:  # pragma: no cover - defensive cleanup
+        logger.debug("python gc cleanup skipped: {}", exc)
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception as exc:  # pragma: no cover - torch may be unavailable in tests
+        logger.debug("cuda cache cleanup skipped: {}", exc)
 
 
 def _capture_best_quality(cap, *, frames: int = 5) -> FrameQuality:

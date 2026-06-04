@@ -65,6 +65,25 @@ class AuthChangePasswordRequest(BaseModel):
     new_password: str = Field(..., min_length=8, max_length=200)
 
 
+class CameraStreamTokenResponse(BaseModel):
+    token: str
+    expires_at: str
+
+
+class AudioVoiceEventStatusDTO(BaseModel):
+    event_key: str
+    label: str
+    available: bool
+
+
+class AudioVoicePackStatusResponse(BaseModel):
+    gender: Literal["female", "male"]
+    available_count: int
+    total_count: int
+    missing_events: list[str] = Field(default_factory=list)
+    events: list[AudioVoiceEventStatusDTO] = Field(default_factory=list)
+
+
 class AccountDTO(BaseModel):
     id: int
     username: str
@@ -125,6 +144,7 @@ class BinChildDTO(BaseModel):
     bin_index: int
     label: str
     fullness_percent: float | None = None
+    fill_percent: float = 0.0
     status: str = "unknown"
     active: bool = True
     updated_at: str = ""
@@ -141,12 +161,18 @@ class BinStationDTO(BaseModel):
     status: str = "candidate"
     coordinate_verified: bool = False
     source: str = ""
+    seed_source: str = ""
     assigned_owner_username: str = ""
+    owner_username: str = ""
+    device_id: str = ""
+    note: str = ""
     active: bool = True
     created_at: str = ""
     updated_at: str = ""
     bins: list[BinChildDTO] = Field(default_factory=list)
     alert_counts: dict[str, int] = Field(default_factory=dict)
+    alert_total: int = 0
+    open_alert_total: int = 0
 
 
 class BinMapCenterDTO(BaseModel):
@@ -174,6 +200,9 @@ class BinStationCreateRequest(BaseModel):
     coordinate_verified: bool = False
     source: str = Field("admin", max_length=80)
     assigned_owner_username: str = Field("", max_length=80)
+    owner_username: str = Field("", max_length=80)
+    device_id: str = Field("", max_length=120)
+    note: str = Field("", max_length=400)
     active: bool = True
 
 
@@ -187,6 +216,9 @@ class BinStationPatchRequest(BaseModel):
     coordinate_verified: bool | None = None
     source: str | None = Field(default=None, max_length=80)
     assigned_owner_username: str | None = Field(default=None, max_length=80)
+    owner_username: str | None = Field(default=None, max_length=80)
+    device_id: str | None = Field(default=None, max_length=120)
+    note: str | None = Field(default=None, max_length=400)
     active: bool | None = None
 
 
@@ -792,6 +824,19 @@ class CameraSampleRequest(BaseModel):
     use_latest_detection_box: bool = True
 
 
+class HardNegativeCaptureRequest(BaseModel):
+    reason: Literal[
+        "empty_tray",
+        "hand_only",
+        "background_clutter",
+        "two_objects",
+        "outside_roi",
+        "cloth_non_waste",
+        "wire_or_fixture",
+        "blur_or_motion",
+    ]
+
+
 class UnknownLearnRequest(BaseModel):
     manual_hint: str = ""
     approved_cls_name: str = ""
@@ -993,6 +1038,15 @@ class DatasetItemDTO(BaseModel):
     updated_at: str
     trusted: bool = True
     reviewed: bool = False
+    trust_state: str = ""
+    trust_reasons: list[str] = Field(default_factory=list)
+    review_decision: str = ""
+    review_reason: str = ""
+    reviewed_by: str = ""
+    bbox_reviewed: bool = False
+    training_excluded: bool = False
+    quarantined: bool = False
+    quarantine_reason: str = ""
 
 
 class DatasetItemsResponse(BaseModel):
@@ -1057,6 +1111,24 @@ class WebSourceDiscoveryResponse(BaseModel):
 
 class AnnotationRequest(BaseModel):
     boxes: list[DatasetBoxDTO]
+
+
+class DatasetReviewRequestDTO(BaseModel):
+    action: Literal[
+        "approve",
+        "relabel",
+        "bbox_approved",
+        "needs_annotation",
+        "hard_negative",
+        "holdout",
+        "quarantine",
+        "exclude",
+    ]
+    cls_name: str | None = None
+    cls_id: int | None = None
+    reason: str = ""
+    actor: str | None = None
+    boxes: list[DatasetBoxDTO] = Field(default_factory=list)
 
 
 class BulkDatasetRequest(BaseModel):
@@ -1157,6 +1229,8 @@ __all__ = [
     "AlertPatchRequest",
     "AlertsResponse",
     "AnnotationRequest",
+    "AudioVoiceEventStatusDTO",
+    "AudioVoicePackStatusResponse",
     "AuthChangePasswordRequest",
     "AuthLoginRequest",
     "AuthLoginResponse",
@@ -1171,6 +1245,7 @@ __all__ = [
     "BinStationPatchRequest",
     "BulkDatasetRequest",
     "CameraSampleRequest",
+    "CameraStreamTokenResponse",
     "CaptureSessionFrameRequest",
     "CaptureSessionResponse",
     "CaptureSessionStartRequest",
@@ -1184,6 +1259,7 @@ __all__ = [
     "DatasetBoxDTO",
     "DatasetItemDTO",
     "DatasetItemsResponse",
+    "DatasetReviewRequestDTO",
     "DatasetSummaryDTO",
     "DeleteRequest",
     "DetectionDTO",
@@ -1192,6 +1268,7 @@ __all__ = [
     "DeviceIssueResponse",
     "DeviceStatusDTO",
     "EcoScoreDTO",
+    "HardNegativeCaptureRequest",
     "HardwareAudioTestRequest",
     "HardwareAudioTestResponse",
     "HardwareDiagnosticsResponse",
