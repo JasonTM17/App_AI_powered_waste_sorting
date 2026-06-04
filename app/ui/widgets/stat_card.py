@@ -10,6 +10,7 @@ class StatCard(QFrame):
         super().__init__(parent)
         self.setObjectName("card")
         self.setMinimumHeight(108)
+        self.setMinimumWidth(120)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 14, 18, 14)
         layout.setSpacing(5)

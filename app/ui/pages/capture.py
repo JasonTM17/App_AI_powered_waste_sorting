@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFrame,
-    QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -68,7 +67,7 @@ class CapturePage(QWidget):
         self._catalog_path = dataset_db_path()
         self._sync_thread: CatalogSyncThread | None = None
         self._queue_files_cache: tuple[Path, int, list[Path]] | None = None
-        self._display_files_cache: tuple[Path, int, int, list[Path]] | None = None
+        self._display_files_cache: tuple[Path, int, int, str, str, str, list[Path]] | None = None
         self._queue_count_cache: tuple[Path, int, int] | None = None
         self._catalog_summary_cache: tuple[int, dict] | None = None
         self._label_cache: dict[str, tuple[int, str]] = {}
@@ -88,18 +87,17 @@ class CapturePage(QWidget):
         mode_layout = QVBoxLayout(mode_card)
         mode_layout.setContentsMargins(20, 16, 20, 16)
         mode_layout.setSpacing(12)
-        mode_row = QHBoxLayout()
-        mode_row.setSpacing(20)
-        action_row = QHBoxLayout()
-        action_row.setSpacing(10)
-        manage_row = QHBoxLayout()
-        manage_row.setSpacing(10)
-        catalog_row = QHBoxLayout()
-        catalog_row.setSpacing(10)
+        from app.ui.widgets.flow_layout import FlowLayout
+        mode_row = FlowLayout(margin=0, h_spacing=20, v_spacing=10)
+        action_row = FlowLayout(margin=0, h_spacing=10, v_spacing=10)
+        manage_row = FlowLayout(margin=0, h_spacing=10, v_spacing=10)
+        catalog_row = FlowLayout(margin=0, h_spacing=10, v_spacing=10)
+        filter_row = FlowLayout(margin=0, h_spacing=10, v_spacing=10)
         mode_layout.addLayout(mode_row)
         mode_layout.addLayout(action_row)
         mode_layout.addLayout(manage_row)
         mode_layout.addLayout(catalog_row)
+        mode_layout.addLayout(filter_row)
 
         self.rb_off = QRadioButton("Tắt")
         self.rb_manual = QRadioButton("Manual")
@@ -119,8 +117,6 @@ class CapturePage(QWidget):
         self.rb_off.toggled.connect(lambda v: v and self.mode_changed.emit("off"))
         self.rb_manual.toggled.connect(lambda v: v and self.mode_changed.emit("manual"))
         self.rb_auto.toggled.connect(lambda v: v and self.mode_changed.emit("auto_low_conf"))
-
-        mode_row.addStretch()
 
         self.class_select = QComboBox()
         self.class_select.setMinimumWidth(220)
@@ -178,8 +174,6 @@ class CapturePage(QWidget):
         _fit_button_to_text(btn_quarantine, 130)
         btn_quarantine.clicked.connect(self._quarantine_untrusted)
         manage_row.addWidget(btn_quarantine)
-        manage_row.addStretch()
-        action_row.addStretch()
 
         self.counter = QLabel("0 ảnh")
         self.counter.setObjectName("mono")
@@ -208,7 +202,27 @@ class CapturePage(QWidget):
         _fit_button_to_text(btn_export, 110)
         btn_export.clicked.connect(self._export)
         catalog_row.addWidget(btn_export)
-        catalog_row.addStretch()
+
+        self.filter_source = QComboBox()
+        self.filter_source.addItem("Tất cả nguồn", "")
+        self.filter_trust = QComboBox()
+        self.filter_trust.addItem("Tất cả trạng thái", "")
+        self.filter_trust.addItem("Trainable", "trainable")
+        self.filter_trust.addItem("Cần duyệt", "needs_review")
+        self.filter_trust.addItem("Hard negative", "hard_negative")
+        self.filter_trust.addItem("Holdout", "holdout")
+        self.filter_trust.addItem("Không train", "excluded")
+        self.filter_class = QComboBox()
+        self.filter_class.addItem("Tất cả nhãn", "")
+
+        filter_row.addWidget(QLabel("Lọc:"))
+        filter_row.addWidget(self.filter_source)
+        filter_row.addWidget(self.filter_trust)
+        filter_row.addWidget(self.filter_class)
+
+        self.filter_source.currentIndexChanged.connect(self._invalidate_display_cache_and_reload)
+        self.filter_trust.currentIndexChanged.connect(self._invalidate_display_cache_and_reload)
+        self.filter_class.currentIndexChanged.connect(self._invalidate_display_cache_and_reload)
 
         outer.addWidget(mode_card)
 
@@ -477,6 +491,7 @@ class CapturePage(QWidget):
                 trust_counts = catalog.count_by_trusted()
                 summary["trainable"] = trust_counts.get("trainable", 0)
                 summary["needs_review"] = trust_counts.get("needs_review", 0)
+                summary["sources_dict"] = sources
                 self._catalog_summary_cache = (_safe_mtime_ns(self._catalog_path), summary)
                 return summary
             finally:
@@ -498,29 +513,41 @@ class CapturePage(QWidget):
         self._queue_count_cache = (key_path, mtime_ns, len(files))
         return files
 
+    def _invalidate_display_cache_and_reload(self) -> None:
+        self._display_files_cache = None
+        self._update_grid_ui()
+
     def _display_files(self, qdir: Path) -> list[Path]:
         key_path = qdir.resolve()
         qdir_mtime_ns = _safe_mtime_ns(qdir)
         catalog_mtime_ns = _safe_mtime_ns(self._catalog_path)
+        
+        f_source = self.filter_source.currentData() or ""
+        f_trust = self.filter_trust.currentData() or ""
+        f_class = self.filter_class.currentData() or ""
+
         cached = self._display_files_cache
         if (
             cached is not None
             and cached[0] == key_path
             and cached[1] == qdir_mtime_ns
             and cached[2] == catalog_mtime_ns
+            and cached[3] == f_source
+            and cached[4] == f_trust
+            and cached[5] == f_class
         ):
-            return cached[3]
-        files = self._catalog_display_files(qdir)
-        if not files:
+            return cached[6]
+        files = self._catalog_display_files(qdir, f_source, f_trust, f_class)
+        if not files and not (f_source or f_trust or f_class):
             files = sorted(
                 qdir.glob("*.jpg"),
                 key=lambda path: (_safe_mtime_ns(path), path.name),
                 reverse=True,
             )[:DISPLAY_LIMIT]
-        self._display_files_cache = (key_path, qdir_mtime_ns, catalog_mtime_ns, files)
+        self._display_files_cache = (key_path, qdir_mtime_ns, catalog_mtime_ns, f_source, f_trust, f_class, files)
         return files
 
-    def _catalog_display_files(self, qdir: Path) -> list[Path]:
+    def _catalog_display_files(self, qdir: Path, f_source: str, f_trust: str, f_class: str) -> list[Path]:
         if not self._catalog_path.exists():
             return []
         files: list[Path] = []
@@ -528,27 +555,30 @@ class CapturePage(QWidget):
         try:
             catalog = DatasetCatalog(self._catalog_path)
             try:
-                for trusted in (True, False):
-                    if len(files) >= DISPLAY_LIMIT:
-                        break
-                    rows, _total = catalog.list_items(
-                        limit=DISPLAY_LIMIT - len(files),
-                        trusted=trusted,
-                    )
-                    for row in rows:
-                        path = Path(str(row.get("image_path") or ""))
-                        if not path.exists():
-                            continue
-                        resolved = path.resolve()
-                        if resolved in seen:
-                            continue
-                        files.append(path)
-                        seen.add(resolved)
+                if len(files) >= DISPLAY_LIMIT:
+                    return files
+                rows, _total = catalog.list_items(
+                    limit=DISPLAY_LIMIT,
+                    source=f_source or None,
+                    trust_state=f_trust or None,
+                    cls_name=f_class or None,
+                )
+                if not f_trust:
+                    rows.sort(key=_catalog_display_trust_rank)
+                for row in rows:
+                    path = Path(str(row.get("image_path") or ""))
+                    if not path.exists():
+                        continue
+                    resolved = path.resolve()
+                    if resolved in seen:
+                        continue
+                    files.append(path)
+                    seen.add(resolved)
             finally:
                 catalog.close()
         except Exception:
             return []
-        if len(files) < DISPLAY_LIMIT and qdir.exists():
+        if len(files) < DISPLAY_LIMIT and qdir.exists() and not (f_source or f_trust or f_class):
             for path in sorted(
                 qdir.glob("*.jpg"),
                 key=lambda item: (_safe_mtime_ns(item), item.name),
@@ -589,12 +619,22 @@ class CapturePage(QWidget):
                 if meta.get("boxes"):
                     box = meta["boxes"][0]
                     label = f"{box.get('cls_name', '?')} {box.get('conf', 0):.2f}"
+                
+                from app.core.dataset_trust import classify_dataset_item
+                trust_decision = classify_dataset_item(meta)
+                trust_val = trust_decision.state.value
+                
                 status = _review_status_text(meta)
                 source = _source_label(str(meta.get("source") or "unknown"))
+                
+                parts = [label]
+                if trust_val:
+                    parts.append(f"State: {trust_val}")
                 if status:
-                    label = f"{status}: {label}"
+                    parts.append(f"Status: {status}")
                 if source:
-                    label = f"{label}\n{source}"
+                    parts.append(f"Src: {source}")
+                label = "\n".join(parts)
             except Exception:
                 pass
         self._label_cache[key] = (mtime_ns, label)
@@ -721,6 +761,20 @@ def _count_queue_images(queue_dir: Path) -> int:
     if not queue_dir.exists():
         return 0
     return sum(1 for _ in queue_dir.glob("*.jpg"))
+
+
+def _catalog_display_trust_rank(row: dict) -> tuple[int, int]:
+    state = str(row.get("trust_state") or "")
+    reviewed = 0 if int(row.get("reviewed") or 0) else 1
+    rank = {
+        DatasetTrustState.TRAINABLE.value: 0,
+        DatasetTrustState.HOLDOUT.value: 1,
+        DatasetTrustState.HARD_NEGATIVE.value: 2,
+        DatasetTrustState.NEEDS_REVIEW.value: 3,
+        DatasetTrustState.EXCLUDED.value: 4,
+        DatasetTrustState.QUARANTINE.value: 5,
+    }.get(state, 6)
+    return rank, reviewed
 
 
 def _safe_mtime_ns(path: Path) -> int:
