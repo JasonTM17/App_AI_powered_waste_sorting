@@ -146,6 +146,49 @@ def test_stats_by_class(tmp_path: Path):
     svc.close()
 
 
+def test_query_and_counts_respect_until_and_ack_filters(tmp_path: Path):
+    db = tmp_path / "h.db"
+    svc = HistoryService(db)
+    svc.insert(
+        track_id=1,
+        ts=datetime(2026, 6, 5, 8, 0, tzinfo=UTC),
+        cls_id=0,
+        cls_name="Aluminum can",
+        conf=0.9,
+        bbox=(0, 0, 1, 1),
+        thumbnail=b"",
+        uart_command="I",
+        ack_status="ok",
+    )
+    svc.insert(
+        track_id=2,
+        ts=datetime(2026, 6, 10, 8, 0, tzinfo=UTC),
+        cls_id=0,
+        cls_name="Paper",
+        conf=0.9,
+        bbox=(0, 0, 1, 1),
+        thumbnail=b"",
+        uart_command="I",
+        ack_status="pending",
+    )
+
+    rows = svc.query(
+        limit=10,
+        since=datetime(2026, 6, 10, 0, 0, tzinfo=UTC),
+        until=datetime(2026, 6, 10, 23, 59, 59, tzinfo=UTC),
+        ack_status="ok",
+    )
+    counts = svc.count_by_class(
+        since=datetime(2026, 6, 10, 0, 0, tzinfo=UTC),
+        until=datetime(2026, 6, 10, 23, 59, 59, tzinfo=UTC),
+        ack_status="ok",
+    )
+
+    assert rows == []
+    assert counts == {}
+    svc.close()
+
+
 def test_count_by_hour(tmp_path):
     from datetime import UTC, datetime
 
