@@ -102,20 +102,26 @@ def _arm_dispatch(p: Pipeline) -> None:
     p._dispatch_guard.observe_frame(has_visible_object=False, roi_ready=True, now=time.monotonic())
 
 
-def _write_manual_reference(queue_dir: Path) -> None:
+def _write_manual_reference(
+    queue_dir: Path,
+    *,
+    cls_name: str = "Pen",
+    cls_id: int = 42,
+    rgb_color: tuple[int, int, int] = (220, 30, 30),
+) -> None:
     queue_dir.mkdir(parents=True, exist_ok=True)
     for index in range(3):
         image = Image.new("RGB", (80, 40), (20, 20, 20))
         for x in range(15, 65):
             for y in range(12, 28):
-                image.putpixel((x, y), (220, 30, 30))
+                image.putpixel((x, y), rgb_color)
         img_path = queue_dir / f"manual_camera_ref_{index}.jpg"
         image.save(img_path, format="JPEG", quality=95)
         meta = {
             "source": "manual_camera_capture",
             "reviewed": True,
             "recognition_enabled": True,
-            "boxes": [{"cls_id": 42, "cls_name": "Pen", "conf": 1.0, "xyxy": [15, 12, 65, 28]}],
+            "boxes": [{"cls_id": cls_id, "cls_name": cls_name, "conf": 1.0, "xyxy": [15, 12, 65, 28]}],
         }
         img_path.with_suffix(".json").write_text(json.dumps(meta), encoding="utf-8")
 
@@ -142,6 +148,32 @@ def test_pipeline_labels_unknown_with_reviewed_manual_reference(tmp_path, monkey
     assert [d.cls_name for d in detections] == ["Pen"]
     assert detections[0].conf >= 0.9
     assert uart.sent == []
+
+
+def test_pipeline_routes_unknown_with_legacy_common_reference_alias(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
+    cfg = _dispatch_ready_config()
+    cfg.capture.output_dir = str(tmp_path / "dataset_v2")
+    cfg.model.conf_threshold = 0.3
+    cfg.manual_reference_recognition.min_similarity = 0.9
+    _write_manual_reference(
+        Path(cfg.capture.output_dir) / "low_conf_queue",
+        cls_name="lon nuoc",
+        cls_id=0,
+        rgb_color=(30, 90, 230),
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, _UnknownInfer(), uart, tmp_path / "h.db")
+    frame = np.zeros((40, 80, 3), dtype=np.uint8)
+    frame[:, :] = (20, 20, 20)
+    frame[12:28, 15:65] = (230, 90, 30)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [d.cls_name for d in detections] == ["Aluminum can"]
+    assert uart.sent == [(1, "I", detections[0].conf)]
 
 
 def test_pipeline_emits_one_command_per_object(tmp_path, monkeypatch):

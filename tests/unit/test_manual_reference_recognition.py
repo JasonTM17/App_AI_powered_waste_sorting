@@ -195,3 +195,30 @@ def test_manual_reference_recognizes_multiple_common_waste_classes(tmp_path):
 
         assert match is not None
         assert match.cls_name == cls_name
+
+
+def test_manual_reference_canonicalizes_legacy_common_aliases(tmp_path):
+    queue_dir = tmp_path / "queue"
+    _write_reference(
+        queue_dir,
+        reviewed=True,
+        cls_name="vo chuoi",
+        cls_id=0,
+        rgb_color=(40, 180, 60),
+    )
+    recognizer = ManualReferenceRecognizer(
+        queue_dir,
+        min_similarity=0.9,
+        refresh_seconds=0,
+        query_cache_seconds=0,
+        embedder=LegacyImageEmbedder(),
+    )
+
+    match = recognizer.classify(
+        _query_frame_for_rgb((40, 180, 60)),
+        Detection(999, "Unknown object", 0.39, (15, 12, 65, 28)),
+    )
+
+    assert match is not None
+    assert match.cls_name == "Organic"
+    assert match.cls_id == 17

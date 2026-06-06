@@ -200,6 +200,10 @@ Implemented:
 - Added a curated common-waste catalog for Vietnamese household items such as
   `Vo chuoi`, `Lon nuoc`, `Chai PET`, `Hop giay`, `Khau trang`, `But bi`, and
   `Pin`.
+- Extended that catalog with additional household items such as `Vo trung`,
+  `Ba ca phe/tra`, `Lon do hop`, `Nap chai kim loai`, `Chai dau goi/sua tam`,
+  `Ta giay/giay uot`, `Vo keo/vi thuoc`, and `Dau loc thuoc la`. These still
+  map into the fixed 45-class taxonomy instead of creating ad-hoc classes.
 - Added `/api/common-waste/catalog` so web/manual workflows can pick common
   labels while saving canonical classes.
 - Data tab now shows quick common-waste choices; selecting a common item fills
@@ -214,6 +218,9 @@ Implemented:
 - Reviewed-reference recognition is validated on multiple common classes and
   still only corrects `Unknown object`; it does not overwrite confident YOLO
   detections.
+- Reviewed-reference loading also canonicalizes legacy alias labels. Existing
+  manually reviewed samples saved as aliases such as `lon nuoc` now become
+  `Aluminum can` in the immediate-recognition path.
 - Fast export can include common-waste focus classes and filter tiny/thin boxes.
 - Training utility can run with `--no-plots` to avoid plot-time memory failures.
 
@@ -276,7 +283,8 @@ Stage 1 final status:
 Stage 2 stabilization:
 
 - Added low-memory augmentation controls to `scripts/train_yolo.py`:
-  `--mosaic`, `--erasing`, `--scale`, and `--translate`.
+  `--mosaic`, `--erasing`, `--scale`, `--translate`, HSV controls, and flip
+  controls.
 - Hardened `scripts/start_common_software_training.ps1` so export/train exit
   codes fail the script instead of continuing silently.
 - Added `scripts/start_common_software_stage2.ps1` to resume from stage 1 best
@@ -286,9 +294,36 @@ Stage 2 stabilization:
 - Stage 2 logs:
   `runs/train_logs/common-stage2-20260606-230021.out.log` and
   `runs/train_logs/common-stage2-20260606-230021.err.log`.
+- The first 640px batch-8 stage 2 attempt reached epoch 4, then stopped with an
+  OpenCV allocation error during HSV augmentation. This candidate is not
+  promotable.
+- Low-memory 640px batch-4 was stable but too slow for this pass, so it was
+  stopped and replaced with a 512px batch-16 run with cache disabled and HSV
+  augmentation off.
+- Final stabilized run:
+  `runs/train/trash-sorter-common-software-stage2-fast512-b16`.
+- Validation best came from `best.pt`; final validation summary was overall
+  `P=0.521`, `R=0.581`, `mAP50=0.582`, `mAP50-95=0.459`.
+- Test split evaluation of
+  `runs/train/trash-sorter-common-software-stage2-fast512-b16/weights/best.pt`
+  on `dataset_v2/yolo_fast_common`: overall `P=0.479`, `R=0.469`,
+  `mAP50=0.521`, `mAP50-95=0.405`.
+- Compared with stage 1, the stabilized run improved test `mAP50` from `0.493`
+  to `0.521` and `mAP50-95` from `0.388` to `0.405`, but it is still not
+  production-ready.
+- Strong test classes: `Aluminum can` (`mAP50=0.902`), `Organic` (`0.828`),
+  `Plastic bag` (`0.889`), `Plastic bottle` (`0.855`), `Plastic cup` (`0.973`),
+  and `Glass bottle` (`0.817`).
+- Weak or tiny-count test classes: `Pen` (`P=0.498`, `R=0.215`,
+  `mAP50=0.232`), `Battery` (`R=0`, `mAP50=0.249`), `Toothbrush`
+  (`mAP50=0.111`), `Ceramic`, `Paper cups`, `Unknown plastic`, and
+  `Postal packaging`.
+- Keep using reviewed-reference recognition for immediate common-waste handling.
+  Add more real camera/licensed web samples for weak classes before another
+  YOLO promotion attempt.
 - Verification after the latest software pass: Ruff full repo passed, mypy
   `app/core` passed, PowerShell training scripts parse, full pytest passed
-  `234 passed, 1 skipped`, and Next.js production build passed.
+  `237 passed, 1 skipped`, and Next.js production build passed.
 - Production model remains unchanged until candidate metrics and camera tests
   pass.
 

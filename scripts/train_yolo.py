@@ -45,6 +45,11 @@ def main() -> int:
     parser.add_argument("--erasing", type=float, default=0.4)
     parser.add_argument("--scale", type=float, default=0.5)
     parser.add_argument("--translate", type=float, default=0.1)
+    parser.add_argument("--hsv-h", type=float, default=0.015)
+    parser.add_argument("--hsv-s", type=float, default=0.7)
+    parser.add_argument("--hsv-v", type=float, default=0.4)
+    parser.add_argument("--fliplr", type=float, default=0.5)
+    parser.add_argument("--flipud", type=float, default=0.0)
     parser.add_argument("--cos-lr", action="store_true", help="Use cosine LR schedule")
     parser.add_argument("--optimizer", default="SGD", help="Use a fixed optimizer so lr0 is respected")
     args = parser.parse_args()
@@ -85,6 +90,11 @@ def main() -> int:
         erasing=args.erasing,
         scale=args.scale,
         translate=args.translate,
+        hsv_h=args.hsv_h,
+        hsv_s=args.hsv_s,
+        hsv_v=args.hsv_v,
+        fliplr=args.fliplr,
+        flipud=args.flipud,
         cos_lr=args.cos_lr,
         optimizer=args.optimizer,
         amp=args.amp,

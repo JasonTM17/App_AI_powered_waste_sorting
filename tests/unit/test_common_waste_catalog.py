@@ -5,6 +5,7 @@ from app.core.waste_categories import (
     RECYCLABLE,
     canonical_class_name,
     category_for_class,
+    default_class_id_for_name,
 )
 
 
@@ -29,12 +30,20 @@ def test_common_aliases_canonicalize_to_training_classes():
     assert canonical_class_name("but bi") == "Pen"
     assert canonical_class_name("but chi") == "Pen"
     assert canonical_class_name("khau trang") == "Textile"
+    assert canonical_class_name("lon do hop") == "Tin"
+    assert canonical_class_name("chai dau goi") == "Plastic bottle"
+    assert canonical_class_name("hop xop") == "Disposable tableware"
+    assert canonical_class_name("vi thuoc") == "Unknown plastic"
     assert category_for_class(canonical_class_name("vo goi ban")) == INORGANIC
+
+
+def test_common_waste_catalog_stays_inside_training_taxonomy():
+    assert all(default_class_id_for_name(item.canonical_class) is not None for item in COMMON_WASTE_ITEMS)
 
 
 def test_common_waste_catalog_api_shape_is_serializable():
     rows = common_waste_catalog()
 
-    assert len(rows) >= 20
+    assert len(rows) >= 30
     assert {"label", "canonical_class", "command", "bin_index", "aliases"} <= set(rows[0])
     assert {row["canonical_class"] for row in rows} >= {"Organic", "Pen", "Plastic bottle"}

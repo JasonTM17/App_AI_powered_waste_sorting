@@ -239,7 +239,10 @@ class ManualReferenceRecognizer:
                 with Image.open(image_path) as image:
                     rgb = image.convert("RGB")
                     for box in meta.get("boxes") or []:
-                        cls_name = str(box.get("cls_name") or "").strip()
+                        cls_name, cls_id = _canonical_reference_label(
+                            box.get("cls_name"),
+                            box.get("cls_id"),
+                        )
                         if not cls_name or per_class[cls_name] >= self.max_references_per_class:
                             continue
                         vector = _embedding_from_pil_crop(
@@ -251,7 +254,7 @@ class ManualReferenceRecognizer:
                             continue
                         references.append(
                             _Reference(
-                                cls_id=int(box.get("cls_id", 0) or 0),
+                                cls_id=cls_id,
                                 cls_name=cls_name,
                                 image_path=image_path,
                                 vector=vector,
@@ -277,6 +280,19 @@ def _can_use_as_reference(meta: dict) -> bool:
     if meta.get("holdout") is True:
         return False
     return bool(meta.get("recognition_enabled", True))
+
+
+def _canonical_reference_label(cls_name: object, cls_id: object) -> tuple[str, int]:
+    from app.core.waste_categories import canonical_class_name, default_class_id_for_name
+
+    raw_name = str(cls_name or "").strip()
+    class_name = canonical_class_name(raw_name) or raw_name
+    try:
+        fallback_id = int(str(cls_id).strip())
+    except (TypeError, ValueError):
+        fallback_id = 0
+    known_id = default_class_id_for_name(class_name)
+    return class_name, fallback_id if known_id is None else known_id
 
 
 def _rgb_crop_from_bgr(
