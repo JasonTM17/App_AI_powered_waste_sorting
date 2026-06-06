@@ -34,7 +34,7 @@ class Skeleton(QWidget):
 
     offset = Property(float, get_offset, set_offset)
 
-    def paintEvent(self, _ev) -> None:
+    def paintEvent(self, _ev) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         rect = self.rect().adjusted(0, 0, -1, -1)

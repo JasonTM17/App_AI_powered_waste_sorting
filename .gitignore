@@ -4,11 +4,18 @@ __pycache__/
 *.egg-info/
 .venv/
 .uv/
+.uv-cache/
+.tmp/
 
 # Build
 build/
 dist/
 *.spec
+
+# Web
+web/node_modules/
+web/.next/
+web/out/
 
 # IDE
 .vscode/
@@ -21,6 +28,8 @@ dist/
 *.sqlite3
 snapshots/
 dataset_v2/
+runs/
+yolo*.pt
 
 # Config (private)
 config.local.json
@@ -29,6 +38,11 @@ config.local.json
 !.env.example
 
 # Private docs (per global rule)
+.codex/
+.claude/
+plans/
+CLAUDE.md
+CLAUDE.MD
 PLAN*.md
 plan*.md
 NOTES*.md
@@ -50,6 +64,8 @@ docs/superpowers/
 .coverage.*
 htmlcov/
 .pytest_cache/
+audit_artifacts/
+docs/audit/
 
 # Generated launcher shortcuts (regenerated on every build)
 *.lnk

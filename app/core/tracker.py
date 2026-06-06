@@ -85,3 +85,8 @@ class Tracker:
 
     def mark_emitted(self, track_id):
         self._emitted.add(track_id)
+
+    def reset(self):
+        self._tracks.clear()
+        self._emitted.clear()
+        self._next_id = 1

@@ -30,7 +30,7 @@ def _desktop_dir() -> Path:
 
 
 def _make_lnk(target: Path, link: Path, icon: Path | None) -> None:
-    icon_arg = f', $s.IconLocation = "{icon}"' if icon and icon.exists() else ""
+    icon_arg = f'; $s.IconLocation = "{icon}"' if icon and icon.exists() else ""
     ps = (
         f'$w = New-Object -ComObject WScript.Shell; '
         f'$s = $w.CreateShortcut("{link}"); '

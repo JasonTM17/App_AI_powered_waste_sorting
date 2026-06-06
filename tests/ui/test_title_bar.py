@@ -11,6 +11,7 @@ def test_titlebar_has_buttons(qtbot):
     assert bar.btn_min is not None
     assert bar.btn_max is not None
     assert bar.btn_close is not None
+    assert bar.btn_web is not None
     assert "Test App" in bar.label.text()
 
 
@@ -21,3 +22,5 @@ def test_titlebar_signals_emit(qtbot):
         bar.btn_min.click()
     with qtbot.waitSignal(bar.close_requested, timeout=500):
         bar.btn_close.click()
+    with qtbot.waitSignal(bar.web_requested, timeout=500):
+        bar.btn_web.click()

@@ -21,6 +21,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
+from app.core.waste_categories import (
+    category_for_bin_index,
+    category_for_class,
+    category_for_command,
+    category_for_known_class,
+)
+
 metadata = MetaData()
 
 detections = Table(
@@ -37,16 +44,55 @@ detections = Table(
     Column("bbox_x2", Integer),
     Column("bbox_y2", Integer),
     Column("thumbnail", LargeBinary),
+    Column("image_path", String),
+    Column("annotated_path", String),
+    Column("meta_path", String),
+    Column("route_label", String),
+    Column("bin_index", Integer),
     Column("uart_command", String),
     Column("ack_status", String),
     Column("rtt_ms", Integer),
 )
 
+_OPTIONAL_DETECTION_COLUMNS = {
+    "image_path": "image_path TEXT",
+    "annotated_path": "annotated_path TEXT",
+    "meta_path": "meta_path TEXT",
+    "route_label": "route_label TEXT",
+    "bin_index": "bin_index INTEGER",
+}
+
 
 class HistoryRow:
+    route_label: str | None
+    bin_index: int | None
+    uart_command: str | None
+
     def __init__(self, **kw):
         for k, v in kw.items():
             setattr(self, k, v)
+
+
+def _with_route_defaults(row: HistoryRow) -> HistoryRow:
+    route_label = getattr(row, "route_label", None)
+    bin_index = getattr(row, "bin_index", None)
+    command = str(getattr(row, "uart_command", "") or "")
+    cls_name = str(getattr(row, "cls_name", "") or "")
+    command_category = category_for_command(command)
+    class_category = category_for_known_class(cls_name)
+    category = (
+        command_category
+        or class_category
+        or category_for_bin_index(bin_index)
+        or category_for_class(cls_name)
+    )
+    if command_category is None:
+        row.uart_command = category.code
+    if not route_label or command_category is None:
+        row.route_label = category.name
+    if bin_index is None or command_category is None:
+        row.bin_index = category.bin_index
+    return row
 
 
 class HistoryService:
@@ -55,6 +101,12 @@ class HistoryService:
         self._engine: Engine = create_engine(f"sqlite:///{db_path}", future=True)
         metadata.create_all(self._engine)
         with self._engine.begin() as conn:
+            existing_cols = {
+                str(row[1]) for row in conn.execute(text("PRAGMA table_info(detections)")).all()
+            }
+            for name, ddl in _OPTIONAL_DETECTION_COLUMNS.items():
+                if name not in existing_cols:
+                    conn.execute(text(f"ALTER TABLE detections ADD COLUMN {ddl}"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_detections_ts ON detections(ts)"))
             conn.execute(
                 text("CREATE INDEX IF NOT EXISTS idx_detections_cls ON detections(cls_name)")
@@ -70,6 +122,11 @@ class HistoryService:
         conf,
         bbox,
         thumbnail=b"",
+        image_path=None,
+        annotated_path=None,
+        meta_path=None,
+        route_label=None,
+        bin_index=None,
         uart_command=None,
         ack_status="pending",
         rtt_ms=None,
@@ -88,12 +145,26 @@ class HistoryService:
                     bbox_x2=x2,
                     bbox_y2=y2,
                     thumbnail=thumbnail,
+                    image_path=image_path,
+                    annotated_path=annotated_path,
+                    meta_path=meta_path,
+                    route_label=route_label,
+                    bin_index=bin_index,
                     uart_command=uart_command,
                     ack_status=ack_status,
                     rtt_ms=rtt_ms,
                 )
             )
-            return int(res.inserted_primary_key[0])
+            pk = res.inserted_primary_key
+            if not pk:
+                raise RuntimeError("history insert did not return a primary key")
+            return int(pk[0])
+
+    def get(self, row_id: int):
+        stmt = select(detections).where(detections.c.id == row_id)
+        with self._engine.begin() as conn:
+            row = conn.execute(stmt).mappings().first()
+        return _with_route_defaults(HistoryRow(**dict(row))) if row is not None else None
 
     def update_ack(self, row_id: int, status: str, rtt_ms) -> None:
         with self._engine.begin() as conn:
@@ -114,7 +185,7 @@ class HistoryService:
             stmt = stmt.where(detections.c.ts >= since.isoformat())
         with self._engine.begin() as conn:
             rows = conn.execute(stmt).mappings().all()
-        return [HistoryRow(**dict(r)) for r in rows]
+        return [_with_route_defaults(HistoryRow(**dict(r))) for r in rows]
 
     def count_by_class(self) -> dict[str, int]:
         stmt = select(detections.c.cls_name, func.count()).group_by(detections.c.cls_name)
@@ -147,6 +218,11 @@ class HistoryService:
             "bbox_y1",
             "bbox_x2",
             "bbox_y2",
+            "image_path",
+            "annotated_path",
+            "meta_path",
+            "route_label",
+            "bin_index",
             "uart_command",
             "ack_status",
             "rtt_ms",

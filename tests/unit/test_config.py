@@ -2,25 +2,46 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
-from app.core.config import AppConfig, load_config, save_config
+from app.core.config import AppConfig, load_config, merge_missing_mappings, save_config
 
 
 def _default_dict():
     return {
-        "camera": {"source": "0", "width": 1280, "height": 720, "mirror": False},
+        "camera": {
+            "source": "",
+            "width": 1280,
+            "height": 720,
+            "mirror": False,
+            "rotation": 0,
+        },
         "model": {
             "path": "models/best.pt",
-            "device": "cpu",
+            "device": "auto",
             "conf_threshold": 0.4,
             "iou_threshold": 0.45,
             "input_size": 640,
             "half_precision": False,
         },
-        "uart": {"port": "COM3", "baud": 9600, "auto_reconnect": True, "ack_timeout_ms": 200},
+        "uart": {
+            "port": "",
+            "baud": 9600,
+            "auto_reconnect": True,
+            "ack_timeout_ms": 4500,
+            "protocol": "plain_group",
+        },
         "mappings": [{"class_name": "plastic", "command": "S", "bin_index": 2, "enabled": True}],
         "roi": {"enabled": False, "x": 0, "y": 0, "width": 0, "height": 0},
         "capture": {"mode": "auto_low_conf", "low_conf_threshold": 0.6, "output_dir": "dataset_v2"},
+        "dispatch_guard": {
+            "min_sort_interval_seconds": 12.0,
+            "busy_settle_seconds": 1.0,
+            "min_stable_frames": 3,
+            "empty_rearm_seconds": 2.0,
+            "empty_rearm_frames": 10,
+            "require_roi_for_dispatch": True,
+        },
         "theme": "dark",
         "language": "vi",
         "minimize_to_tray": True,
@@ -30,16 +51,52 @@ def _default_dict():
 
 def test_app_config_parses_default_dict():
     c = AppConfig.model_validate(_default_dict())
-    assert c.camera.source == "0"
+    assert c.camera.source == ""
+    assert c.camera.rotation == 0
     assert c.model.conf_threshold == 0.4
-    assert c.uart.port == "COM3"
+    assert c.uart.port == ""
+    assert c.uart.protocol == "plain_group"
+    assert c.speaker.enabled is False
+    assert c.unknown_fallback.enabled is True
+    assert c.unknown_fallback.command == "R"
+    assert c.unknown_fallback.bin_index == 2
+    assert c.dispatch_guard.min_sort_interval_seconds == 12.0
+    assert c.dispatch_guard.require_roi_for_dispatch is True
+    assert c.manual_reference_recognition.enabled is True
+    assert c.manual_reference_recognition.min_similarity == 0.82
+    assert c.manual_reference_recognition.min_consensus_similarity == 0.55
+    assert c.manual_reference_recognition.min_votes == 3
+    assert c.manual_reference_recognition.top_k == 5
+    assert c.manual_reference_recognition.cache_refresh_seconds == 30.0
+    assert c.manual_reference_recognition.query_cache_seconds == 1.0
     assert c.mappings[0].command == "S"
 
 
 def test_conf_threshold_out_of_range_rejected():
     d = _default_dict()
     d["model"]["conf_threshold"] = 1.5
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate(d)
+
+
+def test_unknown_fallback_invalid_command_rejected():
+    d = _default_dict()
+    d["unknown_fallback"] = {"command": "", "bin_index": 2}
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate(d)
+
+
+def test_dispatch_guard_invalid_values_rejected():
+    d = _default_dict()
+    d["dispatch_guard"]["min_stable_frames"] = 0
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate(d)
+
+
+def test_manual_reference_recognition_invalid_values_rejected():
+    d = _default_dict()
+    d["manual_reference_recognition"] = {"min_similarity": 2.0}
+    with pytest.raises(ValidationError):
         AppConfig.model_validate(d)
 
 
@@ -73,5 +130,135 @@ def test_atomic_save_does_not_corrupt(tmp_path: Path):
     cfg = AppConfig.model_validate(_default_dict())
     save_config(cfg, cfg_path)
     raw = json.loads(cfg_path.read_text(encoding="utf-8"))
-    assert raw["camera"]["source"] == "0"
+    assert raw["camera"]["source"] == ""
     assert not (tmp_path / "config.json.tmp").exists()
+
+
+def test_load_config_accepts_utf8_sig_and_clears_ambiguous_camera_index(tmp_path: Path):
+    cfg_path = tmp_path / "config.json"
+    data = _default_dict()
+    data["camera"]["source"] = "0"
+    cfg_path.write_text(json.dumps(data), encoding="utf-8-sig")
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.camera.source == ""
+    raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert raw["camera"]["source"] == ""
+
+
+def test_load_config_clears_legacy_com3_when_not_usb(tmp_path: Path, monkeypatch):
+    from app.utils import serial_enum
+
+    monkeypatch.setattr(serial_enum, "list_serial_ports", lambda: [])
+    cfg_path = tmp_path / "config.json"
+    data = _default_dict()
+    data["uart"]["port"] = "COM3"
+    cfg_path.write_text(json.dumps(data), encoding="utf-8")
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.uart.port == ""
+    raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert raw["uart"]["port"] == ""
+
+
+def test_load_config_repairs_plain_group_ack_timeout(tmp_path: Path):
+    cfg_path = tmp_path / "config.json"
+    data = _default_dict()
+    data["uart"]["ack_timeout_ms"] = 200
+    cfg_path.write_text(json.dumps(data), encoding="utf-8")
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.uart.ack_timeout_ms == 4500
+    raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert raw["uart"]["ack_timeout_ms"] == 4500
+
+
+def test_load_config_disables_pc_speaker_without_debug_env(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("TRASH_SORTER_ENABLE_PC_SPEAKER", raising=False)
+    cfg_path = tmp_path / "config.json"
+    data = _default_dict()
+    data["speaker"] = {"enabled": True, "cooldown_seconds": 2.5}
+    cfg_path.write_text(json.dumps(data), encoding="utf-8")
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.speaker.enabled is False
+    raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert raw["speaker"]["enabled"] is False
+
+
+def test_load_config_keeps_pc_speaker_with_debug_env(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("TRASH_SORTER_ENABLE_PC_SPEAKER", "1")
+    cfg_path = tmp_path / "config.json"
+    data = _default_dict()
+    data["speaker"] = {"enabled": True, "cooldown_seconds": 2.5}
+    cfg_path.write_text(json.dumps(data), encoding="utf-8")
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.speaker.enabled is True
+
+
+def test_load_config_repairs_known_class_semantic_mappings(tmp_path: Path):
+    cfg_path = tmp_path / "config.json"
+    data = _default_dict()
+    data["mappings"] = [
+        {"class_name": "Paper", "command": "R", "bin_index": 2, "enabled": True},
+        {
+            "class_name": "Disposable tableware",
+            "command": "I",
+            "bin_index": 3,
+            "enabled": True,
+        },
+        {"class_name": "Organic", "command": "O", "bin_index": 1, "enabled": True},
+        {"class_name": "Pen", "command": "I", "bin_index": 3, "enabled": True},
+    ]
+    cfg_path.write_text(json.dumps(data), encoding="utf-8")
+
+    cfg = load_config(cfg_path)
+
+    by_name = {mapping.class_name: mapping for mapping in cfg.mappings}
+    assert (by_name["Paper"].command, by_name["Paper"].bin_index) == ("I", 3)
+    assert (
+        by_name["Disposable tableware"].command,
+        by_name["Disposable tableware"].bin_index,
+    ) == ("R", 2)
+    assert (by_name["Organic"].command, by_name["Organic"].bin_index) == ("O", 1)
+    assert (by_name["Pen"].command, by_name["Pen"].bin_index) == ("R", 2)
+
+    saved = json.loads(cfg_path.read_text(encoding="utf-8"))
+    saved_by_name = {mapping["class_name"]: mapping for mapping in saved["mappings"]}
+    assert saved_by_name["Paper"]["command"] == "I"
+    assert saved_by_name["Disposable tableware"]["command"] == "R"
+
+
+def test_merge_missing_mappings_keeps_user_edits():
+    cfg = AppConfig(
+        mappings=[
+            {
+                "class_name": "Paper",
+                "command": "X",
+                "bin_index": 9,
+                "enabled": False,
+            }
+        ]
+    )
+    seed = AppConfig(
+        mappings=[
+            {"class_name": "Paper", "command": "P", "bin_index": 1, "enabled": True},
+            {"class_name": "Plastic", "command": "S", "bin_index": 2, "enabled": True},
+        ]
+    )
+
+    merged, changed = merge_missing_mappings(cfg, seed)
+
+    assert changed is True
+    assert len(merged.mappings) == 2
+    assert merged.mappings[0].class_name == "Paper"
+    assert merged.mappings[0].command == "X"
+    assert merged.mappings[0].bin_index == 9
+    assert merged.mappings[0].enabled is False
+    assert merged.mappings[1].class_name == "Plastic"

@@ -58,12 +58,22 @@ def snapshots_dir() -> Path:
     return p
 
 
+def detection_captures_dir() -> Path:
+    p = app_data_dir() / "detection_captures"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def config_path() -> Path:
     return app_data_dir() / "config.json"
 
 
 def db_path() -> Path:
     return app_data_dir() / "history.db"
+
+
+def dataset_db_path() -> Path:
+    return app_data_dir() / "dataset.db"
 
 
 def example_config_path() -> Path:

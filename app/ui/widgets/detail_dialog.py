@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
@@ -38,21 +40,22 @@ class DetectionDetailDialog(QDialog):
         img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         img_label.setStyleSheet("background: #000; border-radius: 8px;")
         img_label.setMinimumSize(360, 360)
+        pix = QPixmap()
+        annotated_path = Path(str(getattr(row, "annotated_path", "") or ""))
+        if annotated_path.exists():
+            pix.load(str(annotated_path))
         thumb = getattr(row, "thumbnail", None) or b""
-        if thumb:
-            pix = QPixmap()
+        if pix.isNull() and thumb:
             pix.loadFromData(bytes(thumb))
-            if not pix.isNull():
-                img_label.setPixmap(
-                    pix.scaled(
-                        360,
-                        360,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
+        if not pix.isNull():
+            img_label.setPixmap(
+                pix.scaled(
+                    360,
+                    360,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
                 )
-            else:
-                img_label.setText("(no image)")
+            )
         else:
             img_label.setText("(no image)")
         outer.addWidget(img_label, 1)
@@ -77,6 +80,9 @@ class DetectionDetailDialog(QDialog):
         _add("Track ID", str(getattr(row, "track_id", "—")))
         _add("Time", str(getattr(row, "ts", "—")).replace("T", " ")[:19])
         _add("Class", f"{getattr(row, 'cls_name', '—')} (id={getattr(row, 'cls_id', '—')})")
+        _add("Nhóm", getattr(row, "route_label", "—") or "—")
+        bin_index = getattr(row, "bin_index", None)
+        _add("Thùng", str(bin_index) if bin_index is not None else "—")
         _add("Confidence", f"{getattr(row, 'conf', 0):.2f}")
         bx1 = getattr(row, "bbox_x1", None)
         by1 = getattr(row, "bbox_y1", None)

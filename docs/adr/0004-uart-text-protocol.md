@@ -13,8 +13,21 @@ App ↔ Arduino exchange one of: detection sort command, ack, ping, log. Need a 
 ## Decision
 
 Use newline-terminated UTF-8 text lines:
-- App → board: `SORT:<cmd>:<conf>\n`, `PING\n`
-- Board → app: `ACK:<cmd>\n`, `NACK:<cmd>:<reason>\n`, `PONG\n`, `LOG:<text>\n`
+- App → board, default block mode: `O -> huuco\n`, `R -> voco\n`, `I -> taiche\n`
+- App → board, firmware mode: `SORT:<cmd>:<conf>\n`, `PING\n`
+- Board → app: `ACK:<cmd>\n`, `NACK:<cmd>:<reason>\n`, `BIN:<bin_index>:<percent>\n`, `PONG\n`, `LOG:<text>\n`
+
+Current 3-bin command mapping:
+
+| Cmd | Bin | Waste group |
+|---|---:|---|
+| `O` | 1 | Hữu cơ |
+| `R` | 2 | Vô cơ |
+| `I` | 3 | Tái chế |
+
+The YOLO model can still detect 42 detailed classes. Before hardware dispatch, the app normalizes every detected class to one of the three commands above. Unknown or disabled mappings must not be sent to UART. The default `plain_group` mode targets the visual block firmware that compares strings `huuco`, `voco`, and `taiche`; command meaning stays aligned end-to-end, so app `R` sends `voco\n` and expects `ACK:R`, while app `I` sends `taiche\n` and expects `ACK:I`. `sort_line` is retained for Arduino code that sends ACK/PONG using the same command code it received.
+
+HC-SR04 bin fullness telemetry uses `BIN:<bin_index>:<percent>`, where `bin_index` is `1..3` and `percent` is `0..100`. The agent treats readings as stale after 10 seconds without a new value.
 
 ## Consequences
 

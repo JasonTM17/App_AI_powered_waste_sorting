@@ -1,6 +1,8 @@
+from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
 
 import numpy as np
+import pytest
 
 from app.core.events import AckEvent, Detection, DetectionEvent, TrackedDetection
 
@@ -8,11 +10,8 @@ from app.core.events import AckEvent, Detection, DetectionEvent, TrackedDetectio
 def test_detection_immutable():
     d = Detection(cls_id=1, cls_name="plastic", conf=0.92, xyxy=(10, 20, 100, 200))
     assert d.conf == 0.92
-    try:
+    with pytest.raises(FrozenInstanceError):
         d.conf = 0.5
-        assert False, "should be frozen"
-    except Exception:
-        pass
 
 
 def test_tracked_detection_carries_track_id():

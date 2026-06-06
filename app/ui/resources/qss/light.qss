@@ -1,10 +1,19 @@
 * { font-family: "Inter", "Segoe UI", sans-serif; font-size: 14px; color: #0F172A; }
 QMainWindow, QDialog { background: #F8FAFC; }
 #sidebar { background: #F1F5F9; border-right: 1px solid #E2E8F0; }
-#card { background: white; border: 1px solid #E2E8F0; border-radius: 12px; }
+#card { background: white; border: 1px solid #E2E8F0; border-radius: 8px; }
 QPushButton#primary { background: #10B981; color: white; border: none; border-radius: 6px; padding: 8px 16px; font-weight: 600; }
 QPushButton#secondary { background: transparent; color: #0F172A; border: 1px solid #CBD5E1; border-radius: 6px; padding: 8px 16px; }
 QPushButton#secondary:hover { background: #F1F5F9; }
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox { background: white; border: 1px solid #CBD5E1; border-radius: 6px; padding: 6px 10px; color: #0F172A; }
 #statusbar { background: #F1F5F9; border-top: 1px solid #E2E8F0; color: #64748B; }
 #titlebar { background: #F1F5F9; border-bottom: 1px solid #E2E8F0; }
+#titlebar QLabel#titlebar-label { color: #0F172A; font-weight: 600; font-size: 13px; }
+#titlebar QPushButton { background: transparent; border: none; color: #0F172A; }
+#titlebar QPushButton:hover { background: #E2E8F0; }
+#titlebar QPushButton#close-btn:hover { background: #EF4444; color: white; }
+QPushButton#titlebar-cta { background: #10B981; color: white; border: none; border-radius: 6px; padding: 4px 14px; font-weight: 700; font-size: 12px; }
+QPushButton#titlebar-cta:hover { background: #059669; }
+QPushButton#titlebar-secondary { background: transparent; color: #047857; border: 1px solid #CBD5E1; border-radius: 6px; padding: 4px 12px; font-weight: 700; font-size: 12px; }
+QPushButton#titlebar-secondary:hover { background: #ECFDF5; border-color: #10B981; color: #065F46; }
+QPushButton#titlebar-cta[active="true"] { background: transparent; color: #0F172A; border: 1px solid #EF4444; }

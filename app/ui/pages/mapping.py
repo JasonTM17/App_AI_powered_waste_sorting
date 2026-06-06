@@ -81,7 +81,7 @@ class MappingRow(QWidget):
         self.bin_spin.valueChanged.connect(self.changed.emit)
         layout.addWidget(self.bin_spin)
 
-        self.enabled_check = QCheckBox("Enabled")
+        self.enabled_check = QCheckBox("Bật")
         self.enabled_check.setChecked(mapping.enabled)
         self.enabled_check.toggled.connect(self.changed.emit)
         layout.addWidget(self.enabled_check)
@@ -122,7 +122,7 @@ class MappingPage(QWidget):
         outer.setSpacing(16)
 
         header = QHBoxLayout()
-        title = QLabel("Mapping Class → Lệnh UART")
+        title = QLabel("Mapping 42 class → 3 thùng")
         title.setStyleSheet("font-size: 24px; font-weight: 700;")
         header.addWidget(title)
         header.addStretch()
@@ -152,7 +152,7 @@ class MappingPage(QWidget):
         preview_card.setObjectName("card")
         prev_layout = QVBoxLayout(preview_card)
         prev_layout.setContentsMargins(20, 16, 20, 16)
-        prev_title = QLabel("Protocol preview")
+        prev_title = QLabel("Protocol preview: O=Hữu cơ, R=Vô cơ, I=Tái chế")
         prev_title.setStyleSheet("font-size: 14px; font-weight: 700; color: #94A3B8;")
         prev_layout.addWidget(prev_title)
         self.preview_label = QLabel("—")
@@ -193,11 +193,18 @@ class MappingPage(QWidget):
             self.preview_label.setText("—")
             return
         first = rows[0].to_mapping()
+        lines = []
         try:
-            payload = encode_sort(first.command, 0.92)
-            self.preview_label.setText(payload.decode("utf-8").rstrip("\n") + "\\n")
+            block_payload = encode_sort(first.command, 0.92, protocol="plain_group")
+            lines.append("Block: " + block_payload.decode("utf-8").rstrip("\n") + "\\n")
         except Exception:
-            self.preview_label.setText("invalid")
+            lines.append("Block: invalid\\n")
+        try:
+            firmware_payload = encode_sort(first.command, 0.92, protocol="sort_line")
+            lines.append("Firmware: " + firmware_payload.decode("utf-8").rstrip("\n") + "\\n")
+        except Exception:
+            lines.append("Firmware: invalid\\n")
+        self.preview_label.setText("".join(lines))
 
     def collect(self) -> list[ClassMapping]:
         return [r.to_mapping() for r in self._rows()]

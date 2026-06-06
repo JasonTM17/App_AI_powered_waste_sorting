@@ -1,275 +1,505 @@
 {
   "camera": {
-    "source": "0",
+    "source": "",
     "width": 1280,
     "height": 720,
-    "mirror": false
+    "mirror": false,
+    "rotation": 0
   },
   "model": {
     "path": "models/best.pt",
-    "device": "cpu",
+    "device": "auto",
     "conf_threshold": 0.4,
     "iou_threshold": 0.45,
     "input_size": 640,
     "half_precision": false
   },
   "uart": {
-    "port": "COM3",
+    "port": "",
     "baud": 9600,
     "auto_reconnect": true,
-    "ack_timeout_ms": 200
+    "ack_timeout_ms": 4500,
+    "protocol": "plain_group"
   },
   "mappings": [
     {
       "class_name": "Cardboard",
-      "command": "P",
-      "bin_index": 1,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Cellulose",
-      "command": "P",
-      "bin_index": 1,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Paper",
-      "command": "P",
-      "bin_index": 1,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Paper bag",
-      "command": "P",
-      "bin_index": 1,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Paper cups",
-      "command": "P",
-      "bin_index": 1,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Paper shavings",
-      "command": "P",
-      "bin_index": 1,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Papier mache",
-      "command": "P",
-      "bin_index": 1,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Postal packaging",
-      "command": "P",
-      "bin_index": 1,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Printing industry",
-      "command": "P",
-      "bin_index": 1,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Combined plastic",
-      "command": "S",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Plastic bag",
-      "command": "S",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Plastic bottle",
-      "command": "S",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Plastic can",
-      "command": "S",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Plastic canister",
-      "command": "S",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Plastic caps",
-      "command": "S",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Plastic cup",
-      "command": "S",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Plastic shaker",
-      "command": "S",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Plastic shavings",
-      "command": "S",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Plastic toys",
-      "command": "S",
+      "command": "R",
       "bin_index": 2,
       "enabled": true
     },
     {
       "class_name": "Stretch film",
-      "command": "S",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Unknown plastic",
-      "command": "S",
+      "command": "R",
       "bin_index": 2,
       "enabled": true
     },
     {
       "class_name": "Zip plastic bag",
-      "command": "S",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Aerosols",
-      "command": "S",
+      "command": "R",
       "bin_index": 2,
       "enabled": true
     },
     {
       "class_name": "Aluminum can",
-      "command": "M",
+      "command": "I",
       "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Aluminum caps",
-      "command": "M",
+      "command": "I",
       "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Foil",
-      "command": "M",
+      "command": "I",
       "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Iron utensils",
-      "command": "M",
+      "command": "I",
       "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Metal shavings",
-      "command": "M",
+      "command": "I",
       "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Scrap metal",
-      "command": "M",
+      "command": "I",
       "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Tin",
-      "command": "M",
+      "command": "I",
       "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Ceramic",
-      "command": "G",
-      "bin_index": 4,
+      "command": "R",
+      "bin_index": 2,
       "enabled": true
     },
     {
       "class_name": "Glass bottle",
-      "command": "G",
-      "bin_index": 4,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Milk bottle",
-      "command": "G",
-      "bin_index": 4,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Liquid",
       "command": "O",
-      "bin_index": 5,
+      "bin_index": 1,
       "enabled": true
     },
     {
       "class_name": "Organic",
       "command": "O",
-      "bin_index": 5,
+      "bin_index": 1,
       "enabled": true
     },
     {
       "class_name": "Container for household chemicals",
-      "command": "C",
-      "bin_index": 6,
+      "command": "R",
+      "bin_index": 2,
       "enabled": true
     },
     {
       "class_name": "Disposable tableware",
-      "command": "C",
-      "bin_index": 6,
+      "command": "R",
+      "bin_index": 2,
       "enabled": true
     },
     {
       "class_name": "Electronics",
-      "command": "C",
-      "bin_index": 6,
+      "command": "R",
+      "bin_index": 2,
       "enabled": true
     },
     {
       "class_name": "Furniture",
-      "command": "C",
-      "bin_index": 6,
+      "command": "R",
+      "bin_index": 2,
       "enabled": true
     },
     {
       "class_name": "Tetra pack",
-      "command": "C",
-      "bin_index": 6,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Textile",
-      "command": "C",
-      "bin_index": 6,
+      "command": "R",
+      "bin_index": 2,
       "enabled": true
     },
     {
       "class_name": "Wood",
-      "command": "C",
-      "bin_index": 6,
+      "command": "O",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Pen",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Pencil",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Marker",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Battery",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Toothbrush",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Banana peel",
+      "command": "O",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Fruit peel",
+      "command": "O",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Vegetable scraps",
+      "command": "O",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Leftover food",
+      "command": "O",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Tea leaves",
+      "command": "O",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Coffee grounds",
+      "command": "O",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Eggshell",
+      "command": "O",
+      "bin_index": 1,
+      "enabled": true
+    },
+    {
+      "class_name": "Beer can",
+      "command": "I",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Soft drink can",
+      "command": "I",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Glass jar",
+      "command": "I",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Newspaper",
+      "command": "I",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Carton box",
+      "command": "I",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Milk carton",
+      "command": "I",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Clean plastic cup",
+      "command": "I",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Shampoo bottle",
+      "command": "I",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Food can",
+      "command": "I",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Metal bottle cap",
+      "command": "I",
+      "bin_index": 3,
+      "enabled": true
+    },
+    {
+      "class_name": "Foam food box",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Face mask",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Dirty nylon bag",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Plastic straw",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Disposable chopsticks",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Snack wrapper",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Candy wrapper",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Ceramic bowl",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Broken glass",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Diaper",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Cigarette butt",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Wet tissue",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Medicine blister pack",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Milk tea cup",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Instant noodle cup",
+      "command": "R",
+      "bin_index": 2,
+      "enabled": true
+    },
+    {
+      "class_name": "Styrofoam cup",
+      "command": "R",
+      "bin_index": 2,
       "enabled": true
     }
   ],
@@ -281,9 +511,42 @@
     "height": 0
   },
   "capture": {
-    "mode": "auto_low_conf",
+    "mode": "off",
     "low_conf_threshold": 0.6,
     "output_dir": "dataset_v2"
+  },
+  "speaker": {
+    "enabled": false,
+    "cooldown_seconds": 2.5
+  },
+  "unknown_fallback": {
+    "enabled": true,
+    "class_name": "Unknown object",
+    "command": "R",
+    "bin_index": 2,
+    "min_raw_confidence": 0.05,
+    "min_area_ratio": 0.003,
+    "stable_frames": 2,
+    "warmup_frames": 6
+  },
+  "dispatch_guard": {
+    "min_sort_interval_seconds": 12.0,
+    "busy_settle_seconds": 1.0,
+    "min_stable_frames": 3,
+    "empty_rearm_seconds": 2.0,
+    "empty_rearm_frames": 10,
+    "require_roi_for_dispatch": true
+  },
+  "manual_reference_recognition": {
+    "enabled": true,
+    "min_similarity": 0.82,
+    "min_consensus_similarity": 0.55,
+    "min_margin": 0.04,
+    "top_k": 5,
+    "min_votes": 3,
+    "max_references_per_class": 30,
+    "cache_refresh_seconds": 30.0,
+    "query_cache_seconds": 1.0
   },
   "theme": "dark",
   "language": "vi",

@@ -35,6 +35,11 @@ class FakeSerial:
         self.is_open = False
 
 
+@pytest.fixture(autouse=True)
+def no_uart_reset_delay(monkeypatch):
+    monkeypatch.setattr("app.core.uart.ARDUINO_SERIAL_RESET_SETTLE_S", 0.0)
+
+
 @pytest.fixture
 def fake_serial(monkeypatch):
     instances = []
@@ -87,3 +92,32 @@ def test_no_ack_marked_when_silent(monkeypatch, qtbot):
     w.stop()
     w.wait(2000)
     assert acks and acks[0] == (2, "P", "no_ack")
+
+
+def test_plain_group_sends_block_command_and_waits_for_ack(monkeypatch, qtbot):
+    class PlainSerial(FakeSerial):
+        def write(self, data):
+            self._tx.append(bytes(data))
+            if data == b"voco\n":
+                self._rx.append(b"ACK:R\n")
+            return len(data)
+
+    instances = []
+
+    def factory(port, baud, timeout=0.1):
+        s = PlainSerial(port, baud, timeout)
+        instances.append(s)
+        return s
+
+    monkeypatch.setattr("app.core.uart.serial.Serial", factory)
+    acks = []
+    w = UartWorker(port="COM_FAKE", baud=9600, ack_timeout_ms=200, protocol="plain_group")
+    w.ack_received.connect(lambda tid, c, st, rtt: acks.append((tid, c, st)))
+    w.start()
+    _wait(lambda: w.is_connected, 2.0)
+    w.send(track_id=3, command="R", conf=0.8)
+    _wait(lambda: len(acks) >= 1, 2.0)
+    w.stop()
+    w.wait(2000)
+    assert instances[0]._tx == [b"PING\n", b"PROFILE\n", b"voco\n"]
+    assert acks and acks[0] == (3, "R", "ok")

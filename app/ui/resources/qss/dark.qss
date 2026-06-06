@@ -37,7 +37,7 @@ QLabel#mono { font-family: "JetBrains Mono", "Consolas", monospace; }
 #card {
   background: #111A2E;
   border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 12px;
+  border-radius: 8px;
 }
 
 QPushButton#primary {
@@ -156,6 +156,11 @@ QSlider::handle:horizontal {
   background: #0E1628;
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
+#titlebar QLabel#titlebar-label {
+  color: #F1F5F9;
+  font-weight: 600;
+  font-size: 13px;
+}
 #titlebar QPushButton {
   background: transparent; border: none; padding: 6px 12px;
   color: #94A3B8;
@@ -169,6 +174,14 @@ QPushButton#titlebar-cta {
   padding: 4px 14px; font-weight: 700; font-size: 12px;
 }
 QPushButton#titlebar-cta:hover { background: #34D399; }
+QPushButton#titlebar-secondary {
+  background: transparent; color: #D1FAE5;
+  border: 1px solid #334155; border-radius: 6px;
+  padding: 4px 12px; font-weight: 700; font-size: 12px;
+}
+QPushButton#titlebar-secondary:hover {
+  background: #152038; border-color: #10B981; color: #FFFFFF;
+}
 QPushButton#titlebar-cta[active="true"] {
   background: transparent; color: #F1F5F9;
   border: 1px solid #EF4444;

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import ClassVar
 
 import pyqtgraph as pg
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -26,9 +27,21 @@ from app.core.history import HistoryService
 pg.setConfigOption("background", "#111A2E")
 pg.setConfigOption("foreground", "#94A3B8")
 
+MAX_BAR_CLASSES = 6
+BAR_AXIS_LABEL_CHARS = 12
+
 
 class HistoryTableModel(QAbstractTableModel):
-    HEADERS = ["Time", "Class", "Conf", "Cmd", "Ack", "RTT (ms)"]
+    HEADERS: ClassVar[tuple[str, ...]] = (
+        "Time",
+        "Class",
+        "Nhóm",
+        "Thùng",
+        "Conf",
+        "Cmd",
+        "Ack",
+        "RTT (ms)",
+    )
 
     def __init__(self, rows=None):
         super().__init__()
@@ -39,13 +52,13 @@ class HistoryTableModel(QAbstractTableModel):
         self._rows = rows
         self.endResetModel()
 
-    def rowCount(self, _parent=QModelIndex()):
+    def rowCount(self, _parent=None):  # noqa: N802
         return len(self._rows)
 
-    def columnCount(self, _parent=QModelIndex()):
+    def columnCount(self, _parent=None):  # noqa: N802
         return len(self.HEADERS)
 
-    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):  # noqa: N802
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
             return self.HEADERS[section]
         return None
@@ -61,12 +74,17 @@ class HistoryTableModel(QAbstractTableModel):
         if col == 1:
             return getattr(r, "cls_name", "")
         if col == 2:
-            return f"{getattr(r, 'conf', 0):.2f}"
+            return getattr(r, "route_label", "") or ""
         if col == 3:
-            return getattr(r, "uart_command", "") or ""
+            v = getattr(r, "bin_index", None)
+            return str(v) if v is not None else ""
         if col == 4:
-            return getattr(r, "ack_status", "") or ""
+            return f"{getattr(r, 'conf', 0):.2f}"
         if col == 5:
+            return getattr(r, "uart_command", "") or ""
+        if col == 6:
+            return getattr(r, "ack_status", "") or ""
+        if col == 7:
             v = getattr(r, "rtt_ms", None)
             return str(v) if v is not None else ""
         return None
@@ -159,6 +177,11 @@ class HistoryPage(QWidget):
         table_card = _section_card()
         table_layout = QVBoxLayout(table_card)
         table_layout.setContentsMargins(8, 8, 8, 8)
+        self.empty_label = QLabel("Chưa có lịch sử nhận diện trong khoảng thời gian này.")
+        self.empty_label.setObjectName("muted")
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_label.setMinimumHeight(42)
+        table_layout.addWidget(self.empty_label)
         self.table = QTableView()
         self.model = HistoryTableModel([])
         self.table.setModel(self.model)
@@ -191,6 +214,7 @@ class HistoryPage(QWidget):
         if ack and ack != "Tất cả":
             rows = [r for r in rows if getattr(r, "ack_status", None) == ack]
         self.model.set_rows(rows)
+        self.empty_label.setVisible(not rows)
         self._refresh_class_filter(rows)
         self._draw_bar()
         self._draw_area()
@@ -214,7 +238,7 @@ class HistoryPage(QWidget):
 
     def _draw_bar(self) -> None:
         counts = self.history.count_by_class()
-        items = sorted(counts.items(), key=lambda kv: -kv[1])[:10]
+        items = sorted(counts.items(), key=lambda kv: -kv[1])[:MAX_BAR_CLASSES]
         self.bar_plot.clear()
         if not items:
             return
@@ -223,7 +247,9 @@ class HistoryPage(QWidget):
         bg = pg.BarGraphItem(x=x, height=ys, width=0.6, brush="#10B981")
         self.bar_plot.addItem(bg)
         ax = self.bar_plot.getAxis("bottom")
-        ax.setTicks([list(zip(x, [k for k, _ in items]))])
+        ax.setStyle(tickTextOffset=8, autoExpandTextSpace=False, tickTextHeight=40)
+        ax.setTicks([list(zip(x, [_short_axis_label(k) for k, _ in items], strict=False))])
+        self.bar_plot.setXRange(-0.75, len(items) - 0.25, padding=0)
 
     def _draw_area(self) -> None:
         today = datetime.now(timezone.utc)
@@ -260,3 +286,10 @@ def _today_qdate():
 
     n = datetime.now()
     return QDate(n.year, n.month, n.day)
+
+
+def _short_axis_label(label: str) -> str:
+    clean = " ".join(str(label).split())
+    if len(clean) <= BAR_AXIS_LABEL_CHARS:
+        return clean
+    return clean[: BAR_AXIS_LABEL_CHARS - 3].rstrip() + "..."

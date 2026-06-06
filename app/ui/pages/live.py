@@ -81,7 +81,7 @@ class LivePage(QWidget):
         self.stream = QListWidget()
         self.stream.setObjectName("card")
         self.stream.setMinimumWidth(280)
-        self.stream.setStyleSheet("QListWidget { border-radius: 12px; padding: 8px; }")
+        self.stream.setStyleSheet("QListWidget { border-radius: 8px; padding: 8px; }")
         body.addWidget(self.stream, 1)
 
         root.addLayout(body, 1)
@@ -149,8 +149,9 @@ class LivePage(QWidget):
         self.video.set_frame(frame)
         self.video.set_detections(detections)
 
-    def append_detection(self, cls_name: str, conf: float, ts: str) -> None:
-        item = QListWidgetItem(f"●  {cls_name:<10} {conf:.2f}    {ts}")
+    def append_detection(self, cls_name: str, conf: float, ts: str, detail: str = "") -> None:
+        suffix = f"\n    {detail}" if detail else ""
+        item = QListWidgetItem(f"●  {cls_name:<10} {conf:.2f}    {ts}{suffix}")
         item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.stream.insertItem(0, item)
         while self.stream.count() > 50:

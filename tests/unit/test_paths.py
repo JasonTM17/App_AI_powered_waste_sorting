@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.utils.paths import app_data_dir, logs_dir, snapshots_dir
+from app.utils.paths import app_data_dir, detection_captures_dir, logs_dir, snapshots_dir
 
 
 def test_app_data_dir_returns_path(tmp_path, monkeypatch):
@@ -15,4 +15,5 @@ def test_logs_and_snapshots_subdirs(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     assert logs_dir().name == "logs"
     assert snapshots_dir().name == "snapshots"
+    assert detection_captures_dir().name == "detection_captures"
     assert logs_dir().parent == app_data_dir()

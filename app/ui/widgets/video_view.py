@@ -46,7 +46,7 @@ class VideoView(QWidget):
         self._detections = detections
         self.update()
 
-    def resizeEvent(self, ev) -> None:
+    def resizeEvent(self, ev) -> None:  # noqa: N802
         self._scaled = None
         super().resizeEvent(ev)
 
@@ -64,7 +64,7 @@ class VideoView(QWidget):
         self._scaled_for_size = size
         return self._scaled
 
-    def paintEvent(self, _ev) -> None:
+    def paintEvent(self, _ev) -> None:  # noqa: N802
         p = QPainter(self)
         scaled = self._ensure_scaled()
         if scaled is None:

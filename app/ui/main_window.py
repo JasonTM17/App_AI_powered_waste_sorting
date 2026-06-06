@@ -18,7 +18,7 @@ from app.core.config import AppConfig
 from app.ui.widgets.sidebar import Sidebar
 from app.ui.widgets.title_bar import TitleBar
 
-NAV_ITEMS = ["Live", "Lịch sử", "Mapping", "Capture", "Nhật ký", "Cài đặt"]
+NAV_ITEMS = ["Live", "Lịch sử", "Mapping", "Data", "Nhật ký", "Cài đặt"]
 NAV_ICONS = ["recycle", "history", "mapping", "capture", "log", "settings"]
 
 
@@ -130,7 +130,7 @@ class MainWindow(QMainWindow):
         self._grip_br.raise_()
         self._grip_bl.raise_()
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
         if hasattr(self, "_grip_br"):
             self._grip_br.move(self.width() - 16, self.height() - 16)
@@ -149,7 +149,7 @@ class MainWindow(QMainWindow):
         else:
             self.showMaximized()
 
-    def closeEvent(self, event):
+    def closeEvent(self, event):  # noqa: N802
         if getattr(self, "_force_quit", False):
             event.accept()
             return

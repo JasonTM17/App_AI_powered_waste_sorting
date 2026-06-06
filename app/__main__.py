@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from app.core.config import load_config
@@ -12,7 +14,7 @@ from app.ui.controller import AppController
 from app.ui.main_window import MainWindow
 from app.ui.widgets.theme import apply_theme
 from app.utils.logging import logger, setup_logging
-from app.utils.paths import config_path, db_path, example_config_path
+from app.utils.paths import config_path, db_path, example_config_path, resource_path
 
 
 def _seed_config_if_missing() -> None:
@@ -38,6 +40,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("Trash Sorter Pro")
     app.setOrganizationName("TrashSorter")
+    app.setWindowIcon(_app_icon())
 
     _seed_config_if_missing()
     cfg_path = config_path()
@@ -59,6 +62,7 @@ def main() -> int:
 
     window = MainWindow(cfg)
     controller = AppController(cfg, cfg_path, db_path())
+    web_launchers = []
 
     controller.uart_status.connect(window.live_page.set_uart_status)
     controller.uart_status.connect(window.set_uart_status)
@@ -76,8 +80,37 @@ def main() -> int:
     window.live_page.camera_toggled.connect(_on_camera_request)
     window.title_bar.camera_toggled.connect(_on_camera_request)
 
+    def _open_web_dashboard(tab: str = "live") -> None:
+        from PySide6.QtCore import QPoint, QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        from app.ui.web_launcher import WebLauncherThread
+        from app.ui.widgets.toast import Toast
+
+        t = Toast(window, "Đang bật web dashboard…", level="info", duration_ms=2500)
+        tr = window.mapToGlobal(QPoint(window.width(), 0))
+        t.show_at(window.mapFromGlobal(tr))
+
+        worker = WebLauncherThread()
+        web_launchers.append(worker)
+
+        def _done(ok: bool, message: str, url: str) -> None:
+            final_url = url.split("?", 1)[0] + f"?tab={tab}"
+            level = "ok" if ok else "warn"
+            Toast(window, message, level=level, duration_ms=5000).show_at(window.mapFromGlobal(tr))
+            if ok:
+                QDesktopServices.openUrl(QUrl(final_url))
+
+        worker.done.connect(_done)
+        worker.finished.connect(lambda: web_launchers.remove(worker) if worker in web_launchers else None)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    window.title_bar.web_requested.connect(lambda: _open_web_dashboard("live"))
+
     def _on_camera_error(msg: str):
         from PySide6.QtCore import QPoint
+
         from app.ui.widgets.toast import Toast
         t = Toast(window, msg, level="warn", duration_ms=5000)
         tr = window.mapToGlobal(QPoint(window.width(), 0))
@@ -89,6 +122,7 @@ def main() -> int:
             apply_theme(app, new_cfg.theme)
             controller.update_config(new_cfg)
             from PySide6.QtCore import QPoint
+
             from app.ui.widgets.toast import Toast
             t = Toast(window, "Đã lưu cài đặt", level="ok")
             tr = window.mapToGlobal(QPoint(window.width(), 0))
@@ -98,7 +132,11 @@ def main() -> int:
     if window.settings_page is not None:
         window.settings_page.test_camera_requested.connect(controller.test_camera)
         window.settings_page.test_uart_requested.connect(controller.test_uart_ping)
+        window.settings_page.test_hardware_requested.connect(controller.test_hardware_command)
+        window.settings_page.actuation_test_mode_changed.connect(controller.set_actuation_test_mode)
         window.settings_page.reload_model_requested.connect(controller.reload_model)
+        controller.test_uart_result.connect(window.settings_page.set_uart_test_result)
+        window.settings_page.set_actuation_test_mode(controller.is_actuation_test_mode_enabled())
     if window.mapping_page is not None:
 
         def _on_mappings(lst):
@@ -107,6 +145,27 @@ def main() -> int:
             controller.update_config(new_cfg)
 
         window.mapping_page.mappings_saved.connect(_on_mappings)
+        window.mapping_page.test_command_requested.connect(
+            lambda cmd: controller.test_hardware_command(
+                controller.cfg.uart.port,
+                controller.cfg.uart.baud,
+                cmd,
+            )
+        )
+
+    def _on_test_result(ok: bool, message: str) -> None:
+        from PySide6.QtCore import QPoint
+
+        from app.ui.widgets.toast import Toast
+
+        level = "ok" if ok else "warn"
+        tr = window.mapToGlobal(QPoint(window.width(), 0))
+        Toast(window, message, level=level, duration_ms=4500).show_at(window.mapFromGlobal(tr))
+
+    controller.test_camera_result.connect(_on_test_result)
+    controller.test_uart_result.connect(_on_test_result)
+    controller.reload_model_result.connect(_on_test_result)
+    controller.snapshot_saved.connect(_on_test_result)
 
     def _on_frame(frame, detections, fps, latency):
         window.live_page.update_frame(frame, detections)
@@ -117,14 +176,77 @@ def main() -> int:
         # the model classified (= app cũ's "system log under camera")
         if detections:
             from datetime import datetime
+
+            from app.core.config import ClassMapping
+            from app.core.uart_protocol import encode_sort
+            from app.core.waste_categories import (
+                category_for_command,
+                normalize_mapping_to_three_bins,
+            )
+
             ts = datetime.now().strftime("%H:%M:%S")
             for d in detections:
-                window.live_page.append_detection(d.cls_name, d.conf, ts)
+                mapping = next(
+                    (m for m in controller.cfg.mappings if m.enabled and m.class_name == d.cls_name),
+                    None,
+                )
+                fallback = controller.cfg.unknown_fallback
+                if mapping is None and d.cls_name == fallback.class_name:
+                    mapping = ClassMapping(
+                        class_name=fallback.class_name,
+                        command=fallback.command,
+                        bin_index=fallback.bin_index,
+                        enabled=True,
+                    )
+                detail = "no mapping"
+                if mapping is not None:
+                    mapping = normalize_mapping_to_three_bins(mapping)
+                    category = category_for_command(mapping.command)
+                    if category is None:
+                        continue
+                    command = category.code
+                    bin_index = category.bin_index
+                    try:
+                        payload = encode_sort(
+                            command,
+                            d.conf,
+                            protocol=controller.cfg.uart.protocol,
+                        ).decode("utf-8").strip()
+                    except ValueError:
+                        payload = "-"
+                    test_mode_enabled = controller.is_actuation_test_mode_enabled()
+                    if not test_mode_enabled:
+                        ack = "TEST OFF, khong gui xuong phan cung"
+                    else:
+                        guard_status = controller.dispatch_status()
+                        if guard_status:
+                            ack = guard_status
+                        else:
+                            ack = (
+                                "pending"
+                                if controller.is_uart_connected()
+                                else "UART OFF, khong gui xuong phan cung"
+                            )
+                    mode = "TEST ON" if test_mode_enabled else "TEST OFF"
+                    detail = (
+                        f"{mode}; {category.name}; bin {bin_index}; "
+                        f"payload {payload}; ACK {ack}"
+                    )
+                window.live_page.append_detection(d.cls_name, d.conf, ts, detail)
 
     controller.frame_processed.connect(_on_frame)
     window.live_page.snapshot_requested.connect(controller.take_snapshot)
     if window.capture_page is not None:
+        window.capture_page.open_web_requested.connect(lambda: _open_web_dashboard("data"))
+        window.capture_page.capture_camera_sample_requested.connect(controller.capture_camera_sample)
         controller.capture_saved.connect(lambda _p: window.capture_page.reload())
+
+        def _on_capture_mode_changed(mode: str):
+            new_cfg = controller.cfg.model_copy(deep=True)
+            new_cfg.capture.mode = mode
+            controller.update_config(new_cfg)
+
+        window.capture_page.mode_changed.connect(_on_capture_mode_changed)
 
     window.show()
 
@@ -133,7 +255,7 @@ def main() -> int:
     from app.ui.widgets.tray import TrayIcon
 
     if QSystemTrayIcon.isSystemTrayAvailable():
-        tray = TrayIcon(window)
+        tray = TrayIcon(window, app.windowIcon())
         tray.show()
         tray.show_requested.connect(window.show)
         tray.show_requested.connect(window.activateWindow)
@@ -147,6 +269,10 @@ def main() -> int:
         )
 
     controller.start()
+    if os.environ.get("TRASH_SORTER_AUTOSTART_CAMERA") == "1":
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(700, controller.start_camera)
 
     splash.finish(window)
 
@@ -163,6 +289,14 @@ def main() -> int:
     rc = app.exec()
     controller.stop()
     return rc
+
+
+def _app_icon() -> QIcon:
+    for rel in ("app/ui/resources/icons/app.ico", "app/ui/resources/icons/logo.svg"):
+        path = resource_path(rel)
+        if path.exists():
+            return QIcon(str(path))
+    return QIcon()
 
 
 if __name__ == "__main__":

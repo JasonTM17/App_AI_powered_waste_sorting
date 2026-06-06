@@ -14,6 +14,7 @@ class TitleBar(QWidget):
     maximize_toggled = Signal()
     close_requested = Signal()
     camera_toggled = Signal(bool)  # True = bật, False = tắt
+    web_requested = Signal()
 
     def __init__(self, title: str = "Trash Sorter Pro", parent=None):
         super().__init__(parent)
@@ -36,9 +37,16 @@ class TitleBar(QWidget):
         layout.addWidget(self.logo)
 
         self.label = QLabel(title)
-        self.label.setStyleSheet("color: #F1F5F9; font-weight: 600; font-size: 13px;")
+        self.label.setObjectName("titlebar-label")
         layout.addWidget(self.label)
         layout.addStretch()
+
+        self.btn_web = QPushButton("🌐  Mở Web")
+        self.btn_web.setObjectName("titlebar-secondary")
+        self.btn_web.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_web.setFixedHeight(28)
+        self.btn_web.clicked.connect(self.web_requested.emit)
+        layout.addWidget(self.btn_web)
 
         self.btn_camera = QPushButton("▶  Bật camera")
         self.btn_camera.setObjectName("titlebar-cta")
@@ -75,11 +83,11 @@ class TitleBar(QWidget):
         if emit:
             self.camera_toggled.emit(on)
 
-    def mousePressEvent(self, e: QMouseEvent) -> None:
+    def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton and self.window() is not None:
             self._drag_offset = e.globalPosition().toPoint() - self.window().pos()
 
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802
         if self._drag_offset is None or not (e.buttons() & Qt.MouseButton.LeftButton):
             return
         win = self.window()
@@ -96,8 +104,8 @@ class TitleBar(QWidget):
             return
         win.move(e.globalPosition().toPoint() - self._drag_offset)
 
-    def mouseReleaseEvent(self, e: QMouseEvent) -> None:
+    def mouseReleaseEvent(self, e: QMouseEvent) -> None:  # noqa: N802
         self._drag_offset = None
 
-    def mouseDoubleClickEvent(self, e: QMouseEvent) -> None:
+    def mouseDoubleClickEvent(self, e: QMouseEvent) -> None:  # noqa: N802
         self.maximize_toggled.emit()

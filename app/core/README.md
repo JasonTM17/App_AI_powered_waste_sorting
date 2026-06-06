@@ -9,12 +9,13 @@ Pure logic layer — no UI imports. Phase 2 (web) will reuse these modules behin
 - `config.AppConfig` — pydantic schema, `load_config(path)`, `save_config(cfg, path)`.
 - `events.{Detection,TrackedDetection,DetectionEvent,AckEvent}` — frozen dataclasses.
 - `camera.CameraWorker(source, w, h, mirror)` — QThread, signals: `frame_ready`, `error`, `connected`.
-- `inference.InferenceEngine(model_path, device, conf, iou, imgsz, half)` — `predict(frame_bgr) -> list[Detection]`, `update_thresholds(...)`.
+- `inference.InferenceEngine(model_path, device, conf, iou, imgsz, half)` — `device="auto"` prefers CUDA and falls back to CPU; `predict(frame_bgr) -> list[Detection]`, `update_thresholds(...)`.
 - `tracker.Tracker(iou_threshold, max_age)` — `update(detections) -> list[TrackedDetection]`, `should_emit(id)`, `mark_emitted(id)`.
+- `dispatch_guard.DispatchGuard(cfg)` — camera-dispatch safety gate for ROI, stable frames, busy/settle, cooldown, and empty-tray re-arm.
 - `uart_protocol.encode_sort/encode_ping/parse_line` — pure functions.
 - `uart.UartWorker(port, baud, ack_timeout_ms, auto_reconnect)` — QThread, signals: `ack_received`, `connected`, `error`. Method `send(track_id, command, conf)`.
 - `history.HistoryService(db_path)` — `insert/update_ack/query/count_by_class/count_by_hour/export_csv/close`.
-- `pipeline.Pipeline(cfg, engine, uart, history_db)` — `process_frame(frame, ts) -> list[Detection]`, `on_ack(...)`, `update_mappings(...)`.
+- `pipeline.Pipeline(cfg, engine, uart, history_db)` — `process_frame(frame, ts) -> list[Detection]`, `on_ack(...)`, `update_mappings(...)`, `update_config(...)`.
 
 ## Env vars
 

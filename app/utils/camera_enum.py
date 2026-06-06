@@ -4,7 +4,7 @@ Goal: distinguish a real USB camera the user just plugged in from the
 laptop's built-in webcam, so the app refuses to fall back on the webcam
 when the requested USB device isn't connected.
 
-On Windows we read PnP entities via PowerShell — no extra dependency.
+On Windows we read PnP entities via PowerShell - no extra dependency.
 On other OSes the helpers degrade to a permissive 'unknown' verdict so
 behaviour matches the previous app on the user's main target (Windows).
 """
@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import subprocess
-
 
 _BUILTIN_NAME_HINTS = (
     "integrated",
@@ -90,4 +91,70 @@ def has_external_camera() -> bool:
     return any(c.get("is_external") for c in cams)
 
 
-__all__ = ["list_pnp_cameras", "has_external_camera"]
+def list_directshow_cameras() -> list[str]:
+    """Return DirectShow camera names if ffmpeg is available on PATH."""
+    if os.name != "nt" or not shutil.which("ffmpeg"):
+        return []
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
+            timeout=5,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            check=False,
+        )
+    except Exception:
+        return []
+    text = "\n".join(part for part in (proc.stdout, proc.stderr) if part)
+    names: list[str] = []
+    for line in text.splitlines():
+        if "(video)" not in line:
+            continue
+        match = re.search(r'"([^"]+)"\s+\(video\)', line)
+        if match:
+            names.append(match.group(1).strip())
+    return names
+
+
+def find_readable_usb_camera(max_idx: int = 9) -> str | None:
+    """Return an OpenCV source label for the first readable external USB camera."""
+    if os.name != "nt":
+        return None
+    external_names = {
+        (c.get("name") or "").strip().lower()
+        for c in list_pnp_cameras()
+        if c.get("is_external")
+    }
+    if not external_names:
+        return None
+    dshow_names = list_directshow_cameras()
+    if not dshow_names:
+        return None
+    try:
+        import cv2
+    except Exception:
+        return None
+    for idx, name in enumerate(dshow_names[: max_idx + 1]):
+        if name.strip().lower() not in external_names:
+            continue
+        cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+        try:
+            ok = cap.isOpened()
+            if ok:
+                ok, frame = cap.read()
+                ok = ok and frame is not None
+            if ok:
+                return f"{idx} (DSHOW)"
+        finally:
+            cap.release()
+    return None
+
+
+__all__ = [
+    "find_readable_usb_camera",
+    "has_external_camera",
+    "list_directshow_cameras",
+    "list_pnp_cameras",
+]

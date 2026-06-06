@@ -10,17 +10,20 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+DEFAULT_UART_ACK_TIMEOUT_MS = 4500
+
 
 class CameraConfig(BaseModel):
-    source: str = "0"
+    source: str = ""
     width: int = 1280
     height: int = 720
     mirror: bool = False
+    rotation: Literal[0, 90, 180, 270] = 0
 
 
 class ModelConfig(BaseModel):
     path: str = "models/best.pt"
-    device: Literal["cpu", "cuda"] = "cpu"
+    device: Literal["auto", "cpu", "cuda"] = "auto"
     conf_threshold: float = Field(0.4, ge=0.0, le=1.0)
     iou_threshold: float = Field(0.45, ge=0.0, le=1.0)
     input_size: int = 640
@@ -28,10 +31,11 @@ class ModelConfig(BaseModel):
 
 
 class UartConfig(BaseModel):
-    port: str = "COM3"
+    port: str = ""
     baud: int = 9600
     auto_reconnect: bool = True
-    ack_timeout_ms: int = Field(200, ge=10, le=5000)
+    ack_timeout_ms: int = Field(DEFAULT_UART_ACK_TIMEOUT_MS, ge=10, le=5000)
+    protocol: Literal["plain_group", "sort_line"] = "plain_group"
 
 
 class ClassMapping(BaseModel):
@@ -50,22 +54,213 @@ class RoiConfig(BaseModel):
 
 
 class CaptureConfig(BaseModel):
-    mode: Literal["off", "manual", "auto_low_conf"] = "auto_low_conf"
+    mode: Literal["off", "manual", "auto_low_conf"] = "off"
     low_conf_threshold: float = Field(0.6, ge=0.0, le=1.0)
     output_dir: str = "dataset_v2"
 
 
+class SpeakerConfig(BaseModel):
+    enabled: bool = False
+    cooldown_seconds: float = Field(2.5, ge=0.0, le=60.0)
+
+
+class UnknownObjectFallbackConfig(BaseModel):
+    enabled: bool = True
+    class_name: str = "Unknown object"
+    command: str = Field("R", min_length=1, max_length=1)
+    bin_index: int = Field(2, ge=1, le=9)
+    min_raw_confidence: float = Field(0.05, ge=0.0, le=1.0)
+    min_area_ratio: float = Field(0.003, ge=0.0001, le=0.5)
+    stable_frames: int = Field(2, ge=1, le=10)
+    warmup_frames: int = Field(6, ge=0, le=60)
+
+
+class DispatchGuardConfig(BaseModel):
+    min_sort_interval_seconds: float = Field(12.0, ge=0.0, le=300.0)
+    busy_settle_seconds: float = Field(1.0, ge=0.0, le=30.0)
+    min_stable_frames: int = Field(3, ge=1, le=30)
+    empty_rearm_seconds: float = Field(2.0, ge=0.0, le=60.0)
+    empty_rearm_frames: int = Field(10, ge=1, le=300)
+    require_roi_for_dispatch: bool = True
+
+
+class ManualReferenceRecognitionConfig(BaseModel):
+    enabled: bool = True
+    min_similarity: float = Field(0.82, ge=0.0, le=1.0)
+    min_consensus_similarity: float = Field(0.55, ge=0.0, le=1.0)
+    min_margin: float = Field(0.04, ge=0.0, le=1.0)
+    top_k: int = Field(5, ge=1, le=25)
+    min_votes: int = Field(3, ge=1, le=25)
+    max_references_per_class: int = Field(30, ge=1, le=500)
+    cache_refresh_seconds: float = Field(30.0, ge=0.0, le=300.0)
+    query_cache_seconds: float = Field(1.0, ge=0.0, le=30.0)
+
+
+def default_unknown_object_fallback_config() -> UnknownObjectFallbackConfig:
+    return UnknownObjectFallbackConfig(
+        enabled=True,
+        class_name="Unknown object",
+        command="R",
+        bin_index=2,
+        min_raw_confidence=0.05,
+        min_area_ratio=0.003,
+        stable_frames=2,
+        warmup_frames=6,
+    )
+
+
+def default_dispatch_guard_config() -> DispatchGuardConfig:
+    return DispatchGuardConfig(
+        min_sort_interval_seconds=12.0,
+        busy_settle_seconds=1.0,
+        min_stable_frames=3,
+        empty_rearm_seconds=2.0,
+        empty_rearm_frames=10,
+        require_roi_for_dispatch=True,
+    )
+
+
+def default_manual_reference_recognition_config() -> ManualReferenceRecognitionConfig:
+    return ManualReferenceRecognitionConfig(
+        enabled=True,
+        min_similarity=0.82,
+        min_consensus_similarity=0.55,
+        min_margin=0.04,
+        top_k=5,
+        min_votes=3,
+        max_references_per_class=30,
+        cache_refresh_seconds=30.0,
+        query_cache_seconds=1.0,
+    )
+
+
 class AppConfig(BaseModel):
-    camera: CameraConfig = CameraConfig()
-    model: ModelConfig = ModelConfig()
-    uart: UartConfig = UartConfig()
+    camera: CameraConfig = Field(default_factory=lambda: CameraConfig())
+    model: ModelConfig = Field(
+        default_factory=lambda: ModelConfig(conf_threshold=0.4, iou_threshold=0.45)
+    )
+    uart: UartConfig = Field(
+        default_factory=lambda: UartConfig(ack_timeout_ms=DEFAULT_UART_ACK_TIMEOUT_MS)
+    )
     mappings: list[ClassMapping] = Field(default_factory=list)
-    roi: RoiConfig = RoiConfig()
-    capture: CaptureConfig = CaptureConfig()
+    roi: RoiConfig = Field(default_factory=lambda: RoiConfig())
+    capture: CaptureConfig = Field(
+        default_factory=lambda: CaptureConfig(low_conf_threshold=0.6)
+    )
+    speaker: SpeakerConfig = Field(
+        default_factory=lambda: SpeakerConfig(enabled=False, cooldown_seconds=2.5)
+    )
+    unknown_fallback: UnknownObjectFallbackConfig = Field(
+        default_factory=default_unknown_object_fallback_config
+    )
+    dispatch_guard: DispatchGuardConfig = Field(default_factory=default_dispatch_guard_config)
+    manual_reference_recognition: ManualReferenceRecognitionConfig = Field(
+        default_factory=default_manual_reference_recognition_config
+    )
     theme: Literal["dark", "light"] = "dark"
     language: Literal["vi", "en"] = "vi"
     minimize_to_tray: bool = True
     autostart: bool = False
+
+
+def merge_missing_mappings(cfg: AppConfig, seed: AppConfig) -> tuple[AppConfig, bool]:
+    """Add missing seed mappings without overwriting user-edited rows."""
+    existing = {m.class_name for m in cfg.mappings}
+    missing = [m for m in seed.mappings if m.class_name not in existing]
+    if not missing:
+        return cfg, False
+    merged = cfg.model_copy(deep=True)
+    merged.mappings = [*merged.mappings, *missing]
+    return merged, True
+
+
+def _load_example_config(current_path: Path) -> AppConfig | None:
+    try:
+        from app.utils.paths import example_config_path
+
+        example = example_config_path()
+        if example.resolve() == current_path.resolve() or not example.exists():
+            return None
+        return AppConfig.model_validate(json.loads(example.read_text(encoding="utf-8-sig")))
+    except Exception:
+        return None
+
+
+def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
+    changed = False
+    if cfg.camera.source.strip() == "0":
+        cfg.camera.source = ""
+        changed = True
+    if cfg.camera.rotation not in {0, 90, 180, 270}:
+        cfg.camera.rotation = 0
+        changed = True
+    if cfg.uart.port.strip().upper() == "COM3" and not _is_usb_uart_port("COM3"):
+        cfg.uart.port = ""
+        changed = True
+    if cfg.uart.protocol == "plain_group" and cfg.uart.ack_timeout_ms < 3000:
+        cfg.uart.ack_timeout_ms = DEFAULT_UART_ACK_TIMEOUT_MS
+        changed = True
+    if cfg.speaker.enabled and not _allow_pc_speaker_debug():
+        cfg.speaker.enabled = False
+        changed = True
+    if cfg.manual_reference_recognition.cache_refresh_seconds == 3.0:
+        cfg.manual_reference_recognition.cache_refresh_seconds = 30.0
+        changed = True
+    seed = _load_example_config(path)
+    if seed is not None:
+        cfg, mappings_changed = merge_missing_mappings(cfg, seed)
+        changed = changed or mappings_changed
+    cfg, mappings_repaired = _repair_known_class_mappings(cfg)
+    changed = changed or mappings_repaired
+    return cfg, changed
+
+
+def _repair_known_class_mappings(cfg: AppConfig) -> tuple[AppConfig, bool]:
+    try:
+        from app.core.waste_categories import (
+            category_for_known_class,
+            normalize_mapping_to_three_bins,
+        )
+    except Exception:
+        return cfg, False
+
+    repaired: list[ClassMapping] = []
+    changed = False
+    for mapping in cfg.mappings:
+        if category_for_known_class(mapping.class_name) is None:
+            repaired.append(mapping)
+            continue
+        normalized = normalize_mapping_to_three_bins(mapping)
+        changed = changed or normalized != mapping
+        repaired.append(normalized)
+    if not changed:
+        return cfg, False
+    out = cfg.model_copy(deep=True)
+    out.mappings = repaired
+    return out, True
+
+
+def _is_usb_uart_port(port: str) -> bool:
+    if not port:
+        return False
+    try:
+        from app.utils.serial_enum import is_eligible_usb_serial_port, list_serial_ports
+    except Exception:
+        return False
+    wanted = port.strip().upper()
+    return any(
+        str(p.get("device", "")).strip().upper() == wanted and is_eligible_usb_serial_port(p)
+        for p in list_serial_ports()
+    )
+
+
+def _allow_pc_speaker_debug() -> bool:
+    return os.getenv("TRASH_SORTER_ENABLE_PC_SPEAKER", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def save_config(cfg: AppConfig, path: Path) -> None:
@@ -78,15 +273,19 @@ def save_config(cfg: AppConfig, path: Path) -> None:
 
 def load_config(path: Path) -> AppConfig:
     if not path.exists():
-        cfg = AppConfig()
+        cfg, _changed = _repair_config(AppConfig(), path)
         save_config(cfg, path)
         return cfg
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        return AppConfig.model_validate(raw)
+        raw = json.loads(path.read_text(encoding="utf-8-sig"))
+        cfg = AppConfig.model_validate(raw)
+        cfg, changed = _repair_config(cfg, path)
+        if changed:
+            save_config(cfg, path)
+        return cfg
     except Exception:
         backup = path.with_suffix(path.suffix + ".broken")
         shutil.copy2(path, backup)
-        cfg = AppConfig()
+        cfg, _changed = _repair_config(AppConfig(), path)
         save_config(cfg, path)
         return cfg
