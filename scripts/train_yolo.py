@@ -35,6 +35,7 @@ def main() -> int:
     parser.add_argument("--freeze", type=int, default=0, help="Freeze the first N model layers")
     parser.add_argument("--amp", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--rect", action="store_true")
+    parser.add_argument("--plots", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--exist-ok", action="store_true", help="Allow reusing an existing run name")
     parser.add_argument("--lr0", type=float, default=0.0015, help="Initial learning rate for fine-tuning")
     parser.add_argument("--lrf", type=float, default=0.01, help="Final LR fraction")
@@ -80,6 +81,7 @@ def main() -> int:
         optimizer=args.optimizer,
         amp=args.amp,
         rect=args.rect,
+        plots=args.plots,
     )
     if args.freeze > 0:
         train_args["freeze"] = args.freeze

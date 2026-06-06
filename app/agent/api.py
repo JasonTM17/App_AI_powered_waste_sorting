@@ -37,6 +37,7 @@ from app.agent.schemas import (
     CaptureSessionFrameRequest,
     CaptureSessionResponse,
     CaptureSessionStartRequest,
+    CommonWasteCatalogResponse,
     DatasetAnnotationResponse,
     DatasetBoxDTO,
     DatasetItemDTO,
@@ -67,6 +68,7 @@ from app.agent.schemas import (
     UserDashboardResponse,
 )
 from app.agent.user_dashboard import build_user_dashboard
+from app.core.common_waste_catalog import common_waste_catalog
 from app.core.config import AppConfig, ClassMapping
 from app.core.dataset_catalog import DatasetCatalog
 from app.core.dataset_queue import (
@@ -245,6 +247,10 @@ def create_app(
             for cls_id, name in sorted(rt.model_classes().items())
         ]
         return ModelClassesResponse(classes=classes)
+
+    @router.get("/common-waste/catalog", response_model=CommonWasteCatalogResponse)
+    def get_common_waste_catalog() -> CommonWasteCatalogResponse:
+        return CommonWasteCatalogResponse(items=common_waste_catalog())
 
     @router.get("/training/status", response_model=TrainingStatusDTO)
     def training_status() -> TrainingStatusDTO:
@@ -539,6 +545,13 @@ def create_app(
         urls = [url.strip() for url in payload.urls if url.strip()]
         if not urls:
             raise HTTPException(status_code=400, detail="At least one image URL is required")
+        source_page_url = payload.source_page_url.strip()
+        source_license = payload.source_license.strip()
+        if not source_page_url or not source_license:
+            raise HTTPException(
+                status_code=400,
+                detail="Web image import requires source_page_url and source_license",
+            )
         _ensure_manual_class_mapping(rt, class_name)
         try:
             added = import_manual_image_urls(
@@ -546,8 +559,8 @@ def create_app(
                 _queue_dir(rt),
                 class_name,
                 _manual_class_id(class_name, payload.cls_id),
-                source_page_url=payload.source_page_url.strip(),
-                source_license=payload.source_license.strip(),
+                source_page_url=source_page_url,
+                source_license=source_license,
                 source_author=payload.source_author.strip(),
                 catalog_path=rt.dataset_file,
             )

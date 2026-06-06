@@ -147,10 +147,22 @@ Verification on 2026-06-06:
   load/index build to about four milliseconds from cache.
 - Empty-tray negative run: `100` live frames, `0` Pen false positives and `0`
   non-empty detections.
-- Full checks: `225 passed, 1 skipped`; Ruff, mypy core, and Next.js production
+- Full checks: `226 passed, 1 skipped`; Ruff, mypy core, and Next.js production
   build passed.
-- Fast Stage 1 started on the RTX 3060 as
-  `runs/train/trash-sorter-pen-fast-stage1`. It is a candidate only.
+- Fast Stage 1 completed on the RTX 3060 as
+  `runs/train/trash-sorter-pen-fast-stage1`.
+- Fast Stage 2 wrote candidate weights at
+  `runs/train/trash-sorter-pen-fast-stage2/weights/best.pt`.
+- Stage 2 test evaluation on `dataset_v2/yolo_fast_pen`:
+  overall `P=0.627`, `R=0.490`, `mAP50=0.501`, `mAP50-95=0.396`.
+- Stage 2 Pen-only test metrics:
+  `P=0.640`, `R=0.041`, `mAP50=0.189`, `mAP50-95=0.109`.
+- Compared with the existing candidates, Pen-fast is not promotable:
+  `models/best.pt` test `mAP50=0.742`, `mAP50-95=0.605`; V5 candidate
+  `mAP50=0.766`, `mAP50-95=0.621`.
+- Keep runtime on the existing model and use reviewed-reference recognition for
+  immediate Pen handling until more real Pen samples and a stronger fine-tune
+  pass the acceptance thresholds.
 
 Manual COM8 acceptance on 2026-06-06:
 
@@ -161,6 +173,84 @@ Manual COM8 acceptance on 2026-06-06:
   `7E 04 41 00 04 EF`.
 - Hardware profile is HOME `D6=90,D7=85`, return settle `1,500ms`, then servo
   idle policy `detach`.
+
+Runtime recheck on 2026-06-06 after restarting the local agent:
+
+- Agent API is running on `http://127.0.0.1:8765`.
+- Runtime model is still the existing non-Pen production path, not the
+  Pen-fast candidate.
+- PySerial currently sees only Bluetooth ports `COM3` through `COM6`.
+- Windows Device Manager has stale/phantom `USB-SERIAL CH340 (COM7/COM8)`
+  entries with status `Unknown`, but COM8 is not present to the app.
+- The external `USB Camera` entries also have status `Unknown`; the only present
+  camera is the integrated webcam, which is intentionally not used for tray
+  sorting.
+- Because COM8 and the USB tray camera are not present, real camera-to-hardware
+  dumping cannot be accepted in this state. Reconnect the CH340 board and the
+  external USB camera, then restart/refresh the agent before enabling Actuation
+  Test Mode.
+
+## 2026-06-06 Software-Only Common Waste Pass
+
+The next pass is software-only per operator request; hardware acceptance is
+deferred.
+
+Implemented:
+
+- Added a curated common-waste catalog for Vietnamese household items such as
+  `Vo chuoi`, `Lon nuoc`, `Chai PET`, `Hop giay`, `Khau trang`, `But bi`, and
+  `Pin`.
+- Added `/api/common-waste/catalog` so web/manual workflows can pick common
+  labels while saving canonical classes.
+- Data tab now shows quick common-waste choices; selecting a common item fills
+  the canonical class used by upload, URL import, camera capture, and guided
+  capture.
+- Canonical aliases now resolve common ASCII Vietnamese labels such as
+  `vo chuoi -> Organic`, `lon nuoc -> Aluminum can`, `chai pet -> Plastic
+  bottle`, `but bi -> Pen`, and `khau trang -> Textile`.
+- Fast export can include common-waste focus classes and filter tiny/thin boxes.
+- Training utility can run with `--no-plots` to avoid plot-time memory failures.
+
+Verification before starting the new candidate:
+
+- Ruff changed-file gate passed.
+- `mypy app/core` passed.
+- Targeted tests for common catalog, balanced export, and catalog API passed.
+- Web production build passed.
+- Full pytest after the common-waste changes passed:
+  `230 passed, 1 skipped`.
+- Manual URL import now requires `source_page_url` and `source_license` so web
+  images cannot enter the dataset without source-rights metadata.
+
+New software trainset:
+
+- Export: `dataset_v2/yolo_fast_common`.
+- Images/boxes: `5,981` images / `10,200` boxes.
+- Splits: `4,817 train / 554 valid / 610 test`.
+- Quality filter: `min_box_area=0.001`, `min_box_side=0.005`, skipped `31`
+  small boxes.
+- Strong common classes include `Cardboard=2,080`, `Aluminum can=1,852`,
+  `Paper=1,665`, `Plastic bottle=1,021`, `Plastic bag=748`, `Organic=685`,
+  and `Pen=722`.
+- Weak common classes still need more reviewed real/web samples:
+  `Tetra pack=20`, `Textile=23`, `Disposable tableware=6`, `Ceramic=2`.
+
+Candidate training started:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/start_common_software_training.ps1
+```
+
+Run:
+
+- `runs/train/trash-sorter-common-software-stage1`.
+- Seed: `runs/train/trash-sorter-v6-pen-hardware-b8/weights/best.pt`.
+- Settings: 30 epochs, 640px, batch 8, disk cache, AMP, cosine LR,
+  `close_mosaic=5`, `lr0=0.002`, plots disabled.
+- Candidate only; do not promote without test metrics and real-camera checks.
+- Early training signal: epoch 1 validation `mAP50=0.474`, `mAP50-95=0.375`;
+  epoch 2 validation `mAP50=0.521`, `mAP50-95=0.414`. Training remains in
+  progress.
 
 ## 2026-06-05 Camera Fallback Hardware Pass
 

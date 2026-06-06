@@ -1192,6 +1192,24 @@ def test_manual_url_import_adds_source_metadata_and_mapping(tmp_path, monkeypatc
         runtime.close()
 
 
+def test_manual_url_import_requires_source_rights_metadata(tmp_path, monkeypatch):
+    monkeypatch.delenv("TRASH_SORTER_AGENT_TOKEN", raising=False)
+    client, runtime = _client(tmp_path)
+    try:
+        res = client.post(
+            "/api/dataset/manual-url",
+            json={
+                "urls": ["https://example.test/pen.jpg"],
+                "cls_name": "Pen",
+                "cls_id": 42,
+            },
+        )
+        assert res.status_code == 400
+        assert "source_page_url" in res.json()["detail"]
+    finally:
+        runtime.close()
+
+
 def test_mappings_api_returns_seeded_defaults_and_saves_changes(tmp_path, monkeypatch):
     monkeypatch.delenv("TRASH_SORTER_AGENT_TOKEN", raising=False)
     client, runtime = _client(tmp_path)
@@ -1224,6 +1242,24 @@ def test_model_classes_api_returns_runtime_class_ids(tmp_path, monkeypatch):
             {"id": 18, "name": "Paper"},
             {"id": 24, "name": "Plastic bottle"},
         ]
+    finally:
+        runtime.close()
+
+
+def test_common_waste_catalog_api_returns_canonical_routes(tmp_path, monkeypatch):
+    monkeypatch.delenv("TRASH_SORTER_AGENT_TOKEN", raising=False)
+    client, runtime = _client(tmp_path)
+    try:
+        res = client.get("/api/common-waste/catalog")
+        assert res.status_code == 200
+        rows = {item["label"]: item for item in res.json()["items"]}
+
+        assert rows["Vo chuoi"]["canonical_class"] == "Organic"
+        assert rows["Vo chuoi"]["command"] == "O"
+        assert rows["Lon nuoc"]["canonical_class"] == "Aluminum can"
+        assert rows["Lon nuoc"]["command"] == "I"
+        assert rows["But bi"]["canonical_class"] == "Pen"
+        assert rows["But bi"]["command"] == "R"
     finally:
         runtime.close()
 

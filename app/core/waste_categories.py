@@ -333,6 +333,11 @@ def canonical_class_name(class_name: str) -> str:
     clean = str(class_name or "").strip()
     if not clean:
         return ""
+    from app.core.common_waste_catalog import COMMON_WASTE_ALIASES
+
+    common_alias = COMMON_WASTE_ALIASES.get(clean.casefold())
+    if common_alias:
+        return common_alias
     alias = VIETNAMESE_CLASS_ALIASES.get(clean.casefold())
     if alias:
         return alias

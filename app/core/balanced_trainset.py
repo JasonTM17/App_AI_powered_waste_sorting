@@ -30,6 +30,8 @@ def export_balanced_trainset(
     max_images: int = 4500,
     legacy_quota: int = 75,
     focus_classes: tuple[str, ...] = ("Pen", "Battery", "Toothbrush"),
+    min_box_area: float = 0.0,
+    min_box_side: float = 0.0,
     seed: int = 42,
 ) -> dict[str, object]:
     items = _load_items(queue_dir, set(class_names))
@@ -51,10 +53,19 @@ def export_balanced_trainset(
         "focus_classes": list(focus_classes),
         "max_images": max_images,
         "legacy_quota": legacy_quota,
+        "min_box_area": min_box_area,
+        "min_box_side": min_box_side,
+        "skipped_small_boxes": 0,
     }
     for item in selected:
         split = _split_for(item)
-        lines = _label_lines(item, class_ids, stats)
+        lines = _label_lines(
+            item,
+            class_ids,
+            stats,
+            min_box_area=min_box_area,
+            min_box_side=min_box_side,
+        )
         if not lines:
             continue
         image_out = out_dir / "images" / split / item.image_path.name
@@ -124,7 +135,14 @@ def _select_items(
     return selected
 
 
-def _label_lines(item: QueueItem, class_ids: dict[str, int], stats: dict[str, object]) -> list[str]:
+def _label_lines(
+    item: QueueItem,
+    class_ids: dict[str, int],
+    stats: dict[str, object],
+    *,
+    min_box_area: float,
+    min_box_side: float,
+) -> list[str]:
     try:
         with Image.open(item.image_path) as image:
             width, height = image.size
@@ -144,6 +162,11 @@ def _label_lines(item: QueueItem, class_ids: dict[str, int], stats: dict[str, ob
         bw = max(0.0, x2 - x1) / max(1, width)
         bh = max(0.0, y2 - y1) / max(1, height)
         if bw <= 0 or bh <= 0:
+            continue
+        if (min_box_area > 0 and bw * bh < min_box_area) or (
+            min_box_side > 0 and (bw < min_box_side or bh < min_box_side)
+        ):
+            stats["skipped_small_boxes"] = int(str(stats["skipped_small_boxes"])) + 1
             continue
         lines.append(f"{class_ids[name]} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
         stats["classes"][name] += 1  # type: ignore[index]

@@ -38,6 +38,7 @@ import {
   AppConfig,
   AuthMe,
   ClassMapping,
+  CommonWasteItem,
   CaptureSession,
   DEFAULT_AGENT_TOKEN,
   DatasetAnnotationResponse,
@@ -99,6 +100,10 @@ type ModelClassesResponse = {
   classes: ModelClass[];
 };
 
+type CommonWasteCatalogResponse = {
+  items: CommonWasteItem[];
+};
+
 type ClassOption = {
   id: number;
   name: string;
@@ -150,6 +155,7 @@ export function DashboardClient() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [mappings, setMappings] = useState<ClassMapping[]>([]);
   const [modelClasses, setModelClasses] = useState<ModelClass[]>([]);
+  const [commonWasteItems, setCommonWasteItems] = useState<CommonWasteItem[]>([]);
   const [agentError, setAgentError] = useState("");
   const [notice, setNotice] = useState("");
   const [manualFiles, setManualFiles] = useState<FileList | null>(null);
@@ -195,12 +201,13 @@ export function DashboardClient() {
       merged.set(clean, allocateId(preferredId));
     };
     modelClasses.forEach((item) => add(item.name, item.id));
+    commonWasteItems.forEach((item) => add(item.canonical_class, item.class_id ?? undefined));
     mappings.forEach((mapping) => add(mapping.class_name));
     Object.keys(summary?.classes ?? {}).forEach((name) => add(name));
     return [...merged.entries()]
       .map(([name, id]) => ({ id, name }))
       .sort((a, b) => a.id - b.id || a.name.localeCompare(b.name));
-  }, [mappings, modelClasses, summary?.classes]);
+  }, [commonWasteItems, mappings, modelClasses, summary?.classes]);
 
   const normalizedSearch = search.trim().toLowerCase();
   const filteredHistory = useMemo(() => {
@@ -291,6 +298,7 @@ export function DashboardClient() {
         settingsRes,
         mappingRes,
         classesRes,
+        commonWasteRes,
         hardwareRes,
         hardwareDiagnosticsRes,
         actuationRes
@@ -305,6 +313,7 @@ export function DashboardClient() {
           fetchAgent<SettingsResponse>("/api/settings"),
           fetchAgent<MappingsResponse>("/api/mappings"),
           fetchAgent<ModelClassesResponse>("/api/model/classes"),
+          fetchAgent<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
           fetchAgent<HardwareProfile>("/api/hardware/profile"),
           fetchAgent<HardwareDiagnostics>("/api/hardware/diagnostics"),
           fetchAgent<ActuationTestMode>("/api/actuation/test-mode")
@@ -319,6 +328,7 @@ export function DashboardClient() {
       setConfig(settingsRes.config);
       setMappings(mappingRes.mappings);
       setModelClasses(classesRes.classes);
+      setCommonWasteItems(commonWasteRes.items);
       setHardwareProfile(hardwareRes);
       setHardwareDiagnostics(hardwareDiagnosticsRes);
       setActuationMode(actuationRes);
@@ -343,16 +353,18 @@ export function DashboardClient() {
       setTraining(trainingRes);
 
       if (scope === "data") {
-        const [dataRes, itemRes, classesRes, captureSessionRes] = await Promise.all([
+        const [dataRes, itemRes, classesRes, commonWasteRes, captureSessionRes] = await Promise.all([
           fetchAgent<DatasetSummary>("/api/dataset/summary"),
           fetchAgent<DatasetItemsResponse>(datasetItemsPath()),
           fetchAgent<ModelClassesResponse>("/api/model/classes"),
+          fetchAgent<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
           fetchAgent<CaptureSession>("/api/dataset/capture-session")
         ]);
         setSummary(dataRes);
         setDatasetItems(itemRes.rows);
         setDatasetTotal(itemRes.total);
         setModelClasses(classesRes.classes);
+        setCommonWasteItems(commonWasteRes.items);
         setCaptureSession(captureSessionRes);
         setManualClass((current) => current || classesRes.classes[0]?.name || "");
         setSelectedPaths((current) =>
@@ -371,15 +383,17 @@ export function DashboardClient() {
       }
 
       if (scope === "settings") {
-        const [settingsRes, classesRes, hardwareRes, hardwareDiagnosticsRes, actuationRes] = await Promise.all([
+        const [settingsRes, classesRes, commonWasteRes, hardwareRes, hardwareDiagnosticsRes, actuationRes] = await Promise.all([
           fetchAgent<SettingsResponse>("/api/settings"),
           fetchAgent<ModelClassesResponse>("/api/model/classes"),
+          fetchAgent<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
           fetchAgent<HardwareProfile>("/api/hardware/profile"),
           fetchAgent<HardwareDiagnostics>("/api/hardware/diagnostics"),
           fetchAgent<ActuationTestMode>("/api/actuation/test-mode")
         ]);
         setConfig(settingsRes.config);
         setModelClasses(classesRes.classes);
+        setCommonWasteItems(commonWasteRes.items);
         setHardwareProfile(hardwareRes);
         setHardwareDiagnostics(hardwareDiagnosticsRes);
         setActuationMode(actuationRes);
@@ -1105,6 +1119,7 @@ export function DashboardClient() {
             busy={busy}
             classFilter={datasetClass}
             classOptions={classOptions}
+            commonWasteItems={commonWasteItems}
             captureSession={captureSession}
             importSource={importSource}
             itemLimit={DATASET_LIMIT}
@@ -1322,6 +1337,7 @@ function DataPanel({
   captureSession,
   classFilter,
   classOptions,
+  commonWasteItems,
   importSource,
   itemLimit,
   itemOffset,
@@ -1374,6 +1390,7 @@ function DataPanel({
   captureSession: CaptureSession | null;
   classFilter: string;
   classOptions: ClassOption[];
+  commonWasteItems: CommonWasteItem[];
   importSource: string;
   itemLimit: number;
   itemOffset: number;
@@ -1531,6 +1548,22 @@ function DataPanel({
           <MousePointer2 size={16} />
           <span>Upload xong web sẽ mở editor để bạn vẽ bbox chuẩn, không cần giữ box toàn ảnh.</span>
         </div>
+        {commonWasteItems.length ? (
+          <div className="source-grid">
+            {commonWasteItems.map((item) => (
+              <button
+                className={manualClass === item.canonical_class ? "source-tile active" : "source-tile"}
+                key={`${item.label}-${item.canonical_class}`}
+                onClick={() => onClassChange(item.canonical_class)}
+                title={`${item.label} -> ${item.canonical_class} / bin ${item.bin_index}`}
+                type="button"
+              >
+                <span>{item.label}</span>
+                <strong>{item.canonical_class}</strong>
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="form-grid two-col">
           <label>
             Class mặc định
@@ -1679,7 +1712,7 @@ function DataPanel({
         </div>
         <button
           className="secondary-button"
-          disabled={busy || !manualClass || !manualImageUrl}
+          disabled={busy || !manualClass || !manualImageUrl || !manualSourcePageUrl || !manualSourceLicense}
           onClick={onImportImageUrl}
           type="button"
         >

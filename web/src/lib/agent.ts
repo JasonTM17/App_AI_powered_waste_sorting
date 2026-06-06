@@ -28,6 +28,17 @@ export type ModelClass = {
   name: string;
 };
 
+export type CommonWasteItem = {
+  label: string;
+  canonical_class: string;
+  class_id?: number | null;
+  aliases: string[];
+  command: string;
+  bin_index: number;
+  route_label: string;
+  notes: string;
+};
+
 export type AppConfig = {
   camera: {
     source: string;

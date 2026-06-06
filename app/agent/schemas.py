@@ -81,6 +81,21 @@ class ModelClassesResponse(BaseModel):
     classes: list[ModelClassDTO]
 
 
+class CommonWasteItemDTO(BaseModel):
+    label: str
+    canonical_class: str
+    class_id: int | None = None
+    aliases: list[str] = Field(default_factory=list)
+    command: str
+    bin_index: int
+    route_label: str
+    notes: str = ""
+
+
+class CommonWasteCatalogResponse(BaseModel):
+    items: list[CommonWasteItemDTO]
+
+
 class DatasetSummaryDTO(BaseModel):
     images: int
     boxes: int
@@ -438,6 +453,8 @@ __all__ = [
     "CaptureSessionFrameRequest",
     "CaptureSessionResponse",
     "CaptureSessionStartRequest",
+    "CommonWasteCatalogResponse",
+    "CommonWasteItemDTO",
     "DatasetAnnotationResponse",
     "DatasetBoxDTO",
     "DatasetItemDTO",
