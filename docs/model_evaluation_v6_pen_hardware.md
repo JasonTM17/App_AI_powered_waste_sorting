@@ -208,6 +208,12 @@ Implemented:
 - Canonical aliases now resolve common ASCII Vietnamese labels such as
   `vo chuoi -> Organic`, `lon nuoc -> Aluminum can`, `chai pet -> Plastic
   bottle`, `but bi -> Pen`, and `khau trang -> Textile`.
+- Manual file upload, URL import, camera capture, relabel, and annotation save
+  now canonicalize aliases before writing JSON/CSDL, so a typed alias such as
+  `vo chuoi` or `lon nuoc` does not fall out of the 45-class train/export path.
+- Reviewed-reference recognition is validated on multiple common classes and
+  still only corrects `Unknown object`; it does not overwrite confident YOLO
+  detections.
 - Fast export can include common-waste focus classes and filter tiny/thin boxes.
 - Training utility can run with `--no-plots` to avoid plot-time memory failures.
 
@@ -217,7 +223,7 @@ Verification before starting the new candidate:
 - `mypy app/core` passed.
 - Targeted tests for common catalog, balanced export, and catalog API passed.
 - Web production build passed.
-- Full pytest after the common-waste changes passed:
+- Full pytest after the initial common-waste changes passed:
   `230 passed, 1 skipped`.
 - Manual URL import now requires `source_page_url` and `source_license` so web
   images cannot enter the dataset without source-rights metadata.
@@ -249,8 +255,42 @@ Run:
   `close_mosaic=5`, `lr0=0.002`, plots disabled.
 - Candidate only; do not promote without test metrics and real-camera checks.
 - Early training signal: epoch 1 validation `mAP50=0.474`, `mAP50-95=0.375`;
-  epoch 2 validation `mAP50=0.521`, `mAP50-95=0.414`. Training remains in
-  progress.
+  epoch 2 validation `mAP50=0.521`, `mAP50-95=0.414`.
+
+Stage 1 final status:
+
+- Stage 1 reached epoch 12 and then stopped with a CPU/NumPy
+  `ArrayMemoryError` inside mosaic augmentation. It was not a GPU OOM, and the
+  model is not promotable.
+- Last validation row at epoch 12: `P=0.666`, `R=0.508`, `mAP50=0.553`,
+  `mAP50-95=0.441`.
+- Test split evaluation of stage 1 best:
+  overall `P=0.482`, `R=0.464`, `mAP50=0.493`, `mAP50-95=0.388`.
+- Strong common classes on test: `Aluminum can`, `Cardboard`, `Glass bottle`,
+  `Organic`, `Plastic bag`, `Plastic bottle`, and `Plastic cup`.
+- Weak classes on test: `Pen`, `Battery`, `Toothbrush`, `Ceramic`, `Textile`,
+  `Disposable tableware`, `Tetra pack`, and other tiny-count classes. These
+  need more reviewed camera/licensed web data before the model can reliably
+  cover every common household item.
+
+Stage 2 stabilization:
+
+- Added low-memory augmentation controls to `scripts/train_yolo.py`:
+  `--mosaic`, `--erasing`, `--scale`, and `--translate`.
+- Hardened `scripts/start_common_software_training.ps1` so export/train exit
+  codes fail the script instead of continuing silently.
+- Added `scripts/start_common_software_stage2.ps1` to resume from stage 1 best
+  with mosaic and erasing disabled.
+- Started candidate run `runs/train/trash-sorter-common-software-stage2` on
+  2026-06-06 at 23:00 local time.
+- Stage 2 logs:
+  `runs/train_logs/common-stage2-20260606-230021.out.log` and
+  `runs/train_logs/common-stage2-20260606-230021.err.log`.
+- Verification after the latest software pass: Ruff full repo passed, mypy
+  `app/core` passed, PowerShell training scripts parse, full pytest passed
+  `234 passed, 1 skipped`, and Next.js production build passed.
+- Production model remains unchanged until candidate metrics and camera tests
+  pass.
 
 ## 2026-06-05 Camera Fallback Hardware Pass
 

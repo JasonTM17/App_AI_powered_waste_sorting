@@ -984,6 +984,32 @@ def test_dataset_item_annotation_get_and_put_boxes(tmp_path, monkeypatch):
         runtime.close()
 
 
+def test_dataset_item_annotation_canonicalizes_common_aliases(tmp_path, monkeypatch):
+    monkeypatch.delenv("TRASH_SORTER_AGENT_TOKEN", raising=False)
+    client, runtime = _client(tmp_path)
+    queue_dir = Path(runtime.cfg.capture.output_dir) / "low_conf_queue"
+    _make_queue_item(queue_dir)
+    try:
+        assert client.post("/api/dataset/sync").json()["count"] == 1
+
+        payload = {
+            "boxes": [
+                {"cls_id": 999, "cls_name": "vo chuoi", "conf": 1.0, "xyxy": [1, 2, 20, 12]},
+                {"cls_id": 999, "cls_name": "lon nuoc", "conf": 1.0, "xyxy": [4, 5, 24, 20]},
+            ]
+        }
+        saved = client.put("/api/dataset/items/manual_abc/boxes", json=payload)
+
+        assert saved.status_code == 200
+        body = saved.json()
+        assert [box["cls_name"] for box in body["boxes"]] == ["Organic", "Aluminum can"]
+        assert [box["cls_id"] for box in body["boxes"]] == [17, 1]
+        meta = json.loads((queue_dir / "manual_abc.json").read_text(encoding="utf-8"))
+        assert [box["cls_name"] for box in meta["boxes"]] == ["Organic", "Aluminum can"]
+    finally:
+        runtime.close()
+
+
 def test_dataset_bulk_delete_selected_items(tmp_path, monkeypatch):
     monkeypatch.delenv("TRASH_SORTER_AGENT_TOKEN", raising=False)
     client, runtime = _client(tmp_path)
@@ -1058,6 +1084,29 @@ def test_manual_upload_adds_missing_class_mapping(tmp_path, monkeypatch):
         }
         assert mappings["Custom wrapper"]["command"] == "R"
         assert mappings["Custom wrapper"]["bin_index"] == 2
+    finally:
+        runtime.close()
+
+
+def test_manual_upload_canonicalizes_common_alias_and_mapping(tmp_path, monkeypatch):
+    monkeypatch.delenv("TRASH_SORTER_AGENT_TOKEN", raising=False)
+    client, runtime = _client(tmp_path)
+    try:
+        res = client.post(
+            "/api/dataset/manual",
+            data={"cls_name": "lon nuoc", "cls_id": "999"},
+            files=[("files", ("can.jpg", _image_bytes(), "image/jpeg"))],
+        )
+        assert res.status_code == 200
+        items = client.get("/api/dataset/items?source=manual_import&limit=1").json()
+        assert items["rows"][0]["cls_name"] == "Aluminum can"
+        assert items["rows"][0]["cls_id"] == 1
+        mappings = {
+            item["class_name"]: item
+            for item in client.get("/api/mappings").json()["mappings"]
+        }
+        assert mappings["Aluminum can"]["command"] == "I"
+        assert mappings["Aluminum can"]["bin_index"] == 3
     finally:
         runtime.close()
 

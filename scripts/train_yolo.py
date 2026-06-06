@@ -41,6 +41,10 @@ def main() -> int:
     parser.add_argument("--lrf", type=float, default=0.01, help="Final LR fraction")
     parser.add_argument("--warmup-epochs", type=float, default=2.0)
     parser.add_argument("--close-mosaic", type=int, default=20)
+    parser.add_argument("--mosaic", type=float, default=1.0)
+    parser.add_argument("--erasing", type=float, default=0.4)
+    parser.add_argument("--scale", type=float, default=0.5)
+    parser.add_argument("--translate", type=float, default=0.1)
     parser.add_argument("--cos-lr", action="store_true", help="Use cosine LR schedule")
     parser.add_argument("--optimizer", default="SGD", help="Use a fixed optimizer so lr0 is respected")
     args = parser.parse_args()
@@ -77,6 +81,10 @@ def main() -> int:
         lrf=args.lrf,
         warmup_epochs=args.warmup_epochs,
         close_mosaic=args.close_mosaic,
+        mosaic=args.mosaic,
+        erasing=args.erasing,
+        scale=args.scale,
+        translate=args.translate,
         cos_lr=args.cos_lr,
         optimizer=args.optimizer,
         amp=args.amp,

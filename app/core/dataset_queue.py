@@ -81,6 +81,7 @@ def import_manual_images(
     """Import user-selected images as labeled training queue items."""
     from PIL import Image
 
+    class_name, class_id = _canonical_box_label(cls_name, cls_id)
     queue_dir.mkdir(parents=True, exist_ok=True)
     catalog = DatasetCatalog(catalog_path) if catalog_path is not None else None
     added = 0
@@ -105,8 +106,8 @@ def import_manual_images(
                 "original_file": str(src),
                 "boxes": [
                     {
-                        "cls_id": int(cls_id),
-                        "cls_name": cls_name,
+                        "cls_id": class_id,
+                        "cls_name": class_name,
                         "conf": 1.0,
                         "xyxy": [0, 0, w, h],
                     }
@@ -139,6 +140,7 @@ def import_manual_camera_frame(
     import numpy as np
     from PIL import Image
 
+    class_name, class_id = _canonical_box_label(cls_name, cls_id)
     arr = np.asarray(frame_bgr)
     if arr.ndim != 3 or arr.shape[2] < 3:
         raise ValueError("camera frame must be a BGR image")
@@ -170,8 +172,8 @@ def import_manual_camera_frame(
         "annotation_hint": "Review and adjust this box around the object before training.",
         "boxes": [
             {
-                "cls_id": int(cls_id),
-                "cls_name": cls_name,
+                "cls_id": class_id,
+                "cls_name": class_name,
                 "conf": 1.0,
                 "xyxy": box_xyxy,
             }
@@ -206,6 +208,7 @@ def import_manual_image_urls(
     """Import explicit image URLs as manual samples pending annotation."""
     from PIL import Image
 
+    class_name, class_id = _canonical_box_label(cls_name, cls_id)
     queue_dir.mkdir(parents=True, exist_ok=True)
     catalog = DatasetCatalog(catalog_path) if catalog_path is not None else None
     added = 0
@@ -237,8 +240,8 @@ def import_manual_image_urls(
                 "source_author": source_author,
                 "boxes": [
                     {
-                        "cls_id": int(cls_id),
-                        "cls_name": cls_name,
+                        "cls_id": class_id,
+                        "cls_name": class_name,
                         "conf": 1.0,
                         "xyxy": [0, 0, width, height],
                     }
@@ -264,6 +267,7 @@ def relabel_images(
     *,
     catalog_path: Path | None = None,
 ) -> int:
+    class_name, class_id = _canonical_box_label(cls_name, cls_id)
     catalog = DatasetCatalog(catalog_path) if catalog_path is not None else None
     changed = 0
     try:
@@ -279,8 +283,8 @@ def relabel_images(
             if not boxes:
                 continue
             for box in boxes:
-                box["cls_id"] = int(cls_id)
-                box["cls_name"] = cls_name
+                box["cls_id"] = class_id
+                box["cls_name"] = class_name
                 box["conf"] = 1.0
             meta["reviewed"] = True
             meta["reviewed_at"] = datetime.now().isoformat()
@@ -518,7 +522,7 @@ def _clean_box(box: dict[str, Any], width: int, height: int) -> dict[str, Any] |
     y2 = max(0.0, min(float(height), y2))
     if x2 <= x1 or y2 <= y1:
         return None
-    cls_name = str(box.get("cls_name") or cls_id)
+    cls_name, cls_id = _canonical_box_label(box.get("cls_name") or cls_id, cls_id)
     conf = float(box.get("conf", 1.0) or 1.0)
     return {
         "cls_id": cls_id,
@@ -526,6 +530,19 @@ def _clean_box(box: dict[str, Any], width: int, height: int) -> dict[str, Any] |
         "conf": conf,
         "xyxy": [x1, y1, x2, y2],
     }
+
+
+def _canonical_box_label(cls_name: object, cls_id: object) -> tuple[str, int]:
+    from app.core.waste_categories import canonical_class_name, default_class_id_for_name
+
+    raw_name = str(cls_name or "").strip()
+    class_name = canonical_class_name(raw_name) or raw_name
+    try:
+        fallback_id = int(str(cls_id).strip())
+    except (TypeError, ValueError):
+        fallback_id = 0
+    known_id = default_class_id_for_name(class_name)
+    return class_name, fallback_id if known_id is None else known_id
 
 
 __all__ = [
