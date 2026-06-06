@@ -43,6 +43,7 @@ def main() -> int:
         "data": str(args.data.resolve()),
         "split": args.split,
         "metrics": _jsonable(getattr(metrics, "results_dict", {})),
+        "per_class": _per_class_metrics(metrics),
         "save_dir": str(getattr(metrics, "save_dir", "")),
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -60,6 +61,35 @@ def _jsonable(value: Any) -> Any:
         return float(value)
     except (TypeError, ValueError):
         return str(value)
+
+
+def _per_class_metrics(metrics: Any) -> dict[str, dict[str, float | int]]:
+    box = getattr(metrics, "box", None)
+    class_indexes = getattr(box, "ap_class_index", None)
+    class_result = getattr(box, "class_result", None)
+    names = getattr(metrics, "names", {})
+    if box is None or class_indexes is None or not callable(class_result):
+        return {}
+
+    report: dict[str, dict[str, float | int]] = {}
+    for result_index, raw_class_id in enumerate(class_indexes):
+        class_id = int(raw_class_id)
+        try:
+            precision, recall, map50, map50_95 = class_result(result_index)
+        except (IndexError, TypeError, ValueError):
+            continue
+        if isinstance(names, dict):
+            class_name = str(names.get(class_id, class_id))
+        else:
+            class_name = str(names[class_id]) if class_id < len(names) else str(class_id)
+        report[class_name] = {
+            "class_id": class_id,
+            "precision": float(precision),
+            "recall": float(recall),
+            "map50": float(map50),
+            "map50_95": float(map50_95),
+        }
+    return report
 
 
 if __name__ == "__main__":
