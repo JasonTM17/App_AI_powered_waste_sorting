@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import ClassVar
 
 import pyqtgraph as pg
-from PySide6.QtCore import QAbstractTableModel, Qt, Signal
+from PySide6.QtCore import QAbstractTableModel, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
@@ -24,8 +24,8 @@ from PySide6.QtWidgets import (
 
 from app.core.history import HistoryService
 
-pg.setConfigOption("background", "#111A2E")
-pg.setConfigOption("foreground", "#94A3B8")
+pg.setConfigOption("background", "#060E20")
+pg.setConfigOption("foreground", "#BBCABF")
 
 MAX_BAR_CLASSES = 6
 BAR_AXIS_LABEL_CHARS = 12
@@ -102,18 +102,29 @@ class HistoryPage(QWidget):
     def __init__(self, history: HistoryService, parent=None):
         super().__init__(parent)
         self.history = history
+        self._reload_in_progress = False
+        self._reload_again = False
+        self._bar_signature: tuple[tuple[str, int], ...] | None = None
+        self._area_signature: tuple[int, ...] | None = None
+        self._reload_timer = QTimer(self)
+        self._reload_timer.setSingleShot(True)
+        self._reload_timer.setInterval(150)
+        self._reload_timer.timeout.connect(self.reload)
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 24, 24, 24)
+        outer.setContentsMargins(24, 20, 24, 24)
         outer.setSpacing(16)
 
         title = QLabel("Lịch sử & Thống kê")
-        title.setStyleSheet("font-size: 24px; font-weight: 700;")
+        title.setObjectName("h1")
         outer.addWidget(title)
 
         # filter row: 2-row grid so it wraps on narrow widths
         from PySide6.QtWidgets import QGridLayout
 
-        filter_grid = QGridLayout()
+        filter_card = QFrame()
+        filter_card.setObjectName("toolbar")
+        filter_grid = QGridLayout(filter_card)
+        filter_grid.setContentsMargins(16, 12, 16, 12)
         filter_grid.setHorizontalSpacing(12)
         filter_grid.setVerticalSpacing(8)
         self.date_from = QDateEdit()
@@ -128,12 +139,15 @@ class HistoryPage(QWidget):
         self.ack_filter = QComboBox()
         self.ack_filter.addItems(["Tất cả", "ok", "no_ack", "error", "pending"])
         self.ack_filter.setMinimumWidth(120)
-        btn_refresh = QPushButton("↻ Refresh")
-        btn_refresh.setObjectName("secondary")
-        btn_refresh.clicked.connect(self.reload)
-        btn_export = QPushButton("⤓ Export CSV")
-        btn_export.setObjectName("secondary")
-        btn_export.clicked.connect(self._export)
+        self.btn_refresh = QPushButton("Refresh")
+        self.btn_refresh.setObjectName("secondary")
+        self.btn_refresh.clicked.connect(lambda: self.request_reload())
+        self.btn_export = QPushButton("Export CSV")
+        self.btn_export.setObjectName("secondary")
+        self.btn_export.clicked.connect(self._export)
+        self.refresh_status = QLabel("Đang cập nhật...")
+        self.refresh_status.setObjectName("muted")
+        self.refresh_status.setVisible(False)
         filter_grid.addWidget(QLabel("Từ ngày"), 0, 0)
         filter_grid.addWidget(self.date_from, 0, 1)
         filter_grid.addWidget(QLabel("Đến ngày"), 0, 2)
@@ -142,10 +156,15 @@ class HistoryPage(QWidget):
         filter_grid.addWidget(self.cls_filter, 0, 5)
         filter_grid.addWidget(QLabel("ACK"), 0, 6)
         filter_grid.addWidget(self.ack_filter, 0, 7)
-        filter_grid.addWidget(btn_refresh, 0, 8)
-        filter_grid.addWidget(btn_export, 0, 9)
+        filter_grid.addWidget(self.btn_refresh, 0, 8)
+        filter_grid.addWidget(self.btn_export, 0, 9)
+        filter_grid.addWidget(self.refresh_status, 1, 0, 1, 10)
         filter_grid.setColumnStretch(10, 1)
-        outer.addLayout(filter_grid)
+        outer.addWidget(filter_card)
+        self.date_from.dateChanged.connect(lambda *_args: self.request_reload())
+        self.date_to.dateChanged.connect(lambda *_args: self.request_reload())
+        self.cls_filter.currentIndexChanged.connect(lambda *_args: self.request_reload())
+        self.ack_filter.currentIndexChanged.connect(lambda *_args: self.request_reload())
 
         # charts row
         charts = QHBoxLayout()
@@ -157,7 +176,8 @@ class HistoryPage(QWidget):
         bar_layout.addWidget(QLabel("Phân bố theo lớp"))
         self.bar_plot = pg.PlotWidget()
         self.bar_plot.setMinimumHeight(220)
-        self.bar_plot.showGrid(x=False, y=True, alpha=0.2)
+        self.bar_plot.setBackground("#060E20")
+        self.bar_plot.showGrid(x=False, y=True, alpha=0.12)
         bar_layout.addWidget(self.bar_plot)
         charts.addWidget(bar_card, 1)
 
@@ -167,7 +187,8 @@ class HistoryPage(QWidget):
         area_layout.addWidget(QLabel("Theo giờ trong ngày (hôm nay)"))
         self.area_plot = pg.PlotWidget()
         self.area_plot.setMinimumHeight(220)
-        self.area_plot.showGrid(x=True, y=True, alpha=0.2)
+        self.area_plot.setBackground("#060E20")
+        self.area_plot.showGrid(x=True, y=True, alpha=0.12)
         area_layout.addWidget(self.area_plot)
         charts.addWidget(area_card, 1)
 
@@ -194,37 +215,62 @@ class HistoryPage(QWidget):
 
         self.reload()
 
-    def reload(self) -> None:
-        cls = self.cls_filter.currentData() or None
-        ack = self.ack_filter.currentText()
-        since_qdate = self.date_from.date().toPython()
-        since_dt = datetime(
-            since_qdate.year, since_qdate.month, since_qdate.day, tzinfo=timezone.utc
-        )
-        until_qdate = self.date_to.date().toPython()
-        until_dt = datetime(
-            until_qdate.year, until_qdate.month, until_qdate.day,
-            23, 59, 59, tzinfo=timezone.utc,
-        )
-        rows = self.history.query(limit=500, cls_name=cls, since=since_dt)
-        rows = [
-            r for r in rows
-            if (ts := getattr(r, "ts", "")) and ts <= until_dt.isoformat()
-        ]
-        if ack and ack != "Tất cả":
-            rows = [r for r in rows if getattr(r, "ack_status", None) == ack]
-        self.model.set_rows(rows)
-        self.empty_label.setVisible(not rows)
-        self._refresh_class_filter(rows)
-        self._draw_bar()
-        self._draw_area()
+    def request_reload(self) -> None:
+        """Debounce UI refresh requests from filters or image actions."""
+        if self._reload_in_progress:
+            self._reload_again = True
+            return
+        self._set_busy(True)
+        self._reload_timer.start()
 
-    def _refresh_class_filter(self, rows) -> None:
-        seen = set()
-        for r in rows:
-            n = getattr(r, "cls_name", "")
-            if n:
-                seen.add(n)
+    def reload(self) -> None:
+        if self._reload_in_progress:
+            self._reload_again = True
+            return
+        self._reload_timer.stop()
+        self._reload_in_progress = True
+        self._set_busy(True)
+        try:
+            cls = self.cls_filter.currentData() or None
+            ack = self.ack_filter.currentText()
+            since_qdate = self.date_from.date().toPython()
+            since_dt = datetime(
+                since_qdate.year, since_qdate.month, since_qdate.day, tzinfo=timezone.utc
+            )
+            until_qdate = self.date_to.date().toPython()
+            until_dt = datetime(
+                until_qdate.year, until_qdate.month, until_qdate.day,
+                23, 59, 59, tzinfo=timezone.utc,
+            )
+            rows = self.history.query(limit=500, cls_name=cls, since=since_dt)
+            rows = [
+                r for r in rows
+                if (ts := getattr(r, "ts", "")) and ts <= until_dt.isoformat()
+            ]
+            if ack and ack != "Tất cả":
+                rows = [r for r in rows if getattr(r, "ack_status", None) == ack]
+            class_counts = self.history.count_by_class()
+            today = datetime.now(timezone.utc)
+            hourly_counts = self.history.count_by_hour(today)
+            self.model.set_rows(rows)
+            self.empty_label.setVisible(not rows)
+            self._refresh_class_filter(class_counts)
+            self._draw_bar(class_counts)
+            self._draw_area(hourly_counts)
+        finally:
+            self._reload_in_progress = False
+            self._set_busy(False)
+            if self._reload_again:
+                self._reload_again = False
+                self.request_reload()
+
+    def _set_busy(self, busy: bool) -> None:
+        self.btn_refresh.setEnabled(not busy)
+        self.btn_export.setEnabled(not busy)
+        self.refresh_status.setVisible(busy)
+
+    def _refresh_class_filter(self, counts: dict[str, int]) -> None:
+        seen = {name for name in counts if name}
         current = self.cls_filter.currentData() or ""
         self.cls_filter.blockSignals(True)
         self.cls_filter.clear()
@@ -236,29 +282,34 @@ class HistoryPage(QWidget):
             self.cls_filter.setCurrentIndex(idx)
         self.cls_filter.blockSignals(False)
 
-    def _draw_bar(self) -> None:
-        counts = self.history.count_by_class()
+    def _draw_bar(self, counts: dict[str, int]) -> None:
         items = sorted(counts.items(), key=lambda kv: -kv[1])[:MAX_BAR_CLASSES]
+        signature = tuple((str(k), int(v)) for k, v in items)
+        if signature == self._bar_signature:
+            return
+        self._bar_signature = signature
         self.bar_plot.clear()
         if not items:
             return
         x = list(range(len(items)))
         ys = [v for _, v in items]
-        bg = pg.BarGraphItem(x=x, height=ys, width=0.6, brush="#10B981")
+        bg = pg.BarGraphItem(x=x, height=ys, width=0.6, brush="#4EDEA3")
         self.bar_plot.addItem(bg)
         ax = self.bar_plot.getAxis("bottom")
         ax.setStyle(tickTextOffset=8, autoExpandTextSpace=False, tickTextHeight=40)
         ax.setTicks([list(zip(x, [_short_axis_label(k) for k, _ in items], strict=False))])
         self.bar_plot.setXRange(-0.75, len(items) - 0.25, padding=0)
 
-    def _draw_area(self) -> None:
-        today = datetime.now(timezone.utc)
-        per_hour = self.history.count_by_hour(today)
+    def _draw_area(self, per_hour: dict[int, int]) -> None:
         xs = list(range(24))
         ys = [per_hour.get(h, 0) for h in xs]
+        signature = tuple(int(v) for v in ys)
+        if signature == self._area_signature:
+            return
+        self._area_signature = signature
         self.area_plot.clear()
         curve = self.area_plot.plot(
-            xs, ys, pen=pg.mkPen("#10B981", width=2), fillLevel=0, brush=(16, 185, 129, 60)
+            xs, ys, pen=pg.mkPen("#4CD7F6", width=2), fillLevel=0, brush=(3, 181, 211, 45)
         )
         _ = curve
 
