@@ -19,6 +19,10 @@ def main() -> int:
     parser.add_argument("--data", type=Path, default=Path("dataset_v2") / "yolo_trainset" / "data.yaml")
     parser.add_argument("--split", choices=["train", "val", "test"], default="test")
     parser.add_argument("--imgsz", type=int, default=640)
+    parser.add_argument("--batch", type=int, default=4)
+    parser.add_argument("--workers", type=int, default=0)
+    parser.add_argument("--max-det", type=int, default=100)
+    parser.add_argument("--plots", action="store_true")
     parser.add_argument("--device", default="0")
     parser.add_argument("--out", type=Path, default=Path("runs") / "eval" / "metrics.json")
     args = parser.parse_args()
@@ -35,13 +39,23 @@ def main() -> int:
         data=str(args.data),
         split=args.split,
         imgsz=args.imgsz,
+        batch=args.batch,
+        workers=args.workers,
+        max_det=args.max_det,
         device=args.device,
-        plots=True,
+        plots=args.plots,
     )
     report = {
         "model": str(args.model.resolve()),
         "data": str(args.data.resolve()),
         "split": args.split,
+        "eval_config": {
+            "imgsz": args.imgsz,
+            "batch": args.batch,
+            "workers": args.workers,
+            "max_det": args.max_det,
+            "plots": args.plots,
+        },
         "metrics": _jsonable(getattr(metrics, "results_dict", {})),
         "per_class": _per_class_metrics(metrics),
         "save_dir": str(getattr(metrics, "save_dir", "")),

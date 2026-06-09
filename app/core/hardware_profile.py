@@ -80,6 +80,7 @@ GD5800_TX_PIN = "D5"
 GD5800_RX_PIN = "D4"
 GD5800_SERIAL_MODE = "REVERSE_RX_D4_TX_D5"
 GD5800_STARTUP_TRACK = 1
+GD5800_MULTI_OBJECT_WARNING_TRACK = 8
 MP3_VOLUME_DEFAULT = 30
 DEFAULT_BAUD = 9600
 DEFAULT_PROTOCOL = "plain_group"
@@ -125,6 +126,7 @@ def hardware_profile_payload() -> dict[str, object]:
             "tx_pin": GD5800_TX_PIN,
             "rx_pin": GD5800_RX_PIN,
             "startup_track": GD5800_STARTUP_TRACK,
+            "multi_object_warning_track": GD5800_MULTI_OBJECT_WARNING_TRACK,
             "volume_default": MP3_VOLUME_DEFAULT,
             "select_tf_frame": "7E 03 35 01 EF",
             "play_index_frame": "7E 04 41 00 <track> EF",
@@ -170,6 +172,7 @@ __all__ = [
     "DEFAULT_BAUD",
     "DEFAULT_PROTOCOL",
     "DUMP_DEGREES",
+    "GD5800_MULTI_OBJECT_WARNING_TRACK",
     "GD5800_RX_PIN",
     "GD5800_SERIAL_MODE",
     "GD5800_STARTUP_TRACK",

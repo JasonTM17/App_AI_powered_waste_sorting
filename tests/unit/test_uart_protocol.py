@@ -93,13 +93,14 @@ def test_encode_angle_test_rejects_out_of_range():
 
 def test_encode_audio_test():
     assert encode_audio_test(5) == b"AUDIO:5\n"
+    assert encode_audio_test(8) == b"AUDIO:8\n"
 
 
 def test_encode_audio_test_rejects_out_of_range():
     with pytest.raises(ValueError):
         encode_audio_test(0)
     with pytest.raises(ValueError):
-        encode_audio_test(8)
+        encode_audio_test(9)
 
 
 def test_encode_mp3_test_commands():

@@ -14,6 +14,7 @@ def test_hardware_profile_routes_are_exact():
         "tx_pin": "D5",
         "rx_pin": "D4",
         "startup_track": 1,
+        "multi_object_warning_track": 8,
         "volume_default": 30,
         "select_tf_frame": "7E 03 35 01 EF",
         "play_index_frame": "7E 04 41 00 <track> EF",

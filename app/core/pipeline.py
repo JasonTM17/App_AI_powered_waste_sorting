@@ -18,7 +18,13 @@ from app.core.dispatch_guard import DispatchGuard
 from app.core.events import Detection, TrackedDetection
 from app.core.history import HistoryService
 from app.core.manual_reference_recognition import ManualReferenceRecognizer
+from app.core.multi_object_dispatch import evaluate_single_class_dispatch
 from app.core.speaker import NoopSpeaker, Speaker
+from app.core.three_bin_classifier import (
+    THREE_BIN_SOURCE,
+    ThreeBinClassifier,
+    parse_three_bin_class_name,
+)
 from app.core.tracker import Tracker
 from app.core.unknown_object_fallback import UnknownObjectFallback
 from app.core.waste_categories import (
@@ -110,7 +116,9 @@ class Pipeline:
         self._hardware_dispatch_enabled = True
         self.dispatch_status = "waiting empty tray"
         self._dispatch_guard = DispatchGuard()
+        self._last_multi_class_warning_at = 0.0
         self._manual_reference_recognizer = self._build_manual_reference_recognizer()
+        self._three_bin_classifier = self._build_three_bin_classifier()
         self._configure_dispatch_guard()
         self._foreground_gate_enabled = False
         self._foreground_background: np.ndarray | None = None
@@ -137,6 +145,7 @@ class Pipeline:
                 refresh_seconds=ref_cfg.cache_refresh_seconds,
                 query_cache_seconds=ref_cfg.query_cache_seconds,
             )
+        self._three_bin_classifier = self._build_three_bin_classifier()
         self._dispatch_guard.reset()
         self.dispatch_status = self._dispatch_guard.last_reason
 
@@ -161,6 +170,11 @@ class Pipeline:
         if self._manual_reference_recognizer is not None:
             self._manual_reference_recognizer.refresh(force=True)
 
+    def three_bin_classifier_status(self) -> dict[str, object]:
+        if self._three_bin_classifier is None:
+            return {"enabled": False, "ready": False, "message": "disabled"}
+        return self._three_bin_classifier.status()
+
     def set_dispatch_foreground_gate(self, enabled: bool, warmup_frames: int = 6) -> None:
         self._foreground_gate_enabled = bool(enabled)
         self._foreground_warmup_frames = max(1, int(warmup_frames))
@@ -172,6 +186,7 @@ class Pipeline:
         self._dispatch_guard.reset()
         self._track_to_row.clear()
         self._track_to_speech.clear()
+        self._last_multi_class_warning_at = 0.0
         self.dispatch_status = self._dispatch_guard.last_reason
         self._reset_foreground_gate()
 
@@ -201,6 +216,19 @@ class Pipeline:
             max_references_per_class=ref_cfg.max_references_per_class,
             refresh_seconds=ref_cfg.cache_refresh_seconds,
             query_cache_seconds=ref_cfg.query_cache_seconds,
+        )
+
+    def _build_three_bin_classifier(self) -> ThreeBinClassifier | None:
+        classifier_cfg = self.cfg.three_bin_classifier
+        if not classifier_cfg.enabled:
+            return None
+        return ThreeBinClassifier(
+            classifier_cfg.model_path,
+            enabled=classifier_cfg.enabled,
+            min_confidence=classifier_cfg.min_confidence,
+            min_margin=classifier_cfg.min_margin,
+            min_crop_area_ratio=classifier_cfg.min_crop_area_ratio,
+            input_size=classifier_cfg.input_size,
         )
 
     def _reset_foreground_gate(self) -> None:
@@ -380,6 +408,16 @@ class Pipeline:
         }
 
     def _mapping_for_detection(self, detection: Detection) -> ClassMapping:
+        three_bin_command = parse_three_bin_class_name(detection.cls_name)
+        if three_bin_command is not None:
+            category = category_for_command(three_bin_command)
+            if category is not None:
+                return ClassMapping(
+                    class_name=detection.cls_name,
+                    command=category.code,
+                    bin_index=category.bin_index,
+                    enabled=True,
+                )
         mapping = self._mapping.get(detection.cls_name)
         if mapping is not None:
             return _normalize_dispatch_mapping(mapping)
@@ -445,6 +483,7 @@ class Pipeline:
                     cls_name=match.cls_name,
                     conf=max(detection.conf, match.similarity),
                     xyxy=detection.xyxy,
+                    source="manual_reference",
                 )
             )
             self.dispatch_status = f"manual reference {match.cls_name}"
@@ -459,6 +498,44 @@ class Pipeline:
             )
         return out
 
+    def _apply_three_bin_classifier(
+        self,
+        frame_bgr: np.ndarray,
+        detections: list[Detection],
+    ) -> list[Detection]:
+        classifier = self._three_bin_classifier
+        cfg = self.cfg.three_bin_classifier
+        if classifier is None or not cfg.enabled:
+            return detections
+        fallback_name = self.cfg.unknown_fallback.class_name
+        out: list[Detection] = []
+        for detection in detections:
+            if cfg.unknown_only and detection.cls_name != fallback_name:
+                out.append(detection)
+                continue
+            prediction = classifier.classify_bgr(frame_bgr, detection.xyxy)
+            if prediction is None or not prediction.passed:
+                out.append(detection)
+                continue
+            out.append(
+                Detection(
+                    cls_id=prediction.cls_id,
+                    cls_name=prediction.cls_name,
+                    conf=max(detection.conf, prediction.confidence),
+                    xyxy=detection.xyxy,
+                    source=THREE_BIN_SOURCE,
+                )
+            )
+            self.dispatch_status = f"Kaggle 3-bin {prediction.command}"
+            logger.info(
+                "three-bin classifier routed unknown as {} confidence={:.3f} margin={:.3f} backend={}",
+                prediction.command,
+                prediction.confidence,
+                prediction.margin,
+                prediction.backend,
+            )
+        return out
+
     def process_frame(self, frame_bgr: np.ndarray, ts: datetime):
         raw = self.engine.predict(frame_bgr)
         filtered = [d for d in raw if d.conf >= self.cfg.model.conf_threshold]
@@ -467,6 +544,7 @@ class Pipeline:
         if unknown is not None:
             filtered.append(unknown)
         filtered = self._apply_manual_references(frame_bgr, filtered)
+        filtered = self._apply_three_bin_classifier(frame_bgr, filtered)
         self._save_low_conf_frame(frame_bgr, raw, ts)
         tracked = self.tracker.update(filtered)
         detections_for_render = [t.detection for t in tracked]
@@ -479,6 +557,18 @@ class Pipeline:
             now=now_mono,
         )
         self.dispatch_status = self._dispatch_guard.last_reason
+        multi_class = evaluate_single_class_dispatch(
+            tracked,
+            in_roi=lambda xyxy: bool(roi_ready and self._in_roi(xyxy)),
+            max_classes=self.cfg.dispatch_guard.max_classes_per_dispatch,
+        )
+        if not multi_class.allowed:
+            self.dispatch_status = multi_class.reason
+            self._speak_multi_class_warning(multi_class.class_names)
+            if not self._hardware_dispatch_enabled:
+                for t in tracked:
+                    self.tracker.mark_emitted(t.track_id)
+            return detections_for_render
         if not self._hardware_dispatch_enabled:
             self.dispatch_status = "TEST OFF"
             for t in tracked:
@@ -501,6 +591,7 @@ class Pipeline:
                 self.dispatch_status = "waiting foreground"
                 continue
             mapping = self._mapping_for_detection(t.detection)
+            owner_username = self.cfg.device.owner_username.strip()
             self.tracker.mark_emitted(t.track_id)
             category = category_for_command(mapping.command)
             capture: LabeledCapture = {
@@ -538,6 +629,9 @@ class Pipeline:
                     if capture_ok
                     else "capture_failed"
                 ),
+                owner_account_id=_owner_account_id(owner_username),
+                owner_username=owner_username or None,
+                device_id=self.cfg.device.device_id.strip() or None,
             )
             if not capture_ok:
                 logger.error(
@@ -573,6 +667,32 @@ class Pipeline:
             )
         return detections_for_render
 
+    def _speak_multi_class_warning(self, class_names: tuple[str, ...]) -> None:
+        text = self.cfg.dispatch_guard.multi_class_warning_text
+        cooldown = self.cfg.dispatch_guard.multi_class_warning_cooldown_seconds
+        now = time.monotonic()
+        if now - self._last_multi_class_warning_at < cooldown:
+            return
+        self._last_multi_class_warning_at = now
+        track = self.cfg.dispatch_guard.multi_class_warning_audio_track
+        try:
+            audio_warning = getattr(self.uart, "send_audio_warning", None)
+            if (
+                self._hardware_dispatch_enabled
+                and track > 0
+                and self._has_uart()
+                and callable(audio_warning)
+            ):
+                audio_warning(track)
+            self.speaker.speak_text(
+                text=text,
+                key="multi_class_dispatch_blocked",
+                cooldown_seconds=cooldown,
+            )
+            logger.info("dispatch blocked multiple classes={}", ", ".join(class_names))
+        except Exception as e:
+            logger.warning("multi-class warning speaker failed: {}", e)
+
     def on_ack(self, track_id: int, command: str, status: str, rtt_ms):
         self._dispatch_guard.complete_dispatch(track_id=track_id, now=time.monotonic())
         self.dispatch_status = self._dispatch_guard.last_reason
@@ -596,3 +716,17 @@ class Pipeline:
 
     def close(self):
         self.history.close()
+
+
+def _owner_account_id(owner_username: str) -> int | None:
+    if not owner_username:
+        return None
+    try:
+        from app.agent.auth_service import AuthService
+
+        for row in AuthService().list_accounts():
+            if str(row.get("username")) == owner_username:
+                return int(row["id"])
+    except Exception:
+        return None
+    return None

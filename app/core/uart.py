@@ -12,6 +12,7 @@ from PySide6.QtCore import QThread, Signal
 
 from app.core.uart_protocol import (
     UartProtocol,
+    encode_audio_test,
     encode_ping,
     encode_profile_request,
     encode_sort,
@@ -30,6 +31,7 @@ class _Cmd:
     command: str
     conf: float
     enqueued_at: float
+    audio_track: int | None = None
 
 
 class UartWorker(QThread):
@@ -65,6 +67,14 @@ class UartWorker(QThread):
             with suppress(queue.Empty):
                 self._queue.get_nowait()
             self._queue.put_nowait(_Cmd(track_id, command, conf, time.time()))
+
+    def send_audio_warning(self, track: int) -> None:
+        try:
+            self._queue.put_nowait(_Cmd(-1, f"AUDIO:{int(track)}", 0.0, time.time(), int(track)))
+        except queue.Full:
+            with suppress(queue.Empty):
+                self._queue.get_nowait()
+            self._queue.put_nowait(_Cmd(-1, f"AUDIO:{int(track)}", 0.0, time.time(), int(track)))
 
     def _open(self):
         try:
@@ -129,7 +139,12 @@ class UartWorker(QThread):
                 cmd = self._queue.get(timeout=0.1)
             except queue.Empty:
                 continue
-            payload = encode_sort(cmd.command, cmd.conf, protocol=self._protocol)
+            if cmd.audio_track is None:
+                payload = encode_sort(cmd.command, cmd.conf, protocol=self._protocol)
+                expected_ack = expected_ack_command(cmd.command, self._protocol)
+            else:
+                payload = encode_audio_test(cmd.audio_track)
+                expected_ack = f"AUDIO:{int(cmd.audio_track)}"
             t0 = time.time()
             try:
                 if self._ser is None:
@@ -144,10 +159,13 @@ class UartWorker(QThread):
             if not self._expects_ack:
                 self.ack_received.emit(cmd.track_id, cmd.command, "ok", rtt)
                 continue
-            expected_ack = expected_ack_command(cmd.command, self._protocol)
             deadline = t0 + self._ack_timeout
             outcome = self._read_until_ack(expected_ack, deadline)
             rtt = int((time.time() - t0) * 1000)
+            if cmd.audio_track is not None:
+                if outcome is None:
+                    logger.warning("uart audio warning no ack track={} rtt={}", cmd.audio_track, rtt)
+                continue
             if outcome is None:
                 self.ack_received.emit(cmd.track_id, cmd.command, "no_ack", rtt)
             else:

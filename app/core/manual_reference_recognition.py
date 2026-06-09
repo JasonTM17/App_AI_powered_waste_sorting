@@ -128,10 +128,20 @@ class ManualReferenceRecognizer:
         if not self.enabled:
             return None
         self.refresh_if_needed()
-        crop = _rgb_crop_from_bgr(frame_bgr, detection.xyxy)
-        if crop is None or not self._references:
+        crops = _candidate_rgb_crops_from_bgr(frame_bgr, detection.xyxy)
+        if not crops or not self._references:
             return None
         now = time.monotonic()
+        best_match: ManualReferenceMatch | None = None
+        for crop in crops:
+            match = self._classify_crop(crop, now)
+            if match is None:
+                continue
+            if best_match is None or match.similarity > best_match.similarity:
+                best_match = match
+        return best_match
+
+    def _classify_crop(self, crop: np.ndarray, now: float) -> ManualReferenceMatch | None:
         cache_key = _difference_hash(crop)
         cache_hit, cached = self._cached_match(cache_key, now)
         if cache_hit:
@@ -304,6 +314,82 @@ def _rgb_crop_from_bgr(
     x1, y1, x2, y2 = _clamp_box(xyxy, frame_bgr.shape[1], frame_bgr.shape[0])
     crop = frame_bgr[y1:y2, x1:x2, :3][:, :, ::-1]
     return np.ascontiguousarray(crop)
+
+
+def _candidate_rgb_crops_from_bgr(
+    frame_bgr: np.ndarray,
+    xyxy: tuple[int, int, int, int],
+) -> list[np.ndarray]:
+    if frame_bgr.ndim != 3 or frame_bgr.shape[2] < 3:
+        return []
+    height, width = frame_bgr.shape[:2]
+    crops: list[np.ndarray] = []
+    seen: set[tuple[int, int, int, int]] = set()
+    for box in _candidate_crop_boxes(xyxy, width, height):
+        if box in seen:
+            continue
+        seen.add(box)
+        x1, y1, x2, y2 = box
+        crop = frame_bgr[y1:y2, x1:x2, :3][:, :, ::-1]
+        if crop.size:
+            crops.append(np.ascontiguousarray(crop))
+    return crops
+
+
+def _candidate_crop_boxes(
+    xyxy: tuple[int, int, int, int],
+    width: int,
+    height: int,
+) -> list[tuple[int, int, int, int]]:
+    base = _clamp_box(xyxy, width, height)
+    boxes = [base]
+    x1, y1, x2, y2 = base
+    box_w = max(1, x2 - x1)
+    box_h = max(1, y2 - y1)
+    aspect = max(box_w, box_h) / max(1, min(box_w, box_h))
+    area_ratio = (box_w * box_h) / max(1.0, float(width * height))
+    if box_w >= box_h and aspect >= 3.0:
+        boxes.append(
+            _expanded_box(
+                base,
+                width,
+                height,
+                x_margin=max(box_w * 1.2, box_h * 5.0),
+                y_margin=max(box_h * 1.4, box_w * 0.10),
+            )
+        )
+        if area_ratio <= 0.05 and aspect >= 4.0:
+            boxes.append(
+                _expanded_box(
+                    base,
+                    width,
+                    height,
+                    x_margin=max(box_w * 1.8, box_h * 8.0),
+                    y_margin=max(box_h * 2.0, box_w * 0.14),
+                )
+            )
+    return boxes
+
+
+def _expanded_box(
+    xyxy: tuple[int, int, int, int],
+    width: int,
+    height: int,
+    *,
+    x_margin: float,
+    y_margin: float,
+) -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = xyxy
+    return _clamp_box(
+        (
+            round(x1 - x_margin),
+            round(y1 - y_margin),
+            round(x2 + x_margin),
+            round(y2 + y_margin),
+        ),
+        width,
+        height,
+    )
 
 
 def _embedding_from_pil_crop(

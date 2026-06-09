@@ -33,3 +33,16 @@ def test_read_shared_frame_ignores_stale_file(monkeypatch, tmp_path):
     os.utime(path, (stale_time, stale_time))
 
     assert shared_camera_stream.read_shared_frame(stale_after_s=1) is None
+
+
+def test_read_shared_frame_rejects_black_frame(monkeypatch, tmp_path):
+    monkeypatch.setattr(shared_camera_stream, "app_data_dir", lambda: tmp_path)
+    publisher = shared_camera_stream.SharedFramePublisher(min_interval_s=0)
+    frame = np.zeros((8, 8, 3), dtype=np.uint8)
+
+    publisher.publish(frame)
+
+    assert shared_camera_stream.read_shared_frame(stale_after_s=10) is None
+    diag = shared_camera_stream.shared_frame_diagnostics(stale_after_s=10)
+    assert diag["black_frame"] is True
+    assert diag["reason"] == "black frame"

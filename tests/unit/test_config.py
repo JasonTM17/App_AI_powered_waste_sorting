@@ -41,6 +41,19 @@ def _default_dict():
             "empty_rearm_seconds": 2.0,
             "empty_rearm_frames": 10,
             "require_roi_for_dispatch": True,
+            "max_classes_per_dispatch": 1,
+            "multi_class_warning_cooldown_seconds": 5.0,
+            "multi_class_warning_text": "Số lượng rác bạn đặt chỉ nên là 1 loại.",
+            "multi_class_warning_audio_track": 8,
+        },
+        "three_bin_classifier": {
+            "enabled": False,
+            "model_path": "models/three_bin_classifier.pt",
+            "min_confidence": 0.72,
+            "min_margin": 0.12,
+            "unknown_only": True,
+            "min_crop_area_ratio": 0.003,
+            "input_size": 224,
         },
         "theme": "dark",
         "language": "vi",
@@ -62,6 +75,10 @@ def test_app_config_parses_default_dict():
     assert c.unknown_fallback.bin_index == 2
     assert c.dispatch_guard.min_sort_interval_seconds == 12.0
     assert c.dispatch_guard.require_roi_for_dispatch is True
+    assert c.dispatch_guard.max_classes_per_dispatch == 1
+    assert c.dispatch_guard.multi_class_warning_cooldown_seconds == 5.0
+    assert c.dispatch_guard.multi_class_warning_text.startswith("Số lượng rác")
+    assert c.dispatch_guard.multi_class_warning_audio_track == 8
     assert c.manual_reference_recognition.enabled is True
     assert c.manual_reference_recognition.min_similarity == 0.82
     assert c.manual_reference_recognition.min_consensus_similarity == 0.55
@@ -69,6 +86,11 @@ def test_app_config_parses_default_dict():
     assert c.manual_reference_recognition.top_k == 5
     assert c.manual_reference_recognition.cache_refresh_seconds == 30.0
     assert c.manual_reference_recognition.query_cache_seconds == 1.0
+    assert c.three_bin_classifier.enabled is False
+    assert c.three_bin_classifier.model_path == "models/three_bin_classifier.pt"
+    assert c.three_bin_classifier.min_confidence == 0.72
+    assert c.three_bin_classifier.min_margin == 0.12
+    assert c.three_bin_classifier.unknown_only is True
     assert c.mappings[0].command == "S"
 
 
@@ -96,6 +118,13 @@ def test_dispatch_guard_invalid_values_rejected():
 def test_manual_reference_recognition_invalid_values_rejected():
     d = _default_dict()
     d["manual_reference_recognition"] = {"min_similarity": 2.0}
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate(d)
+
+
+def test_three_bin_classifier_invalid_values_rejected():
+    d = _default_dict()
+    d["three_bin_classifier"]["min_confidence"] = 1.5
     with pytest.raises(ValidationError):
         AppConfig.model_validate(d)
 

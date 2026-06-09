@@ -10,6 +10,7 @@ from PIL import Image
 from app.core.config import AppConfig, ClassMapping
 from app.core.events import Detection
 from app.core.pipeline import Pipeline
+from app.core.three_bin_classifier import THREE_BIN_SOURCE, ThreeBinPrediction
 from app.core.waste_categories import category_for_command
 
 
@@ -75,12 +76,56 @@ class _StubUart:
         self.sent.append((track_id, command, conf))
 
 
+class _WarningUart(_StubUart):
+    def __init__(self):
+        super().__init__()
+        self.audio_tracks = []
+
+    def send_audio_warning(self, track):
+        self.audio_tracks.append(track)
+
+
 class _StubSpeaker:
     def __init__(self):
         self.spoken = []
+        self.texts = []
 
     def speak(self, *, command, bin_index, cls_name, confidence):
         self.spoken.append((command, bin_index, cls_name, confidence))
+
+    def speak_text(self, *, text, key, cooldown_seconds=None):
+        self.texts.append((text, key, cooldown_seconds))
+
+
+class _StubThreeBinClassifier:
+    def status(self):
+        return {
+            "enabled": True,
+            "ready": True,
+            "message": "stub ready",
+        }
+
+    def classify_bgr(self, frame_bgr, xyxy):
+        return ThreeBinPrediction(
+            command="I",
+            cls_id=-303,
+            cls_name="Kaggle 3-bin I",
+            confidence=0.91,
+            margin=0.3,
+            passed=True,
+            probabilities={"O": 0.05, "R": 0.04, "I": 0.91},
+            backend="stub",
+        )
+
+
+class _MultiClassInfer:
+    class_names: ClassVar[dict[int, str]] = {42: "Pen", 37: "Textile"}
+
+    def predict(self, frame):
+        return [
+            Detection(42, "Pen", 0.92, (10, 10, 100, 100)),
+            Detection(37, "Textile", 0.91, (140, 10, 230, 100)),
+        ]
 
 
 def _dispatch_ready_config(*, mappings=None) -> AppConfig:
@@ -146,6 +191,7 @@ def test_pipeline_labels_unknown_with_reviewed_manual_reference(tmp_path, monkey
     detections = p.process_frame(frame, datetime.now(UTC))
 
     assert [d.cls_name for d in detections] == ["Pen"]
+    assert detections[0].source == "manual_reference"
     assert detections[0].conf >= 0.9
     assert uart.sent == []
 
@@ -173,6 +219,25 @@ def test_pipeline_routes_unknown_with_legacy_common_reference_alias(tmp_path, mo
     detections = p.process_frame(frame, datetime.now(UTC))
 
     assert [d.cls_name for d in detections] == ["Aluminum can"]
+    assert uart.sent == [(1, "I", detections[0].conf)]
+
+
+def test_pipeline_routes_unknown_with_kaggle_three_bin_classifier(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config()
+    cfg.model.conf_threshold = 0.3
+    cfg.three_bin_classifier.enabled = True
+    cfg.three_bin_classifier.unknown_only = True
+    uart = _StubUart()
+    p = Pipeline(cfg, _UnknownInfer(), uart, tmp_path / "h.db")
+    p._three_bin_classifier = _StubThreeBinClassifier()
+    frame = np.zeros((40, 80, 3), dtype=np.uint8)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [d.cls_name for d in detections] == ["Kaggle 3-bin I"]
+    assert detections[0].source == THREE_BIN_SOURCE
     assert uart.sent == [(1, "I", detections[0].conf)]
 
 
@@ -251,6 +316,56 @@ def test_pipeline_routes_three_representative_classes_to_three_bins(tmp_path, mo
     rows_after_ack = list(reversed(p.history.query(limit=10)))
     assert [row.ack_status for row in rows_after_ack] == ["ok", "ok", "ok"]
     assert [row.rtt_ms for row in rows_after_ack] == [15, 15, 15]
+    p.close()
+
+
+def test_pipeline_blocks_dispatch_and_warns_for_multiple_classes_in_roi(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config()
+    cfg.dispatch_guard.multi_class_warning_cooldown_seconds = 5.0
+    uart = _WarningUart()
+    speaker = _StubSpeaker()
+    p = Pipeline(cfg, _MultiClassInfer(), uart, tmp_path / "h.db", speaker=speaker)
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+    p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert {item.cls_name for item in detections} == {"Pen", "Textile"}
+    assert p.dispatch_status == "multiple waste types"
+    assert uart.sent == []
+    assert uart.audio_tracks == [8]
+    assert p.history.query(limit=10) == []
+    assert speaker.spoken == []
+    assert speaker.texts == [
+        ("Số lượng rác bạn đặt chỉ nên là 1 loại.", "multi_class_dispatch_blocked", 5.0),
+    ]
+    p.close()
+
+
+def test_pipeline_warns_for_multiple_classes_when_hardware_disabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config()
+    cfg.dispatch_guard.multi_class_warning_cooldown_seconds = 5.0
+    uart = _WarningUart()
+    speaker = _StubSpeaker()
+    p = Pipeline(cfg, _MultiClassInfer(), uart, tmp_path / "h.db", speaker=speaker)
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert {item.cls_name for item in detections} == {"Pen", "Textile"}
+    assert p.dispatch_status == "multiple waste types"
+    assert uart.sent == []
+    assert uart.audio_tracks == []
+    assert p.history.query(limit=10) == []
+    assert speaker.spoken == []
+    assert speaker.texts == [
+        (cfg.dispatch_guard.multi_class_warning_text, "multi_class_dispatch_blocked", 5.0),
+    ]
     p.close()
 
 

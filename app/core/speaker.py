@@ -24,6 +24,9 @@ class Speaker(Protocol):
     ) -> None:
         """Announce a dispatched item without blocking inference."""
 
+    def speak_text(self, *, text: str, key: str, cooldown_seconds: float | None = None) -> None:
+        """Announce a warning/status text without implying a sort completed."""
+
 
 class NoopSpeaker:
     def speak(
@@ -34,6 +37,9 @@ class NoopSpeaker:
         cls_name: str,
         confidence: float,
     ) -> None:
+        return
+
+    def speak_text(self, *, text: str, key: str, cooldown_seconds: float | None = None) -> None:
         return
 
 
@@ -63,20 +69,7 @@ class WasteSpeaker:
         if category is None:
             logger.debug("speaker skipped unknown command={} cls={}", command, cls_name)
             return
-        now = time.monotonic()
-        with self._lock:
-            previous = self._last_spoken_at.get(category.code, 0.0)
-            if now - previous < self.cooldown_seconds:
-                return
-            self._last_spoken_at[category.code] = now
-        text = category.voice_text
-        thread = threading.Thread(
-            target=self._speak_background,
-            args=(text,),
-            name="trash-sorter-speaker",
-            daemon=True,
-        )
-        thread.start()
+        self.speak_text(text=category.voice_text, key=category.code)
         logger.info(
             "speaker queued cls={} cmd={} bin={} conf={:.2f}",
             cls_name,
@@ -84,6 +77,28 @@ class WasteSpeaker:
             bin_index,
             confidence,
         )
+
+    def speak_text(self, *, text: str, key: str, cooldown_seconds: float | None = None) -> None:
+        if not self.enabled:
+            return
+        clean_text = str(text or "").strip()
+        if not clean_text:
+            return
+        cooldown = self.cooldown_seconds if cooldown_seconds is None else max(0.0, float(cooldown_seconds))
+        now = time.monotonic()
+        with self._lock:
+            previous = self._last_spoken_at.get(key, 0.0)
+            if now - previous < cooldown:
+                return
+            self._last_spoken_at[key] = now
+        thread = threading.Thread(
+            target=self._speak_background,
+            args=(clean_text,),
+            name="trash-sorter-speaker",
+            daemon=True,
+        )
+        thread.start()
+        logger.info("speaker queued warning key={} text={}", key, clean_text)
 
     def _speak_background(self, text: str) -> None:
         if sys.platform != "win32":

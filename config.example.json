@@ -21,6 +21,12 @@
     "ack_timeout_ms": 4500,
     "protocol": "plain_group"
   },
+  "device": {
+    "device_id": "local-trash-sorter",
+    "device_name": "Trash Sorter Pro",
+    "location": "Local station",
+    "owner_username": ""
+  },
   "mappings": [
     {
       "class_name": "Cardboard",
@@ -535,7 +541,11 @@
     "min_stable_frames": 3,
     "empty_rearm_seconds": 2.0,
     "empty_rearm_frames": 10,
-    "require_roi_for_dispatch": true
+    "require_roi_for_dispatch": true,
+    "max_classes_per_dispatch": 1,
+    "multi_class_warning_cooldown_seconds": 5.0,
+    "multi_class_warning_text": "Số lượng rác bạn đặt chỉ nên là 1 loại.",
+    "multi_class_warning_audio_track": 8
   },
   "manual_reference_recognition": {
     "enabled": true,
@@ -547,6 +557,15 @@
     "max_references_per_class": 30,
     "cache_refresh_seconds": 30.0,
     "query_cache_seconds": 1.0
+  },
+  "three_bin_classifier": {
+    "enabled": false,
+    "model_path": "models/three_bin_classifier.pt",
+    "min_confidence": 0.72,
+    "min_margin": 0.12,
+    "unknown_only": true,
+    "min_crop_area_ratio": 0.003,
+    "input_size": 224
   },
   "theme": "dark",
   "language": "vi",

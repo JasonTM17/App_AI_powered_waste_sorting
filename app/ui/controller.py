@@ -19,6 +19,7 @@ from app.core.speaker import WasteSpeaker
 from app.core.uart import UartWorker
 from app.core.uart_protocol import UartProtocol, encode_sort
 from app.utils import serial_enum
+from app.utils.camera_frame_quality import evaluate_frame_quality
 from app.utils.camera_source import backend_hint, normalize_camera_source
 from app.utils.logging import logger
 from app.utils.runtime_lock import RuntimeLock, RuntimeLockError, acquire_runtime_lock
@@ -54,12 +55,16 @@ class _CamProbe(QThread):
                 ok = cap.isOpened()
                 if ok:
                     ok, frame = cap.read()
-                    ok = ok and frame is not None
+                    quality = evaluate_frame_quality(frame if ok else None)
+                    ok = ok and quality.usable
+                else:
+                    quality = None
                 cap.release()
                 if ok:
                     self.done.emit(True, f"OK ({name})")
                     return
-                last_error = f"Cannot open source ({name})"
+                reason = quality.reason if quality is not None else "cannot open source"
+                last_error = f"Cannot use source ({name}): {reason}"
             self.done.emit(False, last_error)
         except Exception as e:
             self.done.emit(False, str(e))

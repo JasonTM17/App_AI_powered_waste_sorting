@@ -10,6 +10,7 @@ import uuid
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 from PIL import Image
 
@@ -52,6 +53,75 @@ LABEL_MAP_PRESETS: dict[str, dict[str, str]] = {
         "paper": "Paper",
         "Paper": "Paper",
     },
+    "kaggle_vietnam_waste": {
+        "Foam_box": "Disposable tableware",
+        "foam_box": "Disposable tableware",
+        "Mask": "Textile",
+        "mask": "Textile",
+        "Metal_can": "Aluminum can",
+        "metal_can": "Aluminum can",
+        "Milk_box": "Tetra pack",
+        "milk_box": "Tetra pack",
+        "Paper": "Paper",
+        "paper": "Paper",
+        "Paper_cup": "Paper cups",
+        "paper_cup": "Paper cups",
+        "Plastic_Bottle": "Plastic bottle",
+        "Plastic_bottle": "Plastic bottle",
+        "plastic_bottle": "Plastic bottle",
+        "Plastic_cup": "Plastic cup",
+        "plastic_cup": "Plastic cup",
+        "Plastic": "Unknown plastic",
+        "plastic": "Unknown plastic",
+        "Plastic bag": "Plastic bag",
+        "plastic_bag": "Plastic bag",
+        "Bottle": "Plastic bottle",
+        "bottle": "Plastic bottle",
+        "Can": "Aluminum can",
+        "can": "Aluminum can",
+        "Carton": "Cardboard",
+        "carton": "Cardboard",
+        "Cardboard": "Cardboard",
+        "cardboard": "Cardboard",
+        "Glass": "Glass bottle",
+        "glass": "Glass bottle",
+        "Organic": "Organic",
+        "organic": "Organic",
+        "Food": "Organic",
+        "food": "Organic",
+        "Battery": "Battery",
+        "battery": "Battery",
+        "Electronic": "Electronics",
+        "Electronics": "Electronics",
+        "electronic": "Electronics",
+        "electronics": "Electronics",
+        "rac-huu-co": "Organic",
+        "chai-lo-manh-vo-thuy-tinh": "Glass bottle",
+        "chai-nhua": "Plastic bottle",
+        "hop-sua": "Tetra pack",
+        "khau-trang": "Textile",
+        "lon-nuoc-giai-khat-bang-kim-loai": "Aluminum can",
+        "ly-nhua": "Plastic cup",
+        "tui-nilon": "Plastic bag",
+    },
+    "roboflow_3kelas_v1": {
+        "kertas": "Paper",
+        "Kertas": "Paper",
+        "organik": "Organic",
+        "Organik": "Organic",
+    },
+    "roboflow_wastebasket_can_bottle_v3": {
+        "CAN": "Aluminum can",
+        "Can": "Aluminum can",
+        "can": "Aluminum can",
+        "canned-drinks": "Aluminum can",
+        "Bottle": "Plastic bottle",
+        "bottle": "Plastic bottle",
+        "bottled-drinks": "Plastic bottle",
+        "pet": "Plastic bottle",
+        "plastic-bottles": "Plastic bottle",
+        "plasticbottle": "Plastic bottle",
+    },
 }
 
 
@@ -60,6 +130,15 @@ def label_map_for_preset(preset: str) -> dict[str, str] | None:
         return None
     value = LABEL_MAP_PRESETS.get(preset)
     return dict(value) if value is not None else None
+
+
+def read_yolo_dataset_names(dataset_path: Path) -> dict[int, str]:
+    root, cleanup = _dataset_root(dataset_path)
+    try:
+        return _read_dataset_names(root)
+    finally:
+        if cleanup is not None:
+            shutil.rmtree(cleanup, ignore_errors=True)
 
 
 def import_yolo_dataset_to_queue(
@@ -71,6 +150,10 @@ def import_yolo_dataset_to_queue(
     catalog_path: Path | None = None,
     class_name_to_id: dict[str, int] | None = None,
     label_map: dict[str, str] | None = None,
+    extra_meta: dict[str, object] | None = None,
+    force_split: str | None = None,
+    skip_original_files: set[str] | None = None,
+    drop_unmapped_labels: bool = False,
 ) -> int:
     """Convert a YOLO detection dataset folder/zip into queue image+json items."""
     from app.core.dataset_catalog import DatasetCatalog
@@ -78,7 +161,7 @@ def import_yolo_dataset_to_queue(
     catalog = DatasetCatalog(catalog_path) if catalog_path is not None else None
     root, cleanup = _dataset_root(dataset_path)
     try:
-        names = _read_yolo_names(root / "data.yaml")
+        names = _read_dataset_names(root)
         dataset_metadata = _read_dataset_metadata(root / "data.yaml")
         pairs = _find_yolo_pairs(root)
         queue_dir.mkdir(parents=True, exist_ok=True)
@@ -86,12 +169,15 @@ def import_yolo_dataset_to_queue(
         for image_path, label_path, split in pairs:
             if limit is not None and imported >= limit:
                 break
+            if _original_file_key(image_path) in (skip_original_files or set()):
+                continue
             boxes = _read_yolo_boxes(
                 image_path,
                 label_path,
                 names,
                 class_name_to_id=class_name_to_id,
                 label_map=label_map,
+                drop_unmapped_labels=drop_unmapped_labels,
             )
             if not boxes:
                 continue
@@ -114,11 +200,13 @@ def import_yolo_dataset_to_queue(
             meta = {
                 "ts": datetime.now().isoformat(),
                 "source": item_source,
-                "split": split,
+                "split": force_split or split,
                 "original_file": str(image_path),
                 "boxes": boxes,
             }
-            meta.update(dataset_metadata)
+            meta.update(cast(dict[str, Any], dataset_metadata))
+            if extra_meta:
+                meta.update(cast(dict[str, Any], extra_meta))
             if unknown_labels:
                 meta["intended_source"] = source_name
                 meta["unknown_labels"] = unknown_labels
@@ -139,7 +227,7 @@ def import_yolo_dataset_to_queue(
 
 def _dataset_root(dataset_path: Path) -> tuple[Path, Path | None]:
     if dataset_path.is_file() and dataset_path.suffix.lower() == ".zip":
-        tmp = Path(tempfile.mkdtemp(prefix="trash_sorter_yolo_"))
+        tmp = _short_temp_dataset_dir(dataset_path)
         with zipfile.ZipFile(dataset_path) as zf:
             zf.extractall(tmp)
         candidates = [p for p in tmp.rglob("data.yaml")]
@@ -147,6 +235,43 @@ def _dataset_root(dataset_path: Path) -> tuple[Path, Path | None]:
             return candidates[0].parent, tmp
         return tmp, tmp
     return dataset_path, None
+
+
+def _short_temp_dataset_dir(dataset_path: Path) -> Path:
+    """Use a short temp root so long Roboflow filenames fit on Windows."""
+    parent: Path | None = None
+    if dataset_path.drive:
+        candidate = Path(dataset_path.drive + "\\") / "ts_yolo_tmp"
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            parent = candidate
+        except OSError:
+            parent = None
+    return Path(tempfile.mkdtemp(prefix="y_", dir=str(parent) if parent is not None else None))
+
+
+def _original_file_key(path: Path) -> str:
+    try:
+        return str(path.resolve())
+    except OSError:
+        return str(path)
+
+
+def _read_dataset_names(root: Path) -> dict[int, str]:
+    for candidate in (
+        root / "data.yaml",
+        root / "classes.txt",
+        root / "notes.json",
+    ):
+        if candidate.name == "data.yaml":
+            names = _read_yolo_names(candidate)
+        elif candidate.name == "classes.txt":
+            names = _read_classes_txt(candidate)
+        else:
+            names = _read_notes_json_names(candidate)
+        if names:
+            return names
+    return {}
 
 
 def _read_yolo_names(yaml_path: Path) -> dict[int, str]:
@@ -186,6 +311,44 @@ def _read_yolo_names(yaml_path: Path) -> dict[int, str]:
         elif stripped.startswith("-"):
             names[next_idx] = stripped[1:].strip().strip("'\"")
             next_idx += 1
+    return names
+
+
+def _read_classes_txt(path: Path) -> dict[int, str]:
+    if not path.exists():
+        return {}
+    names: dict[int, str] = {}
+    for index, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines()):
+        name = line.strip()
+        if name:
+            names[index] = name
+    return names
+
+
+def _read_notes_json_names(path: Path) -> dict[int, str]:
+    if not path.exists():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    categories = value.get("categories") if isinstance(value, dict) else None
+    if not isinstance(categories, list):
+        return {}
+    names: dict[int, str] = {}
+    for item in categories:
+        if not isinstance(item, dict):
+            continue
+        class_id_value = item.get("id")
+        if not isinstance(class_id_value, (int, str)):
+            continue
+        try:
+            class_id = int(class_id_value)
+        except (TypeError, ValueError):
+            continue
+        name = str(item.get("name") or "").strip()
+        if name:
+            names[class_id] = name
     return names
 
 
@@ -277,6 +440,7 @@ def _read_yolo_boxes(
     *,
     class_name_to_id: dict[str, int] | None = None,
     label_map: dict[str, str] | None = None,
+    drop_unmapped_labels: bool = False,
 ) -> list[dict]:
     try:
         with Image.open(image_path) as im:
@@ -294,7 +458,10 @@ def _read_yolo_boxes(
         except ValueError:
             continue
         original_name = names.get(cls_id, str(cls_id)).strip()
-        mapped_name = (label_map or {}).get(original_name, original_name).strip()
+        mapped_name = (label_map or {}).get(original_name)
+        if mapped_name is None and drop_unmapped_labels:
+            continue
+        mapped_name = (mapped_name or original_name).strip()
         unknown_label = class_name_to_id is not None and mapped_name not in class_name_to_id
         output_cls_id = class_name_to_id[mapped_name] if class_name_to_id and not unknown_label else cls_id
         x1 = max(0.0, (cx - bw / 2) * w)
@@ -316,4 +483,9 @@ def _read_yolo_boxes(
     return boxes
 
 
-__all__ = ["LABEL_MAP_PRESETS", "import_yolo_dataset_to_queue", "label_map_for_preset"]
+__all__ = [
+    "LABEL_MAP_PRESETS",
+    "import_yolo_dataset_to_queue",
+    "label_map_for_preset",
+    "read_yolo_dataset_names",
+]

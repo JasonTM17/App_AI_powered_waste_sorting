@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -15,6 +16,10 @@ from pathlib import Path
 from typing import Any
 
 from app.core.dataset_catalog import DatasetCatalog
+from app.core.downloaded_zip_intake import (
+    DOWNLOADED_ANCHOR_BOOTSTRAP_SOURCE,
+    has_downloaded_bootstrap_source_metadata,
+)
 
 TRUSTED_SOURCES = {
     "auto_low_conf",
@@ -22,9 +27,16 @@ TRUSTED_SOURCES = {
     "manual_camera_capture",
     "manual_web_import",
     "roboflow",
+    DOWNLOADED_ANCHOR_BOOTSTRAP_SOURCE,
 }
-REVIEW_REQUIRED_SOURCES = {"auto_low_conf", "manual_camera_capture", "manual_web_import"}
+REVIEW_REQUIRED_SOURCES = {
+    "auto_low_conf",
+    "manual_camera_capture",
+    "manual_web_import",
+    DOWNLOADED_ANCHOR_BOOTSTRAP_SOURCE,
+}
 MAX_MANUAL_URL_BYTES = 10 * 1024 * 1024
+MANUAL_IMPORT_USER_AGENT = "TrashSorterPro/2.0 (jasonbmt06@gmail.com) manual-training-import"
 
 
 def summarize_queue(queue_dir: Path) -> dict:
@@ -203,6 +215,9 @@ def import_manual_image_urls(
     source_page_url: str = "",
     source_license: str = "",
     source_author: str = "",
+    source_type: str = "licensed_url",
+    generated: bool = False,
+    extra_meta: dict[str, Any] | None = None,
     catalog_path: Path | None = None,
 ) -> int:
     """Import explicit image URLs as manual samples pending annotation."""
@@ -232,12 +247,16 @@ def import_manual_image_urls(
                 "source": "manual_web_import",
                 "reviewed": False,
                 "needs_annotation": True,
-                "recognition_enabled": True,
+                "recognition_enabled": not generated,
                 "annotation_hint": "Review source rights and adjust this box before training.",
                 "source_url": clean_url,
                 "source_page_url": source_page_url,
                 "source_license": source_license,
+                "license": source_license,
                 "source_author": source_author,
+                "source_type": source_type,
+                "canonical_class": class_name,
+                "generated": bool(generated),
                 "boxes": [
                     {
                         "cls_id": class_id,
@@ -247,6 +266,11 @@ def import_manual_image_urls(
                     }
                 ],
             }
+            if generated:
+                meta["split"] = "train"
+                meta["split_lock"] = True
+            if extra_meta:
+                meta.update(extra_meta)
             img_path.with_suffix(".json").write_text(
                 json.dumps(meta, indent=2, ensure_ascii=False),
                 encoding="utf-8",
@@ -403,6 +427,17 @@ def save_item_annotations(
         meta["reviewed"] = True
         meta["needs_annotation"] = False
         meta["reviewed_at"] = datetime.now().isoformat()
+        if str(meta.get("source") or "") == DOWNLOADED_ANCHOR_BOOTSTRAP_SOURCE:
+            if has_downloaded_bootstrap_source_metadata(meta):
+                meta["training_excluded"] = False
+                meta["phase17_reviewed_train_support"] = True
+                meta["split"] = "train"
+                meta["split_lock"] = True
+                meta["recognition_enabled"] = False
+                meta["training_exclusion_reason_previous"] = meta.pop("training_exclusion_reason", "")
+            else:
+                meta["training_excluded"] = True
+                meta["training_exclusion_reason"] = "missing_downloaded_source_metadata"
         meta.pop("unknown_labels", None)
         meta_file.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
         catalog.upsert_item(img, meta)
@@ -462,6 +497,8 @@ def is_trusted_meta(meta: dict) -> bool:
 def is_trainable_meta(meta: dict) -> bool:
     if not is_trusted_meta(meta):
         return False
+    if meta.get("training_excluded") is True:
+        return False
     source = str(meta.get("source") or "unknown")
     return not (source in REVIEW_REQUIRED_SOURCES and not meta.get("reviewed"))
 
@@ -479,21 +516,37 @@ def _download_image_url(url: str) -> bytes:
         raise ValueError("image URL must start with http:// or https://")
     request = urllib.request.Request(
         url,
-        headers={"User-Agent": "TrashSorterPro/2.0 manual-training-import"},
+        headers={"User-Agent": MANUAL_IMPORT_USER_AGENT},
     )
-    try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            content_type = response.headers.get("Content-Type", "")
-            if content_type and not content_type.lower().startswith("image/"):
-                raise ValueError(f"URL content is not an image: {content_type}")
-            data = response.read(MAX_MANUAL_URL_BYTES + 1)
-    except urllib.error.URLError as e:
-        raise ValueError(f"failed to download image URL: {e}") from e
+    data = b""
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                content_type = response.headers.get("Content-Type", "")
+                if content_type and not content_type.lower().startswith("image/"):
+                    raise ValueError(f"URL content is not an image: {content_type}")
+                data = response.read(MAX_MANUAL_URL_BYTES + 1)
+                break
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < 2:
+                time.sleep(_retry_after_seconds(e, attempt))
+                continue
+            raise ValueError(f"failed to download image URL: {e}") from e
+        except urllib.error.URLError as e:
+            raise ValueError(f"failed to download image URL: {e}") from e
     if len(data) > MAX_MANUAL_URL_BYTES:
         raise ValueError("image URL is larger than 10MB")
     if not data:
         raise ValueError("image URL returned empty content")
     return data
+
+
+def _retry_after_seconds(error: urllib.error.HTTPError, attempt: int) -> float:
+    raw = error.headers.get("Retry-After", "")
+    try:
+        return min(30.0, max(1.0, float(raw)))
+    except (TypeError, ValueError):
+        return float(2 ** (attempt + 1))
 
 
 def _image_size(image_path: Path) -> tuple[int, int]:

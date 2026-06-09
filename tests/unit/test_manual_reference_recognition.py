@@ -21,6 +21,21 @@ class _CountingEmbedder:
         return self._delegate.embed(rgb)
 
 
+class _MarkerEmbedder:
+    name = "marker"
+
+    def embed(self, rgb):
+        arr = np.asarray(rgb)
+        red = bool(((arr[:, :, 0] > 180) & (arr[:, :, 1] < 80) & (arr[:, :, 2] < 80)).any())
+        blue = bool(((arr[:, :, 2] > 180) & (arr[:, :, 0] < 80) & (arr[:, :, 1] < 120)).any())
+        green = bool(((arr[:, :, 1] > 160) & (arr[:, :, 0] < 100) & (arr[:, :, 2] < 100)).any())
+        vector = np.asarray([red, blue, green], dtype=np.float32)
+        norm = float(np.linalg.norm(vector))
+        if norm <= 0:
+            return None
+        return vector / norm
+
+
 def _write_reference(
     queue_dir,
     *,
@@ -58,6 +73,38 @@ def _write_reference(
         img_path.with_suffix(".json").write_text(json.dumps(meta), encoding="utf-8")
 
 
+def _write_full_pen_references(queue_dir) -> None:
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    for index in range(3):
+        img_path = queue_dir / f"manual_camera_full_pen_{index}.jpg"
+        image = Image.new("RGB", (240, 80), (20, 20, 20))
+        for x in range(20, 70):
+            for y in range(30, 50):
+                image.putpixel((x, y), (220, 20, 20))
+        for x in range(70, 155):
+            for y in range(32, 48):
+                image.putpixel((x, y), (20, 40, 220))
+        for x in range(155, 220):
+            for y in range(30, 50):
+                image.putpixel((x, y), (20, 190, 40))
+        image.save(img_path, format="JPEG", quality=95)
+        meta = {
+            "ts": datetime.now().isoformat(),
+            "source": "manual_camera_capture",
+            "reviewed": True,
+            "recognition_enabled": True,
+            "boxes": [
+                {
+                    "cls_id": 42,
+                    "cls_name": "Pen",
+                    "conf": 1.0,
+                    "xyxy": [20, 30, 220, 50],
+                }
+            ],
+        }
+        img_path.with_suffix(".json").write_text(json.dumps(meta), encoding="utf-8")
+
+
 def _query_frame() -> np.ndarray:
     return _query_frame_for_rgb((220, 30, 30))
 
@@ -66,6 +113,15 @@ def _query_frame_for_rgb(rgb_color: tuple[int, int, int]) -> np.ndarray:
     frame = np.zeros((40, 80, 3), dtype=np.uint8)
     frame[:, :] = (20, 20, 20)
     frame[12:28, 15:65] = tuple(reversed(rgb_color))
+    return frame
+
+
+def _wide_pen_query_frame() -> np.ndarray:
+    frame = np.zeros((80, 240, 3), dtype=np.uint8)
+    frame[:, :] = (20, 20, 20)
+    frame[30:50, 20:70] = (20, 20, 220)
+    frame[32:48, 70:155] = (220, 40, 20)
+    frame[30:50, 155:220] = (40, 190, 20)
     return frame
 
 
@@ -162,6 +218,32 @@ def test_manual_reference_caches_stable_query_crop(tmp_path):
     assert first is not None
     assert second == first
     assert embedder.calls == calls_after_first
+
+
+def test_manual_reference_expands_narrow_pen_body_bbox(tmp_path):
+    queue_dir = tmp_path / "queue"
+    _write_full_pen_references(queue_dir)
+    recognizer = ManualReferenceRecognizer(
+        queue_dir,
+        min_similarity=0.95,
+        min_consensus_similarity=0.95,
+        min_margin=0.0,
+        top_k=3,
+        min_votes=3,
+        refresh_seconds=0,
+        query_cache_seconds=0,
+        embedder=_MarkerEmbedder(),
+    )
+
+    match = recognizer.classify(
+        _wide_pen_query_frame(),
+        Detection(999, "Unknown object", 0.39, (70, 32, 155, 48)),
+    )
+
+    assert match is not None
+    assert match.cls_name == "Pen"
+    assert match.cls_id == 42
+    assert match.similarity >= 0.95
 
 
 def test_manual_reference_recognizes_multiple_common_waste_classes(tmp_path):

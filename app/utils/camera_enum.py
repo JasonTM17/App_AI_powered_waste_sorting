@@ -16,6 +16,9 @@ import os
 import re
 import shutil
 import subprocess
+import time
+
+from app.utils.camera_frame_quality import best_frame_quality, evaluate_frame_quality
 
 _BUILTIN_NAME_HINTS = (
     "integrated",
@@ -120,36 +123,70 @@ def list_directshow_cameras() -> list[str]:
 
 def find_readable_usb_camera(max_idx: int = 9) -> str | None:
     """Return an OpenCV source label for the first readable external USB camera."""
+    probes = probe_usb_cameras(max_idx=max_idx)
+    for item in probes:
+        if item.get("usable"):
+            return str(item.get("source") or "")
+    return None
+
+
+def probe_usb_cameras(max_idx: int = 9) -> list[dict[str, object]]:
+    """Probe external USB camera indexes and reject black frames."""
     if os.name != "nt":
-        return None
+        return []
     external_names = {
         (c.get("name") or "").strip().lower()
         for c in list_pnp_cameras()
         if c.get("is_external")
     }
     if not external_names:
-        return None
+        return []
     dshow_names = list_directshow_cameras()
     if not dshow_names:
-        return None
+        return []
     try:
         import cv2
     except Exception:
-        return None
+        return []
+    probes: list[dict[str, object]] = []
     for idx, name in enumerate(dshow_names[: max_idx + 1]):
         if name.strip().lower() not in external_names:
             continue
-        cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-        try:
-            ok = cap.isOpened()
-            if ok:
-                ok, frame = cap.read()
-                ok = ok and frame is not None
-            if ok:
-                return f"{idx} (DSHOW)"
-        finally:
-            cap.release()
-    return None
+        for backend_name, backend in (
+            ("DSHOW", cv2.CAP_DSHOW),
+            ("MSMF", cv2.CAP_MSMF),
+            ("ANY", cv2.CAP_ANY),
+        ):
+            source = f"{idx} ({backend_name})"
+            cap = cv2.VideoCapture(idx, backend)
+            try:
+                opened = bool(cap.isOpened())
+                quality = _sample_capture_quality(cap) if opened else None
+                probes.append(
+                    {
+                        "source": source,
+                        "index": idx,
+                        "backend": backend_name,
+                        "name": name,
+                        "opened": opened,
+                        "usable": bool(quality and quality.usable),
+                        "quality": quality.to_dict() if quality is not None else None,
+                        "reason": quality.reason if quality is not None else "cannot open source",
+                    }
+                )
+            finally:
+                cap.release()
+    return probes
+
+
+def _sample_capture_quality(cap, *, frames: int = 5):
+    qualities = []
+    for _ in range(max(1, frames)):
+        ok, frame = cap.read()
+        if ok and frame is not None:
+            qualities.append(evaluate_frame_quality(frame))
+        time.sleep(0.03)
+    return best_frame_quality(qualities)
 
 
 __all__ = [
@@ -157,4 +194,5 @@ __all__ = [
     "has_external_camera",
     "list_directshow_cameras",
     "list_pnp_cameras",
+    "probe_usb_cameras",
 ]

@@ -22,6 +22,8 @@
  *   D10 LOW -> track 5
  *   D11 LOW -> track 6
  *   D12 LOW -> track 7
+ * Warning audio:
+ *   AUDIO:8 -> multi-object warning, no servo movement
  *   These sensor events never move D6/D7. Only serial sort commands move servos.
  *
  * Extra diagnostics:
@@ -680,7 +682,7 @@ void handle_line(String line) {
       return;
     }
     int track = trackText.toInt();
-    if (track < 1 || track > 7) {
+    if (track < 1 || track > 8) {
       Serial.println(F("NACK:AUDIO:track_out_of_range"));
       return;
     }

@@ -35,6 +35,12 @@ def main() -> int:
     )
     parser.add_argument("--min-box-area", type=float, default=0.0)
     parser.add_argument("--min-box-side", type=float, default=0.0)
+    parser.add_argument(
+        "--require-reviewed",
+        action="store_true",
+        help="Only export samples explicitly reviewed in the manual annotation UI.",
+    )
+    parser.add_argument("--generated-cap-ratio", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     focus_classes = tuple(args.focus_class or ("Pen", "Battery", "Toothbrush"))
@@ -50,6 +56,8 @@ def main() -> int:
         focus_classes=focus_classes,
         min_box_area=args.min_box_area,
         min_box_side=args.min_box_side,
+        require_reviewed=args.require_reviewed,
+        generated_cap_ratio=args.generated_cap_ratio,
         seed=args.seed,
     )
     report = args.out / "export_report.json"

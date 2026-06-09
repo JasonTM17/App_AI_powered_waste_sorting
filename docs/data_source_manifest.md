@@ -24,6 +24,62 @@ and model weights are excluded by `.gitignore`.
 Google Images may be used for discovery only. An image is imported only when
 its direct URL, source page, author, and usage license are recorded.
 
+## Phase 8 Licensed Manifest Format
+
+Bulk imports use `scripts/import_licensed_image_manifest.py` with a JSON list
+or `{ "items": [...] }`. Each item must include:
+
+```json
+{
+  "image_url": "https://example.org/direct-image.jpg",
+  "source_page_url": "https://example.org/page-with-license",
+  "license": "CC-BY-4.0",
+  "author": "Example Author",
+  "source_type": "wikimedia",
+  "canonical_class": "Pen",
+  "generated": false
+}
+```
+
+Allowed `source_type` values are `licensed_url`, `open_images`, `wikimedia`,
+`roboflow`, `generated`, and `other`. Generated images are forced to train-only,
+disabled for immediate reference recognition, and capped at 20% per class.
+
+Phase 8 priority classes:
+
+- P0: `Pen`, `Battery`, `Toothbrush`, `Textile`, `Disposable tableware`,
+  `Unknown plastic`, `Tetra pack`, `Ceramic`, `Aerosols`, `Electronics`.
+- P1: `Organic`, `Aluminum can`, `Plastic bottle`, `Cardboard`, `Paper`,
+  `Plastic bag`, `Plastic cup`, `Tin`, `Glass bottle`.
+- P2: `Plastic caps`, `Stretch film`, `Paper cups`, `Aluminum caps`, `Foil`,
+  `Postal packaging`, `Scrap metal`.
+
+## Phase 9 Web + Camera Blur Workflow
+
+Use Google only to find source pages, then use source metadata from Wikimedia,
+Open Images, or another explicitly licensed page. Build a manifest first:
+
+```powershell
+python -m uv run python scripts/build_p0_licensed_manifest.py --per-class 40
+python -m uv run python scripts/import_licensed_image_manifest.py dataset_v2/phase9_p0_licensed_manifest.json --delay-seconds 1.25
+```
+
+After bbox review, add camera-blur train-only variants for the weak classes:
+
+```powershell
+python -m uv run python scripts/augment_camera_blur_pack.py --variants 2 --max-per-class 48
+python -m uv run python scripts/audit_phase9_readiness.py
+```
+
+Camera-blur metadata fields:
+
+- `camera_blur_augmented: true`
+- `augmentation_parent`: original reviewed image path.
+- `augmentation_profile`: augmentation recipe name.
+- `split: train`, `split_lock: true`, `recognition_enabled: false`.
+
+Camera-blur augmented images are never valid/test/reference samples.
+
 ## Fixed Training Taxonomy
 
 Fast Pen fine-tuning uses the existing 45-class V6 contract. Vietnamese object

@@ -19,6 +19,8 @@ Selected profile: `LEGACY_2_SERVO_OPENSMART`.
   - Huu co: `D10`, audio track `5`.
   - Tai che: `D11`, audio track `6`.
   - Vo co: `D12`, audio track `7`.
+- Multi-object warning audio: track `8`, no servo movement. Generated repo
+  asset: `assets/audio/gd5800/0008-multi-object-warning.mp3`.
 - Servo power: use external 5V supply for servos and connect common GND with Arduino.
 
 ## Servo Angles
@@ -55,6 +57,7 @@ Open Serial Monitor at `9600` baud, line ending `Newline`.
 | `AUDIO:5` | play Huu co sensor audio only, no servo, then `ACK:AUDIO:5` |
 | `AUDIO:6` | play Tai che sensor audio only, no servo, then `ACK:AUDIO:6` |
 | `AUDIO:7` | play Vo co sensor audio only, no servo, then `ACK:AUDIO:7` |
+| `AUDIO:8` | play multi-object warning audio only, no servo, then `ACK:AUDIO:8` |
 | `ANGLE:90:85` | raw wait/upright-position test, then `ACK:ANGLE:90:85` |
 | `HOME:90:85` | set temporary home/upright candidate and return `ACK:HOME:90:85` |
 | `ANGLE:90:180` | raw Huu co angle test, then `ACK:ANGLE:90:180` |
@@ -63,7 +66,7 @@ Open Serial Monitor at `9600` baud, line ending `Newline`.
 | `SORTTEST:R:90:0` | play app Vo co track, test candidate dump angle, return home, then `ACK:SORTTEST:R:90:0` |
 | `HOME` | attach servos, return to wait position, wait for settle, detach, then `ACK:HOME` |
 
-The firmware logs `MP3TX:<hex>` before each MP3 command and best-effort `MP3RX:<hex>` if the red board replies. Proximity sensors send `PROX:O`, `PROX:I`, or `PROX:R` and play tracks `5/6/7`. They are edge-triggered with cooldown, do not call sort logic, and do not move D6/D7. If a sensor fires while sorting, prox audio is queued until the servo returns home.
+The firmware logs `MP3TX:<hex>` before each MP3 command and best-effort `MP3RX:<hex>` if the red board replies. Proximity sensors send `PROX:O`, `PROX:I`, or `PROX:R` and play tracks `5/6/7`. Track `8` is reserved for the app multi-object warning. They are edge-triggered with cooldown, do not call sort logic, and do not move D6/D7. If a sensor fires while sorting, prox audio is queued until the servo returns home.
 
 The firmware keeps `SERVO_DETACH_WHEN_IDLE=true` with a longer
 `RETURN_SETTLE_MS`. Startup still avoids servo jitter because setup does not

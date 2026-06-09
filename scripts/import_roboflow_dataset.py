@@ -33,9 +33,21 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument(
         "--label-map",
-        choices=["none", "waste_detection_2", "pen_hardware_downloads"],
+        choices=[
+            "none",
+            "waste_detection_2",
+            "pen_hardware_downloads",
+            "kaggle_vietnam_waste",
+            "roboflow_3kelas_v1",
+            "roboflow_wastebasket_can_bottle_v3",
+        ],
         default="none",
         help="Optional safe label remapping preset for known public datasets.",
+    )
+    parser.add_argument(
+        "--drop-unmapped-labels",
+        action="store_true",
+        help="Drop boxes not present in the selected label map instead of marking the image untrusted.",
     )
     parser.add_argument(
         "--model",
@@ -56,6 +68,7 @@ def main() -> int:
         catalog_path=dataset_db_path(),
         class_name_to_id=class_map,
         label_map=label_map,
+        drop_unmapped_labels=args.drop_unmapped_labels,
     )
     print(f"Imported {imported} images into {args.queue}")
     print(f"Indexed dataset records in {dataset_db_path()}")

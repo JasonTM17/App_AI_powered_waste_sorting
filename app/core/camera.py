@@ -10,6 +10,7 @@ import numpy as np
 from PySide6.QtCore import QThread, Signal
 
 from app.core.frame_transform import apply_camera_transform
+from app.utils.camera_frame_quality import evaluate_frame_quality
 from app.utils.camera_source import backend_hint, normalize_camera_source
 from app.utils.logging import logger
 from app.utils.shared_camera_stream import read_shared_frame
@@ -59,8 +60,14 @@ class CameraWorker(QThread):
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
             with suppress(Exception):
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            ok, _frame = cap.read()
-            if not ok:
+            quality = _capture_best_quality(cap)
+            if not quality.usable:
+                logger.warning(
+                    "camera source={} backend={} rejected frame: {}",
+                    self._source,
+                    name,
+                    quality.reason,
+                )
                 cap.release()
                 continue
             logger.info("camera open ok source={} backend={}", self._source, name)
@@ -97,6 +104,15 @@ class CameraWorker(QThread):
                     self._cap = None
                     self.connected.emit(False)
                 continue
+            quality = evaluate_frame_quality(frame)
+            if not quality.usable:
+                consecutive_fail += 1
+                if consecutive_fail >= 5:
+                    logger.warning("camera black frames, reconnecting: {}", quality.reason)
+                    cap.release()
+                    self._cap = None
+                    self.connected.emit(False)
+                continue
             consecutive_fail = 0
             frame = apply_camera_transform(
                 frame,
@@ -109,6 +125,26 @@ class CameraWorker(QThread):
 
     def stop(self):
         self._stop = True
+
+
+def _capture_best_quality(cap, *, frames: int = 5):
+    qualities = []
+    for _ in range(max(1, frames)):
+        ok, frame = cap.read()
+        if ok and frame is not None:
+            qualities.append(evaluate_frame_quality(frame))
+        time.sleep(0.03)
+    if not qualities:
+        return evaluate_frame_quality(None)
+    return max(
+        qualities,
+        key=lambda item: (
+            item.usable,
+            item.non_black_ratio,
+            item.mean_brightness,
+            item.variance,
+        ),
+    )
 
 
 class SharedCameraWorker(QThread):

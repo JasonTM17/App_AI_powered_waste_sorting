@@ -82,8 +82,8 @@ def encode_sort_angle_test(command: str, d6_angle: int, d7_angle: int) -> bytes:
 
 
 def encode_audio_test(track: int) -> bytes:
-    if not 1 <= int(track) <= 7:
-        raise ValueError("audio track must be between 1 and 7")
+    if not 1 <= int(track) <= 8:
+        raise ValueError("audio track must be between 1 and 8")
     return f"AUDIO:{int(track)}\n".encode()
 
 

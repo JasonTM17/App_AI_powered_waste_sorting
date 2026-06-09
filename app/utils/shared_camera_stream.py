@@ -11,6 +11,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from app.utils.camera_frame_quality import FrameQuality, evaluate_frame_quality
 from app.utils.paths import app_data_dir
 
 SHARED_CAMERA_STALE_AFTER_S = 2.0
@@ -21,6 +22,7 @@ class SharedFrame:
     frame: np.ndarray
     jpeg: bytes
     age_s: float
+    quality: FrameQuality
 
 
 class SharedFramePublisher:
@@ -67,7 +69,7 @@ def read_shared_frame(*, stale_after_s: float = SHARED_CAMERA_STALE_AFTER_S) -> 
         stat = path.stat()
     except OSError:
         return None
-    age_s = time.time() - stat.st_mtime
+    age_s = max(0.0, time.time() - stat.st_mtime)
     if age_s > stale_after_s:
         return None
     try:
@@ -78,7 +80,39 @@ def read_shared_frame(*, stale_after_s: float = SHARED_CAMERA_STALE_AFTER_S) -> 
     frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if frame is None:
         return None
-    return SharedFrame(frame=frame, jpeg=jpeg, age_s=age_s)
+    quality = evaluate_frame_quality(frame)
+    if not quality.usable:
+        return None
+    return SharedFrame(frame=frame, jpeg=jpeg, age_s=age_s, quality=quality)
+
+
+def shared_frame_diagnostics(
+    *, stale_after_s: float = SHARED_CAMERA_STALE_AFTER_S
+) -> dict[str, object]:
+    path = shared_frame_path()
+    try:
+        stat = path.stat()
+    except OSError:
+        return {"path": str(path), "exists": False, "stale": True, "reason": "no shared frame"}
+    age_s = max(0.0, time.time() - stat.st_mtime)
+    out: dict[str, object] = {
+        "path": str(path),
+        "exists": True,
+        "age_s": round(age_s, 2),
+        "stale": age_s > stale_after_s,
+    }
+    try:
+        jpeg = path.read_bytes()
+    except OSError:
+        out["reason"] = "cannot read shared frame"
+        return out
+    arr = np.frombuffer(jpeg, dtype=np.uint8)
+    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    quality = evaluate_frame_quality(frame)
+    out.update(quality.to_dict())
+    out["black_frame"] = not quality.usable
+    out["reason"] = "stale shared frame" if out["stale"] else quality.reason
+    return out
 
 
 __all__ = [
@@ -87,5 +121,6 @@ __all__ = [
     "SharedFramePublisher",
     "encode_shared_frame",
     "read_shared_frame",
+    "shared_frame_diagnostics",
     "shared_frame_path",
 ]

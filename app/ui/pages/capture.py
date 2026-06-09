@@ -890,6 +890,8 @@ def _is_trusted_meta(meta: dict) -> bool:
 def _is_trainable_meta(meta: dict) -> bool:
     if not _is_trusted_meta(meta):
         return False
+    if meta.get("training_excluded") is True:
+        return False
     source = str(meta.get("source") or "unknown")
     return not (source in REVIEW_REQUIRED_SOURCES and not meta.get("reviewed"))
 

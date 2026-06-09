@@ -159,6 +159,22 @@ def test_export_skips_auto_low_conf_until_reviewed(tmp_path):
     assert is_trainable_meta(meta) is False
 
 
+def test_training_excluded_meta_is_not_trainable(tmp_path):
+    qdir = tmp_path / "queue"
+    _make_frame(
+        qdir,
+        "excluded",
+        [{"cls_id": 42, "cls_name": "Pen", "conf": 1.0, "xyxy": [0, 0, 100, 100]}],
+    )
+    meta_path = qdir / "excluded.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta.update({"source": "manual_web_import", "reviewed": True, "training_excluded": True})
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    assert is_trainable_meta(meta) is False
+    assert export_yolo_dataset(qdir, tmp_path / "out_excluded") == 0
+
+
 def test_quarantine_moves_untrusted_items(tmp_path):
     qdir = tmp_path / "queue"
     _make_frame(

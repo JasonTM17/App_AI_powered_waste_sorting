@@ -13,6 +13,9 @@ from pathlib import Path
 from PIL import Image
 
 from app.core.dataset_queue import is_trainable_meta
+from app.core.licensed_source_ingestion import GENERATED_CAP_RATIO
+from app.core.training_source_flags import is_generated_meta, is_train_only_supplemental_meta
+from app.core.waste_categories import canonical_class_name
 
 
 @dataclass(frozen=True)
@@ -32,14 +35,23 @@ def export_balanced_trainset(
     focus_classes: tuple[str, ...] = ("Pen", "Battery", "Toothbrush"),
     min_box_area: float = 0.0,
     min_box_side: float = 0.0,
+    require_reviewed: bool = False,
+    generated_cap_ratio: float = GENERATED_CAP_RATIO,
     seed: int = 42,
 ) -> dict[str, object]:
-    items = _load_items(queue_dir, set(class_names))
+    blocked_labels: Counter[str] = Counter()
+    items = _load_items(
+        queue_dir,
+        set(class_names),
+        blocked_labels=blocked_labels,
+        require_reviewed=require_reviewed,
+    )
     selected = _select_items(
         items,
         max_images=max_images,
         legacy_quota=legacy_quota,
         focus_classes=set(focus_classes),
+        generated_cap_ratio=generated_cap_ratio,
         seed=seed,
     )
     _reset_output(out_dir)
@@ -55,7 +67,11 @@ def export_balanced_trainset(
         "legacy_quota": legacy_quota,
         "min_box_area": min_box_area,
         "min_box_side": min_box_side,
+        "require_reviewed": require_reviewed,
+        "generated_cap_ratio": generated_cap_ratio,
         "skipped_small_boxes": 0,
+        "skipped_unknown_boxes": 0,
+        "blocked_labels": blocked_labels,
     }
     for item in selected:
         split = _split_for(item)
@@ -82,7 +98,13 @@ def export_balanced_trainset(
     return _jsonable(stats)
 
 
-def _load_items(queue_dir: Path, allowed: set[str]) -> list[QueueItem]:
+def _load_items(
+    queue_dir: Path,
+    allowed: set[str],
+    *,
+    blocked_labels: Counter[str],
+    require_reviewed: bool,
+) -> list[QueueItem]:
     items: list[QueueItem] = []
     for image_path in queue_dir.glob("*.jpg"):
         try:
@@ -91,11 +113,17 @@ def _load_items(queue_dir: Path, allowed: set[str]) -> list[QueueItem]:
             continue
         if not isinstance(meta, dict) or not is_trainable_meta(meta):
             continue
-        classes = frozenset(
-            str(box.get("cls_name") or "").strip()
-            for box in meta.get("boxes") or []
-            if str(box.get("cls_name") or "").strip() in allowed
-        )
+        if require_reviewed and meta.get("reviewed") is not True:
+            continue
+        class_names: set[str] = set()
+        for box in meta.get("boxes") or []:
+            raw_name = str(box.get("cls_name") or "").strip()
+            class_name = canonical_class_name(raw_name)
+            if class_name in allowed:
+                class_names.add(class_name)
+            elif raw_name:
+                blocked_labels[raw_name] += 1
+        classes = frozenset(class_names)
         if classes:
             items.append(QueueItem(image_path, meta, classes))
     return items
@@ -107,12 +135,13 @@ def _select_items(
     max_images: int,
     legacy_quota: int,
     focus_classes: set[str],
+    generated_cap_ratio: float,
     seed: int,
 ) -> list[QueueItem]:
     rng = random.Random(seed)
     ordered = list(items)
     rng.shuffle(ordered)
-    ordered.sort(key=lambda item: not bool(item.classes & focus_classes))
+    ordered.sort(key=lambda item: (not bool(item.classes & focus_classes), _is_generated(item.meta)))
     selected: list[QueueItem] = []
     class_counts: Counter[str] = Counter()
     generated_counts: Counter[str] = Counter()
@@ -123,9 +152,11 @@ def _select_items(
         needed_legacy = any(class_counts[name] < legacy_quota for name in item.classes)
         if not focus and not needed_legacy:
             continue
-        if _is_generated(item.meta) and any(
-            generated_counts[name] >= max(1, class_counts[name] // 4)
-            for name in item.classes
+        if _is_generated(item.meta) and not _within_generated_cap(
+            item.classes,
+            class_counts,
+            generated_counts,
+            generated_cap_ratio,
         ):
             continue
         selected.append(item)
@@ -150,8 +181,10 @@ def _label_lines(
         return []
     lines: list[str] = []
     for box in item.meta.get("boxes") or []:
-        name = str(box.get("cls_name") or "").strip()
+        name = canonical_class_name(str(box.get("cls_name") or "").strip())
         if name not in class_ids:
+            if name:
+                stats["skipped_unknown_boxes"] = int(str(stats["skipped_unknown_boxes"])) + 1
             continue
         xyxy = box.get("xyxy") or []
         if len(xyxy) < 4:
@@ -174,6 +207,8 @@ def _label_lines(
 
 
 def _split_for(item: QueueItem) -> str:
+    if is_train_only_supplemental_meta(item.meta):
+        return "train"
     if item.meta.get("split_lock"):
         split = str(item.meta.get("split") or "train").lower()
         return "valid" if split == "val" else split if split in {"train", "valid", "test"} else "train"
@@ -188,8 +223,26 @@ def _split_for(item: QueueItem) -> str:
 
 
 def _is_generated(meta: dict) -> bool:
-    source = str(meta.get("source") or "").lower()
-    return source.startswith(("generated", "synthetic", "imagegen"))
+    return is_generated_meta(meta)
+
+
+def _within_generated_cap(
+    classes: frozenset[str],
+    class_counts: Counter[str],
+    generated_counts: Counter[str],
+    generated_cap_ratio: float,
+) -> bool:
+    if generated_cap_ratio <= 0:
+        return False
+    real_ratio = generated_cap_ratio / max(0.01, 1.0 - generated_cap_ratio)
+    for name in classes:
+        real_count = class_counts[name] - generated_counts[name]
+        if real_count <= 0:
+            return False
+        cap = max(1, int(real_count * real_ratio))
+        if generated_counts[name] >= cap:
+            return False
+    return True
 
 
 def _reset_output(out_dir: Path) -> None:
