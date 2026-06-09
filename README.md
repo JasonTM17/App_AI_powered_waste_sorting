@@ -27,7 +27,7 @@ Chạy agent và web dashboard:
 powershell -ExecutionPolicy Bypass -File scripts/start_local.ps1
 ```
 
-Trong desktop có nút `Mở Web`; bấm nút này app sẽ tự bật agent + web local nếu chưa chạy, rồi mở dashboard để annotate/quản lý data.
+Trong desktop có nút `Mở Web`; bấm nút này app sẽ tự bật agent + web local nếu chưa chạy, rồi mở màn đăng nhập web dashboard. Sau khi đăng nhập, Admin vào dashboard vận hành, User vào dashboard báo cáo.
 
 Mặc định:
 
@@ -37,15 +37,109 @@ Mặc định:
 - Dataset training: `dataset_v2/low_conf_queue`
 - Export YOLO: `dataset_v2/yolo_trainset`
 
-## Web Roles
+## Web Login And Roles
 
-Web local supports role tokens:
+The web dashboard now uses username/password login. For production, store accounts
+and sessions in PostgreSQL by setting `TRASH_SORTER_AUTH_DATABASE_URL` or
+`DATABASE_URL` before starting the local agent. SQLite remains only as the local
+fallback when no PostgreSQL URL is configured:
 
-- `TRASH_SORTER_ADMIN_TOKEN`: full dashboard, camera/live, dataset, mapping, settings, logs.
-- `TRASH_SORTER_USER_TOKEN`: user dashboard only; shows bin fullness, recent waste composition, and general wellness suggestions.
-- `TRASH_SORTER_AGENT_TOKEN`: legacy admin token fallback.
+- `admin` role: full dashboard, camera/live, dataset, mapping, settings, logs.
+- `user` role: user dashboard only; shows bin fullness, 7/30/90/180-day waste analytics, charts, yesterday summary, and wellness suggestions.
 
-If no token is configured, local development stays admin-compatible. Once any token is configured, the web must provide a valid token. `NEXT_PUBLIC_AGENT_TOKEN` only seeds the first token value; the dashboard can save/change token at runtime.
+Local dev defaults are enabled by both `scripts/start_local.ps1` and the
+desktop `Mở Web` launcher when no production auth/bootstrap env or existing
+auth DB is configured. They start the local agent with
+`TRASH_SORTER_AUTH_DEV_DEFAULTS=1`:
+
+- Admin: `admin` / `admin123`
+- User: `user` / `user123`
+
+These dev accounts are marked `password_default=true`; after login they can only
+call `/api/me`, logout, and `/api/auth/change-password` until the password is
+changed. For production bootstrap, set `TRASH_SORTER_BOOTSTRAP_ADMIN_USERNAME` and
+`TRASH_SORTER_BOOTSTRAP_ADMIN_PASSWORD` before launching the desktop app/web, or
+create accounts with:
+
+```powershell
+python -m uv run python scripts/manage_auth_accounts.py create owner --role admin --force-change
+python -m uv run python scripts/manage_auth_accounts.py set-password owner
+python -m uv run python scripts/manage_auth_accounts.py create viewer --role user --force-change
+```
+
+Auth configuration:
+
+- `TRASH_SORTER_AUTH_DATABASE_URL`: preferred PostgreSQL URL for account/session storage.
+- `DATABASE_URL`: supported fallback PostgreSQL URL used by many deploy platforms.
+- `TRASH_SORTER_AUTH_DB`: optional auth DB path; defaults to `%APPDATA%/TrashSorter/auth.db`.
+- `TRASH_SORTER_SESSION_HOURS`: session lifetime, default `12`.
+- `TRASH_SORTER_ALLOWED_ORIGINS`: comma-separated FastAPI CORS origins for production deploys.
+- `TRASH_SORTER_ADMIN_TOKEN`, `TRASH_SORTER_USER_TOKEN`, and `TRASH_SORTER_AGENT_TOKEN` remain supported as legacy local/script compatibility tokens.
+
+The desktop launcher preserves production auth settings. It will not inject dev
+default accounts when `TRASH_SORTER_AUTH_DATABASE_URL`, `DATABASE_URL`,
+`TRASH_SORTER_AUTH_DB`, bootstrap admin env, or an existing default auth DB is
+present.
+
+If no auth accounts and no legacy token are configured, direct local API development
+stays admin-compatible. The web UI still shows the login screen until a session token
+is created.
+
+User data ownership:
+
+- New history rows can be owned by the configured device owner in `config.json`:
+  `device.owner_username`, `device.device_id`, `device.device_name`, `device.location`.
+- A User session only sees history rows owned by that account. Admin sees all rows.
+- Legacy rows with no owner are not exposed to User automatically. Admin can use the
+  web Account tab backfill action when the machine should assign old rows to one owner.
+- This phase does not identify the person at the bin. For per-person accuracy later,
+  add RFID, login-at-bin, or identity hardware before writing owner rows.
+
+Full Stitch User screens:
+
+- Stitch source: `projects/11781034156481807416`, design system
+  `assets/4bc3c1426eeb4c778d3a4334c3ece067`.
+- Admin keeps the current operational tabs and now also has
+  `/admin?tab=reports` for history export plus dataset/source-quality reporting.
+- User routes are available at `/user/dashboard`, `/user/ecopet`,
+  `/user/advice`, `/user/history`, `/user/device`, `/user/analytics`,
+  `/user/reports`, `/user/notifications`, `/user/community`,
+  `/user/leaderboard`, and `/user/account`.
+- User reports use `/api/user/report` and `/api/user/history/export.csv`.
+  The User CSV intentionally excludes image paths, raw file paths, logs, tokens,
+  password material, and raw history internals.
+- Notifications, community cards, leaderboard, and challenges are local MVP
+  screens derived from owned `history.db` rows and device status. They are not a
+  cloud/social backend in this phase.
+
+DeepSeek AI chatbot/advisor:
+
+- Gắn API key ở backend local agent, không gắn trong frontend và không dùng biến
+  `NEXT_PUBLIC_*`. Biến cần đặt là `DEEPSEEK_API_KEY` trong môi trường chạy FastAPI
+  agent (`scripts/run_agent.py`, `scripts/start_local.ps1`, hoặc desktop `Mở Web`).
+- File env để điền key local: copy `D:\PHAN LOAI RAC\trash-sorter-v2\.env.example`
+  thành `D:\PHAN LOAI RAC\trash-sorter-v2\.env.local`, rồi điền:
+  `DEEPSEEK_API_KEY=sk-...`. File `.env.local` bị git ignore và được `scripts/start_local.ps1`
+  cùng desktop `Mở Web` tự nạp trước khi bật agent.
+- Chạy local một lần bằng PowerShell:
+  `$env:DEEPSEEK_API_KEY="sk-..."; powershell -ExecutionPolicy Bypass -File scripts/start_local.ps1`
+- Nếu mở bằng desktop app, đặt Windows user env trước rồi mở lại app:
+  `setx DEEPSEEK_API_KEY "sk-..."`
+- Optional: set `DEEPSEEK_BASE_URL`; default is `https://api.deepseek.com`.
+- Optional: set `DEEPSEEK_MODEL`; default is `deepseek-v4-flash`.
+- Optional: set `DEEPSEEK_TIMEOUT_SECONDS`; default is `30`.
+- This is domain-trained through backend prompt profiles plus local EcoSort
+  Knowledge/RAG (`trash_sorter_user`, `trash_sorter_admin`), not hosted
+  fine-tuning. Seed knowledge lives in
+  `app/agent/knowledge_packs/trash_sorter_base.json`; Admin edits are stored in
+  `%APPDATA%/TrashSorter/chat_knowledge.local.json`.
+- Admin can open the Account tab and use `Huấn luyện AI` to add/edit snippets,
+  enable/disable local knowledge, reload the local file, and run retrieval tests
+  before asking DeepSeek.
+- The chatbot sends only aggregate counts, chart summaries, scoped history DTOs,
+  device status, and sanitized log counts. It does not send camera frames, dataset
+  images, file paths, raw logs, passwords, hashes, salts, or session tokens.
+- Advice is general wellness/lifestyle guidance, not medical diagnosis.
 
 ## Quy Tắc Camera Và UART
 
@@ -149,6 +243,7 @@ python -m uv run mypy app/core
 python -m uv run pytest -q
 cd web
 npm run build
+npm run test:e2e
 npm audit --audit-level=moderate
 ```
 
