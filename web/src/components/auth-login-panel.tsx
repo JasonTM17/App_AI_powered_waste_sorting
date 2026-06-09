@@ -6,9 +6,10 @@ import {
   EyeOff,
   LockKeyhole,
   LogIn,
-  Recycle,
   UserRound,
 } from "lucide-react";
+
+import { TrashSorterLogo } from "@/components/brand/trash-sorter-logo";
 
 type AuthLoginPanelProps = {
   error: string;
@@ -39,13 +40,7 @@ export function AuthLoginPanel({
     <main className="auth-screen">
       <section className="auth-panel" aria-labelledby="auth-title">
         <div className="auth-brand">
-          <div className="auth-mark">
-            <Recycle size={26} />
-          </div>
-          <div>
-            <span>Trash Sorter Pro</span>
-            <strong>EcoSort AI</strong>
-          </div>
+          <TrashSorterLogo variant="lockup" />
         </div>
 
         {sessionMessage ? (

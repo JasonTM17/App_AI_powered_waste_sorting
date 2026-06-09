@@ -1,7 +1,8 @@
 "use client";
 
-import { AlertTriangle, KeyRound, LogOut, ShieldCheck } from "lucide-react";
+import { AlertTriangle, KeyRound, LogOut } from "lucide-react";
 
+import { TrashSorterLogo } from "@/components/brand/trash-sorter-logo";
 import type { AuthMe } from "@/lib/agent";
 
 type PasswordChangePanelProps = {
@@ -35,13 +36,7 @@ export function PasswordChangePanel({
     <main className="auth-screen">
       <section className="auth-panel password-panel" aria-labelledby="password-title">
         <div className="auth-brand">
-          <div className="auth-mark">
-            <ShieldCheck size={26} />
-          </div>
-          <div>
-            <span>An toàn sản xuất</span>
-            <strong>EcoSort AI</strong>
-          </div>
+          <TrashSorterLogo variant="lockup" />
         </div>
 
         <div className="auth-banner" role="status">
