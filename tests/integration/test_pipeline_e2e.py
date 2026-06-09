@@ -7,7 +7,7 @@ from typing import ClassVar
 import numpy as np
 from PIL import Image
 
-from app.core.config import AppConfig, ClassMapping
+from app.core.config import MULTI_CLASS_WARNING_TEXT, AppConfig, ClassMapping
 from app.core.events import Detection
 from app.core.pipeline import Pipeline
 from app.core.three_bin_classifier import THREE_BIN_SOURCE, ThreeBinPrediction
@@ -68,6 +68,16 @@ class _UnknownInfer:
         return [Detection(999, "Unknown object", 0.39, (15, 12, 65, 28))]
 
 
+class _CardboardInfer:
+    class_names: ClassVar[dict[int, str]] = {3: "Cardboard"}
+
+    def __init__(self, xyxy: tuple[int, int, int, int]) -> None:
+        self.xyxy = xyxy
+
+    def predict(self, frame):
+        return [Detection(3, "Cardboard", 0.72, self.xyxy)]
+
+
 class _StubUart:
     def __init__(self):
         self.sent = []
@@ -125,6 +135,16 @@ class _MultiClassInfer:
         return [
             Detection(42, "Pen", 0.92, (10, 10, 100, 100)),
             Detection(37, "Textile", 0.91, (140, 10, 230, 100)),
+        ]
+
+
+class _SameClassPairInfer:
+    class_names: ClassVar[dict[int, str]] = {42: "Pen"}
+
+    def predict(self, frame):
+        return [
+            Detection(42, "Pen", 0.92, (10, 10, 100, 100)),
+            Detection(42, "Pen", 0.91, (140, 10, 230, 100)),
         ]
 
 
@@ -222,6 +242,112 @@ def test_pipeline_routes_unknown_with_legacy_common_reference_alias(tmp_path, mo
     assert uart.sent == [(1, "I", detections[0].conf)]
 
 
+def test_pipeline_corrects_large_cardboard_cloth_to_textile_reference(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
+    cfg = _dispatch_ready_config(
+        mappings=[
+            ClassMapping(class_name="Cardboard", command="I", bin_index=3),
+            ClassMapping(class_name="Textile", command="R", bin_index=2),
+        ]
+    )
+    cfg.capture.output_dir = str(tmp_path / "dataset_v2")
+    cfg.model.conf_threshold = 0.3
+    cfg.manual_reference_recognition.min_similarity = 0.9
+    _write_manual_reference(
+        Path(cfg.capture.output_dir) / "low_conf_queue",
+        cls_name="Textile",
+        cls_id=37,
+        rgb_color=(180, 180, 180),
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, _CardboardInfer((10, 10, 90, 90)), uart, tmp_path / "h.db")
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame[:, :] = (20, 20, 20)
+    frame[10:90, 10:90] = (180, 180, 180)
+
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [d.cls_name for d in detections] == ["Textile"]
+    assert detections[0].source == "manual_reference"
+    mapping = p._mapping_for_detection(detections[0])
+    assert (mapping.command, mapping.bin_index) == ("R", 2)
+    assert uart.sent == []
+
+
+def test_pipeline_keeps_small_cardboard_detection_without_reference_correction(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
+    cfg = _dispatch_ready_config(
+        mappings=[
+            ClassMapping(class_name="Cardboard", command="I", bin_index=3),
+            ClassMapping(class_name="Textile", command="R", bin_index=2),
+        ]
+    )
+    cfg.capture.output_dir = str(tmp_path / "dataset_v2")
+    cfg.model.conf_threshold = 0.3
+    cfg.manual_reference_recognition.min_similarity = 0.9
+    _write_manual_reference(
+        Path(cfg.capture.output_dir) / "low_conf_queue",
+        cls_name="Textile",
+        cls_id=37,
+        rgb_color=(180, 180, 180),
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, _CardboardInfer((20, 20, 40, 40)), uart, tmp_path / "h.db")
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame[:, :] = (20, 20, 20)
+    frame[10:90, 10:90] = (180, 180, 180)
+
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [d.cls_name for d in detections] == ["Cardboard"]
+    assert detections[0].source == "YOLO"
+    mapping = p._mapping_for_detection(detections[0])
+    assert (mapping.command, mapping.bin_index) == ("I", 3)
+    assert uart.sent == []
+
+
+def test_pipeline_rejects_non_textile_reference_for_cardboard_correction(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
+    cfg = _dispatch_ready_config(
+        mappings=[
+            ClassMapping(class_name="Cardboard", command="I", bin_index=3),
+            ClassMapping(class_name="Pen", command="R", bin_index=2),
+        ]
+    )
+    cfg.capture.output_dir = str(tmp_path / "dataset_v2")
+    cfg.model.conf_threshold = 0.3
+    cfg.manual_reference_recognition.min_similarity = 0.9
+    _write_manual_reference(
+        Path(cfg.capture.output_dir) / "low_conf_queue",
+        cls_name="Pen",
+        cls_id=42,
+        rgb_color=(180, 180, 180),
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, _CardboardInfer((10, 10, 90, 90)), uart, tmp_path / "h.db")
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame[:, :] = (20, 20, 20)
+    frame[10:90, 10:90] = (180, 180, 180)
+
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [d.cls_name for d in detections] == ["Cardboard"]
+    assert detections[0].source == "YOLO"
+    assert uart.sent == []
+
+
 def test_pipeline_routes_unknown_with_kaggle_three_bin_classifier(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config()
@@ -262,6 +388,35 @@ def test_pipeline_emits_one_command_per_object(tmp_path, monkeypatch):
     assert p.uart.sent[0][1] == "I"
     assert speaker.spoken == []
     p.on_ack(p.uart.sent[0][0], p.uart.sent[0][1], "ok", 12)
+    assert speaker.spoken == []
+    row = p.history.query(limit=1)[0]
+    assert row.uart_command == "I"
+    assert row.bin_index == 3
+    p.close()
+
+
+def test_pipeline_speaks_on_uart_send_when_computer_speaker_selected(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="paper", command="P", bin_index=1)]
+    )
+    cfg.speaker.output_mode = "computer_speaker"
+    cfg.speaker.enabled = True
+    speaker = _StubSpeaker()
+    p = Pipeline(
+        cfg=cfg,
+        engine=_StubInfer(),
+        uart=_StubUart(),
+        history_db=tmp_path / "h.db",
+        speaker=speaker,
+    )
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    _arm_dispatch(p)
+    for _ in range(3):
+        p.process_frame(frame, ts=datetime.now(UTC))
+    assert len(p.uart.sent) == 1
+    assert speaker.spoken == [("I", 3, "paper", 0.9)]
+    p.on_ack(p.uart.sent[0][0], p.uart.sent[0][1], "ok", 12)
     assert speaker.spoken == [("I", 3, "paper", 0.9)]
     row = p.history.query(limit=1)[0]
     assert row.uart_command == "I"
@@ -278,6 +433,8 @@ def test_pipeline_routes_three_representative_classes_to_three_bins(tmp_path, mo
             ClassMapping(class_name="Disposable tableware", command="I", bin_index=3),
         ]
     )
+    cfg.speaker.output_mode = "computer_speaker"
+    cfg.speaker.enabled = True
     uart = _StubUart()
     speaker = _StubSpeaker()
     p = Pipeline(
@@ -292,6 +449,11 @@ def test_pipeline_routes_three_representative_classes_to_three_bins(tmp_path, mo
     for index in range(3):
         _arm_dispatch(p)
         p.process_frame(frame, ts=datetime(2026, 6, 2, 8, index, tzinfo=UTC))
+        assert speaker.spoken[index] == [
+            ("O", 1, "Organic", 0.92),
+            ("I", 3, "Plastic bottle", 0.91),
+            ("R", 2, "Disposable tableware", 0.9),
+        ][index]
         track_id, command, _conf = uart.sent[-1]
         p.on_ack(track_id, command, "ok", 15)
 
@@ -338,9 +500,7 @@ def test_pipeline_blocks_dispatch_and_warns_for_multiple_classes_in_roi(tmp_path
     assert uart.audio_tracks == [8]
     assert p.history.query(limit=10) == []
     assert speaker.spoken == []
-    assert speaker.texts == [
-        ("Số lượng rác bạn đặt chỉ nên là 1 loại.", "multi_class_dispatch_blocked", 5.0),
-    ]
+    assert speaker.texts == []
     p.close()
 
 
@@ -363,9 +523,55 @@ def test_pipeline_warns_for_multiple_classes_when_hardware_disabled(tmp_path, mo
     assert uart.audio_tracks == []
     assert p.history.query(limit=10) == []
     assert speaker.spoken == []
+    assert speaker.texts == []
+    p.close()
+
+
+def test_pipeline_warns_on_computer_speaker_when_selected(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config()
+    cfg.speaker.output_mode = "computer_speaker"
+    cfg.speaker.enabled = True
+    cfg.dispatch_guard.multi_class_warning_cooldown_seconds = 5.0
+    uart = _WarningUart()
+    speaker = _StubSpeaker()
+    p = Pipeline(cfg, _MultiClassInfer(), uart, tmp_path / "h.db", speaker=speaker)
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert {item.cls_name for item in detections} == {"Pen", "Textile"}
+    assert p.dispatch_status == "multiple waste types"
+    assert uart.sent == []
+    assert uart.audio_tracks == []
+    assert p.history.query(limit=10) == []
+    assert speaker.spoken == []
     assert speaker.texts == [
-        (cfg.dispatch_guard.multi_class_warning_text, "multi_class_dispatch_blocked", 5.0),
+        (MULTI_CLASS_WARNING_TEXT, "multi_class_dispatch_blocked", 5.0),
     ]
+    p.close()
+
+
+def test_pipeline_allows_two_objects_of_same_class_in_roi(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
+    )
+    uart = _StubUart()
+    speaker = _StubSpeaker()
+    p = Pipeline(cfg, _SameClassPairInfer(), uart, tmp_path / "h.db", speaker=speaker)
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert [item.cls_name for item in detections] == ["Pen", "Pen"]
+    assert p.dispatch_status == "TEST OFF"
+    assert uart.sent == []
+    assert p.history.query(limit=10) == []
+    assert speaker.texts == []
     p.close()
 
 
@@ -623,6 +829,8 @@ def test_pipeline_does_not_pc_speak_when_uart_off(tmp_path, monkeypatch):
     cfg = _dispatch_ready_config(
         mappings=[ClassMapping(class_name="paper", command="P", bin_index=1)]
     )
+    cfg.speaker.output_mode = "computer_speaker"
+    cfg.speaker.enabled = True
     speaker = _StubSpeaker()
     p = Pipeline(cfg, _StubInfer(), None, tmp_path / "h.db", speaker=speaker)
     frame = np.zeros((480, 640, 3), dtype=np.uint8)

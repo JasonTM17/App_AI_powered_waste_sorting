@@ -4,7 +4,13 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.core.config import AppConfig, load_config, merge_missing_mappings, save_config
+from app.core.config import (
+    MULTI_CLASS_WARNING_TEXT,
+    AppConfig,
+    load_config,
+    merge_missing_mappings,
+    save_config,
+)
 
 
 def _default_dict():
@@ -34,6 +40,7 @@ def _default_dict():
         "mappings": [{"class_name": "plastic", "command": "S", "bin_index": 2, "enabled": True}],
         "roi": {"enabled": False, "x": 0, "y": 0, "width": 0, "height": 0},
         "capture": {"mode": "auto_low_conf", "low_conf_threshold": 0.6, "output_dir": "dataset_v2"},
+        "speaker": {"enabled": False, "output_mode": "hardware", "cooldown_seconds": 2.5},
         "dispatch_guard": {
             "min_sort_interval_seconds": 12.0,
             "busy_settle_seconds": 1.0,
@@ -43,7 +50,7 @@ def _default_dict():
             "require_roi_for_dispatch": True,
             "max_classes_per_dispatch": 1,
             "multi_class_warning_cooldown_seconds": 5.0,
-            "multi_class_warning_text": "Số lượng rác bạn đặt chỉ nên là 1 loại.",
+            "multi_class_warning_text": MULTI_CLASS_WARNING_TEXT,
             "multi_class_warning_audio_track": 8,
         },
         "three_bin_classifier": {
@@ -70,6 +77,8 @@ def test_app_config_parses_default_dict():
     assert c.uart.port == ""
     assert c.uart.protocol == "plain_group"
     assert c.speaker.enabled is False
+    assert c.speaker.output_mode == "hardware"
+    assert c.speaker.cooldown_seconds == 2.5
     assert c.unknown_fallback.enabled is True
     assert c.unknown_fallback.command == "R"
     assert c.unknown_fallback.bin_index == 2
@@ -77,7 +86,7 @@ def test_app_config_parses_default_dict():
     assert c.dispatch_guard.require_roi_for_dispatch is True
     assert c.dispatch_guard.max_classes_per_dispatch == 1
     assert c.dispatch_guard.multi_class_warning_cooldown_seconds == 5.0
-    assert c.dispatch_guard.multi_class_warning_text.startswith("Số lượng rác")
+    assert c.dispatch_guard.multi_class_warning_text == MULTI_CLASS_WARNING_TEXT
     assert c.dispatch_guard.multi_class_warning_audio_track == 8
     assert c.manual_reference_recognition.enabled is True
     assert c.manual_reference_recognition.min_similarity == 0.82
@@ -86,6 +95,9 @@ def test_app_config_parses_default_dict():
     assert c.manual_reference_recognition.top_k == 5
     assert c.manual_reference_recognition.cache_refresh_seconds == 30.0
     assert c.manual_reference_recognition.query_cache_seconds == 1.0
+    assert c.manual_reference_recognition.correctable_yolo_classes == ["Cardboard"]
+    assert c.manual_reference_recognition.correction_target_classes == ["Textile"]
+    assert c.manual_reference_recognition.min_correction_area_ratio == 0.25
     assert c.three_bin_classifier.enabled is False
     assert c.three_bin_classifier.model_path == "models/three_bin_classifier.pt"
     assert c.three_bin_classifier.min_confidence == 0.72
@@ -118,6 +130,10 @@ def test_dispatch_guard_invalid_values_rejected():
 def test_manual_reference_recognition_invalid_values_rejected():
     d = _default_dict()
     d["manual_reference_recognition"] = {"min_similarity": 2.0}
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate(d)
+    d = _default_dict()
+    d["manual_reference_recognition"] = {"min_correction_area_ratio": 1.5}
     with pytest.raises(ValidationError):
         AppConfig.model_validate(d)
 
@@ -205,22 +221,20 @@ def test_load_config_repairs_plain_group_ack_timeout(tmp_path: Path):
     assert raw["uart"]["ack_timeout_ms"] == 4500
 
 
-def test_load_config_disables_pc_speaker_without_debug_env(tmp_path: Path, monkeypatch):
-    monkeypatch.delenv("TRASH_SORTER_ENABLE_PC_SPEAKER", raising=False)
+def test_load_config_replaces_legacy_multi_class_warning_text(tmp_path: Path):
     cfg_path = tmp_path / "config.json"
     data = _default_dict()
-    data["speaker"] = {"enabled": True, "cooldown_seconds": 2.5}
+    data["dispatch_guard"]["multi_class_warning_text"] = "Số lượng rác bạn đặt chỉ nên là 1 loại."
     cfg_path.write_text(json.dumps(data), encoding="utf-8")
 
     cfg = load_config(cfg_path)
 
-    assert cfg.speaker.enabled is False
+    assert cfg.dispatch_guard.multi_class_warning_text == MULTI_CLASS_WARNING_TEXT
     raw = json.loads(cfg_path.read_text(encoding="utf-8"))
-    assert raw["speaker"]["enabled"] is False
+    assert raw["dispatch_guard"]["multi_class_warning_text"] == MULTI_CLASS_WARNING_TEXT
 
 
-def test_load_config_keeps_pc_speaker_with_debug_env(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("TRASH_SORTER_ENABLE_PC_SPEAKER", "1")
+def test_load_config_migrates_legacy_enabled_speaker_to_computer_speaker(tmp_path: Path):
     cfg_path = tmp_path / "config.json"
     data = _default_dict()
     data["speaker"] = {"enabled": True, "cooldown_seconds": 2.5}
@@ -229,6 +243,37 @@ def test_load_config_keeps_pc_speaker_with_debug_env(tmp_path: Path, monkeypatch
     cfg = load_config(cfg_path)
 
     assert cfg.speaker.enabled is True
+    assert cfg.speaker.output_mode == "computer_speaker"
+    raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert raw["speaker"]["enabled"] is True
+    assert raw["speaker"]["output_mode"] == "computer_speaker"
+
+
+def test_load_config_enables_speaker_when_computer_speaker_mode_selected(tmp_path: Path):
+    cfg_path = tmp_path / "config.json"
+    data = _default_dict()
+    data["speaker"] = {
+        "enabled": False,
+        "output_mode": "computer_speaker",
+        "cooldown_seconds": 2.5,
+    }
+    cfg_path.write_text(json.dumps(data), encoding="utf-8")
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.speaker.enabled is True
+    assert cfg.speaker.output_mode == "computer_speaker"
+
+
+def test_load_config_keeps_default_audio_output_on_hardware(tmp_path: Path):
+    cfg_path = tmp_path / "config.json"
+    data = _default_dict()
+    cfg_path.write_text(json.dumps(data), encoding="utf-8")
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.speaker.enabled is False
+    assert cfg.speaker.output_mode == "hardware"
 
 
 def test_load_config_repairs_known_class_semantic_mappings(tmp_path: Path):

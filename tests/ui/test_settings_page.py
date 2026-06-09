@@ -8,6 +8,15 @@ from app.core.config import AppConfig
 from app.ui.pages.settings import SettingsPage
 
 
+def _is_descendant(widget, ancestor) -> bool:
+    parent = widget.parent()
+    while parent is not None:
+        if parent is ancestor:
+            return True
+        parent = parent.parent()
+    return False
+
+
 def test_settings_emits_config_on_save(qtbot):
     cfg = AppConfig()
     page = SettingsPage(cfg)
@@ -84,6 +93,52 @@ def test_settings_collect_keeps_empty_uart_without_usb(qtbot):
     assert not page.btn_test_uart.isEnabled()
 
 
+def test_settings_audio_output_defaults_to_hardware(qtbot):
+    cfg = AppConfig()
+    page = SettingsPage(cfg)
+    qtbot.addWidget(page)
+
+    out = page._collect()
+
+    assert page.audio_section.output_mode() == "hardware"
+    assert page.audio_section.hardware_button.isChecked() is True
+    assert page.audio_section.hardware_button.text() == "Loa phần cứng"
+    assert page.audio_section.computer_button.text() == "Loa laptop"
+    assert "Loa laptop" in page.audio_section.status_label.text()
+    assert out.speaker.output_mode == "hardware"
+    assert out.speaker.enabled is False
+    assert not page.audio_section.speaker_cooldown.isEnabled()
+
+
+def test_settings_collect_saves_computer_speaker_output(qtbot):
+    cfg = AppConfig()
+    page = SettingsPage(cfg)
+    qtbot.addWidget(page)
+    page.audio_section.set_output_mode("computer_speaker")
+    page.audio_section.speaker_cooldown.setValue(4.5)
+
+    out = page._collect()
+
+    assert out.speaker.output_mode == "computer_speaker"
+    assert out.speaker.enabled is True
+    assert out.speaker.cooldown_seconds == 4.5
+    assert page.audio_section.computer_button.isChecked() is True
+    assert page.audio_section.speaker_cooldown.isEnabled()
+
+
+def test_settings_voice_test_buttons_emit_requested_command(qtbot):
+    cfg = AppConfig()
+    page = SettingsPage(cfg)
+    qtbot.addWidget(page)
+    captured = []
+    page.test_voice_requested.connect(lambda command: captured.append(command))
+    button = next(btn for btn in page.audio_section.findChildren(QPushButton) if btn.text() == "Test hữu cơ")
+
+    button.click()
+
+    assert captured == ["O"]
+
+
 def test_settings_hardware_test_button_emits_command(qtbot):
     cfg = AppConfig()
     cfg.uart.port = "COM8"
@@ -94,7 +149,11 @@ def test_settings_hardware_test_button_emits_command(qtbot):
     page.uart_port.setCurrentIndex(0)
     captured = []
     page.test_hardware_requested.connect(lambda port, baud, cmd: captured.append((port, baud, cmd)))
-    button = next(btn for btn in page.findChildren(QPushButton) if btn.text() == "Test Huu co")
+    button = next(
+        btn
+        for btn in page.findChildren(QPushButton)
+        if btn.text() == "Test Huu co" and not _is_descendant(btn, page.audio_section)
+    )
 
     button.click()
 
