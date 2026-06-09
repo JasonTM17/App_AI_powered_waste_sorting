@@ -1502,7 +1502,7 @@ def test_user_chat_uses_owned_context_and_knowledge_pack(tmp_path, monkeypatch):
         runtime.close()
 
 
-def test_user_chat_without_deepseek_key_returns_backend_env_hint(tmp_path, monkeypatch):
+def test_user_chat_without_deepseek_key_returns_friendly_user_message(tmp_path, monkeypatch):
     monkeypatch.setenv("TRASH_SORTER_AUTH_DB", str(tmp_path / "auth.db"))
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     AuthService().create_account("alice", "alice-pass-123", "user")
@@ -1520,8 +1520,57 @@ def test_user_chat_without_deepseek_key_returns_backend_env_hint(tmp_path, monke
         assert res.status_code == 200
         assert body["available"] is False
         assert body["provider"] == "deepseek"
-        assert "DEEPSEEK_API_KEY" in body["message"]
-        assert ".env.local" in body["message"]
+        assert "EcoPet" in body["message"]
+        assert "DEEPSEEK_API_KEY" not in body["message"]
+        assert ".env.local" not in body["message"]
+        assert "deepseek-v4-flash" not in body["message"]
+        assert body["quota_limit"] == 36
+        assert body["quota_remaining"] == 35
+    finally:
+        runtime.close()
+
+
+def test_user_chat_and_advisor_share_monthly_quota(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRASH_SORTER_AUTH_DB", str(tmp_path / "auth.db"))
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    AuthService().create_account("alice", "alice-pass-123", "user")
+    client, runtime = _client(tmp_path)
+    try:
+        login = client.post("/api/auth/login", json={"username": "alice", "password": "alice-pass-123"})
+        token = login.json()["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        for index in range(35):
+            response = client.post(
+                "/api/user/chat",
+                headers=headers,
+                json={"message": f"Cau hoi {index}"},
+            )
+            assert response.status_code == 200
+            assert response.json()["quota_exceeded"] is False
+
+        advisor = client.post(
+            "/api/user/advisor",
+            headers=headers,
+            json={"range_days": 30, "question": "Tư vấn hôm nay"},
+        )
+        assert advisor.status_code == 200
+        advisor_body = advisor.json()
+        assert advisor_body["quota_used"] == 36
+        assert advisor_body["quota_remaining"] == 0
+
+        exceeded = client.post(
+            "/api/user/chat",
+            headers=headers,
+            json={"message": "Tôi còn hỏi được không?"},
+        )
+        assert exceeded.status_code == 200
+        body = exceeded.json()
+        assert body["quota_exceeded"] is True
+        assert body["quota_used"] == 36
+        assert body["quota_remaining"] == 0
+        assert "36 lượt" in body["message"]
+        assert "DEEPSEEK_API_KEY" not in body["message"]
     finally:
         runtime.close()
 

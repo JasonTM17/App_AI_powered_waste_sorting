@@ -30,6 +30,10 @@ DEEPSEEK_KEY_SETUP_MESSAGE = (
     '$env:DEEPSEEK_API_KEY="sk-..."; powershell -ExecutionPolicy Bypass -File scripts/start_local.ps1. '
     "Nếu dùng file env local, điền DEEPSEEK_API_KEY trong .env.local rồi khởi động lại agent."
 )
+USER_ASSISTANT_UNAVAILABLE_MESSAGE = (
+    "EcoPet đang dùng gợi ý có sẵn trong ứng dụng. Bạn vẫn có thể xem biểu đồ, lịch sử rác "
+    "và thử hỏi lại sau khi trợ lý trực tuyến."
+)
 
 AdminOrUser = Literal["admin", "user"]
 
@@ -77,7 +81,7 @@ def build_chat_response(
             model=cfg.model,
             role=role,
             profile=clean_profile,
-            message=DEEPSEEK_KEY_SETUP_MESSAGE,
+            message=DEEPSEEK_KEY_SETUP_MESSAGE if role == "admin" else USER_ASSISTANT_UNAVAILABLE_MESSAGE,
             quick_prompts=quick_prompts,
             knowledge_used=knowledge_used,
             safety_notice=DEFAULT_SAFETY_NOTICE,
@@ -93,18 +97,30 @@ def build_chat_response(
             conversation_style=conversation_style,
         )
     except httpx.TimeoutException:
-        answer = "DeepSeek phản hồi quá lâu. Hãy thử lại sau vài giây."
+        answer = (
+            "DeepSeek phản hồi quá lâu. Hãy thử lại sau vài giây."
+            if role == "admin"
+            else "EcoPet phản hồi hơi chậm. Bạn thử lại sau vài giây nhé."
+        )
         available = False
     except httpx.HTTPStatusError as exc:
-        answer = _status_message(exc.response.status_code)
+        answer = _status_message(exc.response.status_code, role)
         available = False
     except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError):
-        answer = "Không thể kết nối DeepSeek lúc này. Hệ thống vẫn giữ dữ liệu local an toàn."
+        answer = (
+            "Không thể kết nối DeepSeek lúc này. Hệ thống vẫn giữ dữ liệu local an toàn."
+            if role == "admin"
+            else "EcoPet chưa kết nối được lúc này. Bạn vẫn có thể xem biểu đồ và lịch sử rác bình thường."
+        )
         available = False
     else:
         available = bool(answer)
         if not answer:
-            answer = "DeepSeek chưa trả về nội dung. Hãy thử lại với câu hỏi cụ thể hơn."
+            answer = (
+                "DeepSeek chưa trả về nội dung. Hãy thử lại với câu hỏi cụ thể hơn."
+                if role == "admin"
+                else "EcoPet chưa nhận được câu trả lời. Bạn thử hỏi ngắn hơn một chút nhé."
+            )
     answer = _polish_answer(answer, role)
     return AiChatResponse(
         generated_at=datetime.now().isoformat(),
@@ -251,7 +267,11 @@ def _clean_field(value: object, *, limit: int = 120) -> str:
     return " ".join(str(value or "").split())[:limit]
 
 
-def _status_message(status_code: int) -> str:
+def _status_message(status_code: int, role: AdminOrUser) -> str:
+    if role == "user":
+        if status_code == 429:
+            return "EcoPet đang có nhiều lượt hỏi. Bạn thử lại sau một chút nhé."
+        return "EcoPet chưa sẵn sàng trả lời lúc này. Bạn vẫn có thể xem biểu đồ và lịch sử rác."
     if status_code == 401:
         return "DeepSeek từ chối API key. Hãy kiểm tra DEEPSEEK_API_KEY."
     if status_code == 429:

@@ -529,6 +529,11 @@ class UserAdvisorResponse(BaseModel):
     local_insights: list[WellnessInsightDTO] = Field(default_factory=list)
     knowledge_used: list[str] = Field(default_factory=list)
     safety_notice: str = ""
+    quota_limit: int | None = None
+    quota_used: int | None = None
+    quota_remaining: int | None = None
+    quota_reset_at: str = ""
+    quota_exceeded: bool = False
 
 
 class AiChatRequest(BaseModel):
@@ -546,6 +551,11 @@ class AiChatResponse(BaseModel):
     quick_prompts: list[str] = Field(default_factory=list)
     knowledge_used: list[str] = Field(default_factory=list)
     safety_notice: str = ""
+    quota_limit: int | None = None
+    quota_used: int | None = None
+    quota_remaining: int | None = None
+    quota_reset_at: str = ""
+    quota_exceeded: bool = False
 
 
 class HardwareTestRequest(BaseModel):

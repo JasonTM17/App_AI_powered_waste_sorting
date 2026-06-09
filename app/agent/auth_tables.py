@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Column, Integer, MetaData, String, Table
+from sqlalchemy import Column, Integer, MetaData, String, Table, UniqueConstraint
 
 metadata = MetaData()
 
@@ -34,5 +34,15 @@ sessions = Table(
     Column("client_label", String, nullable=False, default=""),
 )
 
+chat_usage = Table(
+    "chat_usage",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("account_id", Integer, nullable=False),
+    Column("period", String, nullable=False),
+    Column("used", Integer, nullable=False, default=0),
+    Column("updated_at", String, nullable=False),
+    UniqueConstraint("account_id", "period", name="uq_chat_usage_account_period"),
+)
 
-__all__ = ["accounts", "metadata", "sessions"]
+__all__ = ["accounts", "chat_usage", "metadata", "sessions"]

@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import tempfile
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -46,7 +47,12 @@ from app.agent.auth import (
 )
 from app.agent.auth_password_policy import PasswordPolicyError
 from app.agent.auth_rate_limit import LoginRateLimiter
-from app.agent.auth_service import AuthService, InactiveAccountError
+from app.agent.auth_service import (
+    USER_CHAT_MONTHLY_LIMIT,
+    AuthService,
+    ChatQuota,
+    InactiveAccountError,
+)
 from app.agent.chat_knowledge_service import (
     evaluate_knowledge_retrieval,
     list_knowledge_entries,
@@ -369,21 +375,28 @@ def create_app(
         payload: UserAdvisorRequest,
         context: Annotated[AuthContext, Depends(require_active_user_token)],
     ) -> UserAdvisorResponse:
-        return build_user_advisor(
+        quota = _consume_user_chat_quota(context)
+        if quota and quota.exceeded:
+            return _user_advisor_quota_response(payload.range_days, quota)
+        response = build_user_advisor(
             rt,
             range_days=payload.range_days,
             question=payload.question,
             **_owner_scope(context),
         )
+        return _attach_quota(response, quota)
 
     @user_router.post("/user/chat", response_model=AiChatResponse)
     def user_chat(
         payload: AiChatRequest,
         context: Annotated[AuthContext, Depends(require_active_user_token)],
     ) -> AiChatResponse:
+        quota = _consume_user_chat_quota(context)
+        if quota and quota.exceeded:
+            return _user_chat_quota_response(quota)
         analytics = build_user_analytics(rt, 30, **_owner_scope(context))
         chat_context = _analytics_chat_context(analytics)
-        return build_chat_response(
+        response = build_chat_response(
             role="user",
             message=payload.message,
             context=chat_context,
@@ -395,6 +408,7 @@ def create_app(
             ),
             conversation_style="Ngắn gọn, thân thiện, giải thích bằng dữ liệu trong dashboard User.",
         )
+        return _attach_quota(response, quota)
 
     router = APIRouter(prefix="/api", dependencies=[Depends(require_active_admin_token)])
 
@@ -1169,6 +1183,61 @@ def _owner_scope(context: AuthContext) -> dict[str, object]:
     if context.account_id is not None and context.username:
         return {"owner_account_id": context.account_id, "owner_username": context.username}
     return {"owner_account_id": None, "owner_username": "__session_owner_required__"}
+
+
+def _consume_user_chat_quota(context: AuthContext) -> ChatQuota | None:
+    if context.role != "user" or context.account_id is None:
+        return None
+    return AuthService().consume_user_chat_quota(context.account_id, limit=USER_CHAT_MONTHLY_LIMIT)
+
+
+def _attach_quota(response, quota: ChatQuota | None):
+    if quota is None:
+        return response
+    return response.model_copy(update=quota.as_response_fields())
+
+
+def _user_chat_quota_response(quota: ChatQuota) -> AiChatResponse:
+    return AiChatResponse(
+        generated_at=datetime.now().isoformat(),
+        available=False,
+        provider="local",
+        model="",
+        role="user",
+        profile=DEFAULT_USER_PROFILE,
+        message=(
+            "Bạn đã dùng hết 36 lượt hỏi EcoPet trong tháng này. "
+            "EcoPet sẽ mở lại lượt hỏi vào đầu tháng tới; các biểu đồ và lịch sử vẫn dùng bình thường."
+        ),
+        quick_prompts=[
+            "Xem biểu đồ hôm nay",
+            "Kiểm tra lịch sử rác",
+            "Xem Eco Score",
+        ],
+        knowledge_used=[],
+        safety_notice="",
+        **quota.as_response_fields(),
+    )
+
+
+def _user_advisor_quota_response(range_days: int, quota: ChatQuota) -> UserAdvisorResponse:
+    clean_range = range_days if range_days in {7, 30, 90, 180} else 30
+    return UserAdvisorResponse(
+        generated_at=datetime.now().isoformat(),
+        available=False,
+        provider="local",
+        model="",
+        profile=DEFAULT_USER_PROFILE,
+        range_days=clean_range,  # type: ignore[arg-type]
+        message=(
+            "Bạn đã dùng hết 36 lượt hỏi EcoPet trong tháng này. "
+            "Mình vẫn giữ lại phần biểu đồ, lịch sử và gợi ý có sẵn để bạn theo dõi."
+        ),
+        local_insights=[],
+        knowledge_used=[],
+        safety_notice="",
+        **quota.as_response_fields(),
+    )
 
 
 def _account_to_dto(row: dict[str, object]) -> AccountDTO:

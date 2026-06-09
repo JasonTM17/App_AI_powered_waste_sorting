@@ -697,6 +697,11 @@ export type UserAdvisorResponse = {
   local_insights: WellnessInsight[];
   knowledge_used: string[];
   safety_notice: string;
+  quota_limit?: number | null;
+  quota_used?: number | null;
+  quota_remaining?: number | null;
+  quota_reset_at?: string;
+  quota_exceeded?: boolean;
 };
 
 export type AiChatResponse = {
@@ -710,6 +715,11 @@ export type AiChatResponse = {
   quick_prompts: string[];
   knowledge_used: string[];
   safety_notice: string;
+  quota_limit?: number | null;
+  quota_used?: number | null;
+  quota_remaining?: number | null;
+  quota_reset_at?: string;
+  quota_exceeded?: boolean;
 };
 
 export type KnowledgeEntry = {

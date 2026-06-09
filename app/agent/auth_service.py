@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import secrets
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -24,7 +24,7 @@ from app.agent.auth_crypto import (
     verify_password,
 )
 from app.agent.auth_password_policy import validate_password_policy
-from app.agent.auth_tables import accounts, metadata, sessions
+from app.agent.auth_tables import accounts, chat_usage, metadata, sessions
 from app.utils.paths import auth_db_path
 
 AUTH_DB_ENV = "TRASH_SORTER_AUTH_DB"
@@ -33,6 +33,7 @@ DATABASE_URL_ENV = "DATABASE_URL"
 DEV_DEFAULTS_ENV = "TRASH_SORTER_AUTH_DEV_DEFAULTS"
 BOOTSTRAP_ADMIN_USERNAME_ENV = "TRASH_SORTER_BOOTSTRAP_ADMIN_USERNAME"
 BOOTSTRAP_ADMIN_PASSWORD_ENV = "TRASH_SORTER_BOOTSTRAP_ADMIN_PASSWORD"
+USER_CHAT_MONTHLY_LIMIT = 36
 AuthRole = Literal["admin", "user"]
 
 
@@ -49,6 +50,24 @@ class AuthIdentity:
 class LoginResult:
     token: str
     identity: AuthIdentity
+
+
+@dataclass(frozen=True)
+class ChatQuota:
+    limit: int
+    used: int
+    remaining: int
+    reset_at: str
+    exceeded: bool = False
+
+    def as_response_fields(self) -> dict[str, object]:
+        return {
+            "quota_limit": self.limit,
+            "quota_used": self.used,
+            "quota_remaining": self.remaining,
+            "quota_reset_at": self.reset_at,
+            "quota_exceeded": self.exceeded,
+        }
 
 
 class InactiveAccountError(Exception):
@@ -329,6 +348,45 @@ class AuthService:
             ).mappings().all()
         return [dict(row) for row in rows]
 
+    def get_user_chat_quota(self, account_id: int, *, limit: int = USER_CHAT_MONTHLY_LIMIT) -> ChatQuota:
+        period = _current_chat_period()
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                select(chat_usage.c.used).where(chat_usage.c.account_id == account_id).where(chat_usage.c.period == period)
+            ).mappings().first()
+        used = int(row["used"]) if row is not None else 0
+        return _quota_from_used(used, limit=limit)
+
+    def consume_user_chat_quota(self, account_id: int, *, limit: int = USER_CHAT_MONTHLY_LIMIT) -> ChatQuota:
+        period = _current_chat_period()
+        now = iso(utc_now())
+        with self._engine.begin() as conn:
+            row = conn.execute(
+                select(chat_usage.c.id, chat_usage.c.used)
+                .where(chat_usage.c.account_id == account_id)
+                .where(chat_usage.c.period == period)
+            ).mappings().first()
+            used = int(row["used"]) if row is not None else 0
+            if used >= limit:
+                return _quota_from_used(used, limit=limit, exceeded=True)
+            next_used = used + 1
+            if row is None:
+                conn.execute(
+                    chat_usage.insert().values(
+                        account_id=account_id,
+                        period=period,
+                        used=next_used,
+                        updated_at=now,
+                    )
+                )
+            else:
+                conn.execute(
+                    chat_usage.update()
+                    .where(chat_usage.c.id == int(row["id"]))
+                    .values(used=next_used, updated_at=now)
+                )
+        return _quota_from_used(next_used, limit=limit)
+
     def seed_configured_accounts(self) -> None:
         if env_flag(DEV_DEFAULTS_ENV):
             self._create_if_missing(
@@ -381,6 +439,7 @@ class AuthService:
                 )
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_chat_usage_account_period ON chat_usage(account_id, period)"))
 
 
 def configured_auth_database_url() -> str:
@@ -414,6 +473,28 @@ def _role(value: object) -> AuthRole:
     return "admin" if str(value) == "admin" else "user"
 
 
+def _current_chat_period() -> str:
+    return utc_now().strftime("%Y-%m")
+
+
+def _quota_reset_at() -> str:
+    now = utc_now()
+    year = now.year + 1 if now.month == 12 else now.year
+    month = 1 if now.month == 12 else now.month + 1
+    return datetime(year, month, 1, tzinfo=timezone.utc).isoformat()
+
+
+def _quota_from_used(used: int, *, limit: int, exceeded: bool = False) -> ChatQuota:
+    clean_used = max(0, used)
+    return ChatQuota(
+        limit=limit,
+        used=clean_used,
+        remaining=max(0, limit - clean_used),
+        reset_at=_quota_reset_at(),
+        exceeded=exceeded or clean_used >= limit,
+    )
+
+
 __all__ = [
     "AUTH_DATABASE_URL_ENV",
     "AUTH_DB_ENV",
@@ -422,8 +503,10 @@ __all__ = [
     "DATABASE_URL_ENV",
     "DEV_DEFAULTS_ENV",
     "SESSION_HOURS_ENV",
+    "USER_CHAT_MONTHLY_LIMIT",
     "AuthIdentity",
     "AuthService",
+    "ChatQuota",
     "InactiveAccountError",
     "LoginResult",
     "account_auth_is_configured",
