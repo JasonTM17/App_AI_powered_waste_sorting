@@ -1,141 +1,158 @@
 "use client";
 
-import { RefreshCcw, Recycle, Save, ShieldCheck, Trash2 } from "lucide-react";
-import { AGENT_URL, UserDashboard } from "@/lib/agent";
+import {
+  BarChart3,
+  Bell,
+  Bot,
+  FileDown,
+  HeartPulse,
+  History,
+  Home,
+  RefreshCcw,
+  Recycle,
+  Server,
+  Trophy,
+  UserRound,
+  Users,
+  type LucideIcon
+} from "lucide-react";
 
-type UserDashboardPanelProps = {
-  agentError: string;
-  busy: boolean;
-  dashboard: UserDashboard | null;
-  tokenDraft: string;
-  onRefresh: () => void;
-  onTokenDraftChange: (value: string) => void;
-  onTokenSave: () => void;
-};
+import { AGENT_URL } from "@/lib/agent";
+import { AccountControl } from "@/components/account-control";
+import { RoleChatbotLauncher } from "@/components/chat/role-chatbot-launcher";
+import { RangeSelector } from "@/components/user-dashboard/range-selector";
+import type { UserDashboardPanelProps, UserView } from "@/components/user-dashboard/user-dashboard-types";
+import { UserHeroSummary } from "@/components/user-dashboard/user-hero-summary";
+import { UserRouteContent } from "@/components/user-dashboard/user-route-content";
 
-export function UserDashboardPanel({
-  agentError,
-  busy,
-  dashboard,
-  tokenDraft,
-  onRefresh,
-  onTokenDraftChange,
-  onTokenSave
-}: UserDashboardPanelProps) {
+const userNav: Array<{ id: UserView; href: string; label: string; icon: LucideIcon }> = [
+  { id: "dashboard", href: "/user/dashboard", label: "Tổng quan", icon: Home },
+  { id: "analytics", href: "/user/analytics", label: "Phân tích", icon: BarChart3 },
+  { id: "history", href: "/user/history", label: "Lịch sử", icon: History },
+  { id: "device", href: "/user/device", label: "Thiết bị", icon: Server },
+  { id: "ecopet", href: "/user/ecopet", label: "EcoPet AI", icon: Bot },
+  { id: "advice", href: "/user/advice", label: "Lời khuyên", icon: HeartPulse },
+  { id: "reports", href: "/user/reports", label: "Báo cáo", icon: FileDown },
+  { id: "notifications", href: "/user/notifications", label: "Thông báo", icon: Bell },
+  { id: "community", href: "/user/community", label: "Eco-Share", icon: Users },
+  { id: "leaderboard", href: "/user/leaderboard", label: "Thử thách", icon: Trophy },
+  { id: "account", href: "/user/account", label: "Tài khoản", icon: UserRound }
+];
+
+export function UserDashboardPanel(props: UserDashboardPanelProps) {
+  const { agentError, analytics, auth, busy, chatAnswer, chatQuestion, rangeDays, view } = props;
+  const primaryNav = userNav.slice(0, 5);
+  const secondaryNav = userNav.slice(5);
   return (
-    <div className="app-shell user-shell">
-      <aside className="sidebar">
+    <div className="app-shell user-shell polished-user-shell">
+      <aside className="sidebar user-sidebar">
         <div className="brand">
           <div className="brand-mark">
             <Recycle size={24} />
           </div>
           <div>
-            <strong>EcoSort AI</strong>
-            <span>User dashboard</span>
+            <strong>EcoFlow MS</strong>
+            <span>Waste Management v2.1</span>
           </div>
         </div>
-        <div className="agent-card">
-          <span className="eyebrow">Local Agent</span>
+        <nav className="nav-list user-nav-list" aria-label="User navigation">
+          <UserNavGroup items={primaryNav} view={view} onViewChange={props.onViewChange} />
+          <div className="user-nav-divider" />
+          <UserNavGroup items={secondaryNav} view={view} onViewChange={props.onViewChange} />
+        </nav>
+        <div className="agent-card user-agent-card">
+          <span className="eyebrow">Support</span>
           <strong>{AGENT_URL}</strong>
           <div className={agentError ? "system-pill offline" : "system-pill"}>
             <span className="pulse-dot" />
-            <span>{agentError ? "Can token" : "User online"}</span>
+            <span>{agentError ? "Cần tải lại dữ liệu" : "Đang đồng bộ"}</span>
           </div>
         </div>
       </aside>
 
-      <main className="workspace">
-        <header className="topbar">
-          <label className="token-box" aria-label="Role token">
-            <ShieldCheck size={17} />
-            <input
-              onChange={(event) => onTokenDraftChange(event.target.value)}
-              placeholder="Nhap user/admin token"
-              type="password"
-              value={tokenDraft}
-            />
-            <button className="round-icon" onClick={onTokenSave} title="Luu token" type="button">
-              <Save size={17} />
-            </button>
-          </label>
-          <button className="icon-button" disabled={busy} onClick={onRefresh} type="button">
+      <main className="workspace user-workspace">
+        <header className="topbar user-topbar">
+          <strong className="stitch-topbar-title">EcoFlow Admin</strong>
+          <div className="stitch-user-search" aria-label="Thanh tìm kiếm minh họa">
+            <span>Search data...</span>
+          </div>
+          <AccountControl auth={auth} busy={busy} onLogout={props.onLogout} />
+          <button
+            aria-label="Làm mới dashboard người dùng"
+            className="icon-button"
+            disabled={busy}
+            onClick={props.onRefresh}
+            title="Làm mới"
+            type="button"
+          >
             <RefreshCcw size={18} />
-            <span>Refresh</span>
+            <span>Làm mới</span>
           </button>
         </header>
 
-        <div className="page-heading">
-          <div>
-            <span className="eyebrow">User view</span>
-            <h1>Tinh trang thung rac</h1>
-            <p>Chi hien muc do day, thanh phan rac va goi y chung ve thoi quen.</p>
-          </div>
-        </div>
+        <UserHeroSummary analytics={analytics} auth={auth} busy={busy} />
 
-        {agentError ? <div className="alert">Agent chua san sang: {agentError}</div> : null}
+        {view !== "account" ? (
+          <div className="user-range-row">
+            <div>
+              <span className="eyebrow">Khoảng thời gian</span>
+              <strong>Xem theo ngày và tháng</strong>
+            </div>
+            <RangeSelector rangeDays={rangeDays} onRangeChange={props.onRangeChange} />
+          </div>
+        ) : null}
+
+        {agentError ? <div className="alert">Agent chưa sẵn sàng: {agentError}</div> : null}
 
         <section className="content-grid user-dashboard-grid">
-          <div className="stat-row">
-            {(dashboard?.bins ?? fallbackBins()).map((bin) => (
-              <div className="metric-card bin-fill-card" key={bin.bin_index}>
-                <div className="metric-icon">
-                  <Trash2 size={18} />
-                </div>
-                <span>Thung {bin.bin_index}</span>
-                <strong>{bin.percent}%</strong>
-                <div className="fill-meter" aria-label={`Thung ${bin.bin_index} day ${bin.percent}%`}>
-                  <span style={{ width: `${bin.percent}%` }} />
-                </div>
-                <small>
-                  {bin.label}
-                  {bin.stale ? " - du lieu cu" : ""}
-                </small>
-              </div>
-            ))}
-          </div>
-
-          <div className="panel">
-            <span className="eyebrow">Rac gan day</span>
-            <div className="class-list">
-              {dashboard?.recent_waste.length ? (
-                dashboard.recent_waste.map((item) => (
-                  <div className="class-row" key={item.cls_name}>
-                    <span>
-                      {item.cls_name}
-                      {item.route_label ? ` - ${item.route_label}` : ""}
-                    </span>
-                    <strong>{item.count}</strong>
-                  </div>
-                ))
-              ) : (
-                <div className="empty-state">Chua co du lieu gan day.</div>
-              )}
-            </div>
-          </div>
-
-          <div className="panel">
-            <span className="eyebrow">Goi y</span>
-            <div className="insight-list">
-              {(dashboard?.insights ?? []).map((insight) => (
-                <div className={`insight-card ${insight.severity}`} key={insight.kind}>
-                  <strong>{insight.title}</strong>
-                  <span>{insight.message}</span>
-                </div>
-              ))}
-            </div>
-          </div>
+          <UserRouteContent {...props} />
         </section>
+
+        {props.chatbotEnabled ? (
+          <RoleChatbotLauncher
+            answer={chatAnswer}
+            busy={busy}
+            defaultOpen={view === "ecopet"}
+            label="DeepSeek chatbot"
+            placeholder="Hỏi trợ lý..."
+            question={chatQuestion}
+            role="user"
+            statusText="DeepSeek backend-only. Nếu chưa sẵn sàng, điền DEEPSEEK_API_KEY trong .env.local rồi khởi động lại agent."
+            title="EcoPet"
+            onAsk={props.onChatRequest}
+            onQuestionChange={props.onChatQuestionChange}
+          />
+        ) : null}
       </main>
     </div>
   );
 }
 
-function fallbackBins() {
-  return [1, 2, 3].map((binIndex) => ({
-    bin_index: binIndex,
-    label: `Thung ${binIndex}`,
-    percent: 0,
-    updated_at: null,
-    stale: true
-  }));
+function UserNavGroup({
+  items,
+  onViewChange,
+  view
+}: {
+  items: Array<{ id: UserView; href: string; label: string; icon: LucideIcon }>;
+  view: UserView;
+  onViewChange: (value: UserView) => void;
+}) {
+  return (
+    <>
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <a
+            className={view === item.id ? "nav-item active" : "nav-item"}
+            href={item.href}
+            key={item.id}
+            onClick={() => onViewChange(item.id)}
+          >
+            <Icon size={18} />
+            <span>{item.label}</span>
+          </a>
+        );
+      })}
+    </>
+  );
 }

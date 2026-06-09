@@ -33,14 +33,20 @@ import {
 import { ChangeEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import {
   AGENT_URL,
+  AccountDTO,
+  AccountsResponse,
+  AgentApiError,
   AgentSnapshot,
   ActuationTestMode,
+  AiChatResponse,
+  AnalyticsRangeDays,
   AppConfig,
+  AuthLoginResponse,
   AuthMe,
+  AuthRole,
   ClassMapping,
   CommonWasteItem,
   CaptureSession,
-  DEFAULT_AGENT_TOKEN,
   DatasetAnnotationResponse,
   DatasetBox,
   DatasetItem,
@@ -51,19 +57,39 @@ import {
   HardwareProfile,
   HardwareTestResponse,
   HistoryRow,
+  KnowledgeCatalogResponse,
+  KnowledgeEntry,
+  KnowledgeEvaluateResponse,
+  LearnNowStatus,
   ModelClass,
   RuntimeStatus,
+  SourceQuality,
   TrainingStatus,
-  UserDashboard,
+  UnknownLearnResponse,
+  UserAdvisorResponse,
+  UserAnalytics,
+  UserDevice,
+  UserExperience,
+  UserHistoryItem,
+  UserHistoryResponse,
+  UserReport,
+  WebSourceDiscoveryResponse,
   agentFetch,
   datasetImageUrl,
   historyImageUrl,
   streamUrl,
   websocketUrl
 } from "@/lib/agent";
+import { AccountControl } from "@/components/account-control";
+import { AdminAccountsPanel } from "@/components/admin-accounts-panel";
+import { AuthLoginPanel } from "@/components/auth-login-panel";
+import { RoleChatbotLauncher } from "@/components/chat/role-chatbot-launcher";
+import { PasswordChangePanel } from "@/components/password-change-panel";
+import { TopbarStatusControls } from "@/components/topbar-status-controls";
 import { UserDashboardPanel } from "@/components/user-dashboard-panel";
+import type { UserView } from "@/components/user-dashboard/user-dashboard-types";
 
-type TabId = "live" | "history" | "data" | "mapping" | "settings" | "logs";
+type TabId = "live" | "history" | "data" | "mapping" | "settings" | "logs" | "accounts" | "reports";
 type TrustedFilter = "all" | "trusted" | "untrusted";
 type BulkAction = "delete" | "relabel" | "quarantine" | "mark_trusted" | "mark_untrusted";
 type Mp3TestCommand =
@@ -117,24 +143,58 @@ const BIN_LABELS: Record<string, string> = {
   I: "Tái chế"
 };
 
+const SESSION_TOKEN_KEY = "trash-sorter-session-token";
+const USER_CHATBOT_ENABLED_KEY = "trash-sorter-user-chatbot-enabled";
+
 const tabs = [
   { id: "live" as const, label: "Giám sát", icon: Activity },
   { id: "history" as const, label: "Lịch sử", icon: History },
   { id: "data" as const, label: "Dữ liệu", icon: Database },
   { id: "mapping" as const, label: "Mapping", icon: ListTree },
   { id: "settings" as const, label: "Cài đặt", icon: Settings },
-  { id: "logs" as const, label: "Nhật ký", icon: TerminalSquare }
+  { id: "logs" as const, label: "Nhật ký", icon: TerminalSquare },
+  { id: "accounts" as const, label: "Tài khoản", icon: ShieldCheck },
+  { id: "reports" as const, label: "Báo cáo", icon: Download }
 ];
 
 export function DashboardClient() {
   const [active, setActive] = useState<TabId>("live");
+  const [userView, setUserView] = useState<UserView>("dashboard");
   const [hasHydrated, setHasHydrated] = useState(false);
-  const [agentToken, setAgentToken] = useState(DEFAULT_AGENT_TOKEN);
-  const [tokenDraft, setTokenDraft] = useState(DEFAULT_AGENT_TOKEN);
+  const [agentToken, setAgentToken] = useState("");
   const [auth, setAuth] = useState<AuthMe | null>(null);
-  const [userDashboard, setUserDashboard] = useState<UserDashboard | null>(null);
+  const [loginUsername, setLoginUsername] = useState("admin");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [sessionMessage, setSessionMessage] = useState("");
+  const [passwordCurrent, setPasswordCurrent] = useState("");
+  const [passwordNew, setPasswordNew] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [userAnalytics, setUserAnalytics] = useState<UserAnalytics | null>(null);
+  const [userRangeDays, setUserRangeDays] = useState<AnalyticsRangeDays>(30);
+  const [userAdvisor, setUserAdvisor] = useState<UserAdvisorResponse | null>(null);
+  const [userAdvisorQuestion, setUserAdvisorQuestion] = useState("");
+  const [userHistoryRows, setUserHistoryRows] = useState<UserHistoryItem[]>([]);
+  const [userDevice, setUserDevice] = useState<UserDevice | null>(null);
+  const [userReport, setUserReport] = useState<UserReport | null>(null);
+  const [userExperience, setUserExperience] = useState<UserExperience | null>(null);
+  const [userChat, setUserChat] = useState<AiChatResponse | null>(null);
+  const [userChatQuestion, setUserChatQuestion] = useState("");
+  const [userChatbotEnabled, setUserChatbotEnabled] = useState(true);
+  const [accounts, setAccounts] = useState<AccountDTO[]>([]);
+  const [createUsername, setCreateUsername] = useState("");
+  const [createPassword, setCreatePassword] = useState("");
+  const [createRole, setCreateRole] = useState<AuthRole>("user");
+  const [resetPassword, setResetPassword] = useState("");
+  const [selectedOwner, setSelectedOwner] = useState("");
+  const [adminChat, setAdminChat] = useState<AiChatResponse | null>(null);
+  const [adminChatQuestion, setAdminChatQuestion] = useState("");
+  const [knowledgeCatalog, setKnowledgeCatalog] = useState<KnowledgeCatalogResponse | null>(null);
+  const [knowledgeEvaluation, setKnowledgeEvaluation] = useState<KnowledgeEvaluateResponse | null>(null);
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
   const [summary, setSummary] = useState<DatasetSummary | null>(null);
+  const [sourceQuality, setSourceQuality] = useState<SourceQuality | null>(null);
   const [datasetItems, setDatasetItems] = useState<DatasetItem[]>([]);
   const [datasetTotal, setDatasetTotal] = useState(0);
   const [datasetSource, setDatasetSource] = useState("auto_low_conf");
@@ -148,6 +208,7 @@ export function DashboardClient() {
   const [logs, setLogs] = useState<string[]>([]);
   const [detections, setDetections] = useState<Detection[]>([]);
   const [training, setTraining] = useState<TrainingStatus | null>(null);
+  const [learnNow, setLearnNow] = useState<LearnNowStatus | null>(null);
   const [hardwareProfile, setHardwareProfile] = useState<HardwareProfile | null>(null);
   const [hardwareDiagnostics, setHardwareDiagnostics] = useState<HardwareDiagnostics | null>(null);
   const [hardwareTest, setHardwareTest] = useState<HardwareTestResponse | null>(null);
@@ -164,6 +225,12 @@ export function DashboardClient() {
   const [manualSourcePageUrl, setManualSourcePageUrl] = useState("");
   const [manualSourceLicense, setManualSourceLicense] = useState("");
   const [manualSourceAuthor, setManualSourceAuthor] = useState("");
+  const [manualSourceType, setManualSourceType] = useState("licensed_url");
+  const [manualGenerated, setManualGenerated] = useState(false);
+  const [unknownHint, setUnknownHint] = useState("");
+  const [unknownLearn, setUnknownLearn] = useState<UnknownLearnResponse | null>(null);
+  const [webQuery, setWebQuery] = useState("");
+  const [webDiscovery, setWebDiscovery] = useState<WebSourceDiscoveryResponse | null>(null);
   const [captureSession, setCaptureSession] = useState<CaptureSession | null>(null);
   const [importSource, setImportSource] = useState("roboflow");
   const [search, setSearch] = useState("");
@@ -249,41 +316,408 @@ export function DashboardClient() {
     return `/api/dataset/items?${params.toString()}`;
   }
 
+  function learnNowPath(base = "/api/learn-now/status") {
+    const params = new URLSearchParams();
+    if (manualClass.trim()) {
+      params.set("cls_name", manualClass.trim());
+    }
+    const query = params.toString();
+    return query ? `${base}?${query}` : base;
+  }
+
   async function fetchAgent<T>(path: string, init?: RequestInit) {
-    return agentFetch<T>(path, init, agentToken);
+    try {
+      return await agentFetch<T>(path, init, agentToken);
+    } catch (error) {
+      if (error instanceof AgentApiError && error.status === 401) {
+        clearSession("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+      }
+      throw error;
+    }
   }
 
   async function refreshIdentity(nextToken = agentToken) {
+    if (!nextToken) {
+      setAuth(null);
+      setAgentError("");
+      return;
+    }
     try {
       const me = await agentFetch<AuthMe>("/api/me", undefined, nextToken);
       setAuth(me);
       setAgentError("");
     } catch (error) {
+      if (error instanceof AgentApiError && error.status === 401) {
+        clearSession("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+        return;
+      }
       setAuth(null);
-      setUserDashboard(null);
-      setAgentError(error instanceof Error ? error.message : "Khong xac thuc duoc agent");
+      setUserAnalytics(null);
+      setUserAdvisor(null);
+      setAgentError(error instanceof Error ? error.message : "Không xác thực được agent");
+    }
+  }
+
+  async function loginToAgent() {
+    setBusy(true);
+    setAgentError("");
+    setSessionMessage("");
+    try {
+      const res = await fetch(`${AGENT_URL}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: loginUsername.trim(),
+          password: loginPassword
+        }),
+        cache: "no-store"
+      });
+      if (!res.ok) {
+        const detail = await res.text();
+        throw new AgentApiError(detail || `${res.status} ${res.statusText}`, res.status);
+      }
+      const data = (await res.json()) as AuthLoginResponse;
+      const nextAuth: AuthMe = {
+        role: data.role,
+        capabilities: data.capabilities,
+        auth_required: true,
+        account_id: data.account_id,
+        username: data.username,
+        token_source: "session",
+        session_expires_at: data.expires_at,
+        password_default: data.password_default
+      };
+      window.localStorage.setItem(SESSION_TOKEN_KEY, data.token);
+      setAgentToken(data.token);
+      setAuth(nextAuth);
+      setLoginPassword("");
+      setNotice("Đã đăng nhập");
+      if (data.role === "user") {
+        setActive("live");
+        setUserView("dashboard");
+        window.history.replaceState(null, "", "/user/dashboard");
+      } else if (window.location.pathname.startsWith("/user")) {
+        window.history.replaceState(null, "", "/admin?tab=live");
+      }
+    } catch (error) {
+      const message =
+        error instanceof AgentApiError && error.status === 503
+          ? "Chưa cấu hình tài khoản đăng nhập. Hãy bật dev defaults hoặc bootstrap admin."
+          : "Sai tài khoản hoặc mật khẩu.";
+      setAgentError(error instanceof Error ? error.message : message);
+      setSessionMessage(message);
+    } finally {
+      setBusy(false);
     }
   }
 
   async function refreshUserDashboard() {
     setBusy(true);
     try {
-      const data = await fetchAgent<UserDashboard>("/api/user/dashboard");
-      setUserDashboard(data);
+      const [analyticsData, historyData, deviceData, reportData, experienceData] = await Promise.all([
+        fetchAgent<UserAnalytics>(`/api/user/analytics?range_days=${userRangeDays}`),
+        fetchAgent<UserHistoryResponse>("/api/user/history?limit=24"),
+        fetchAgent<UserDevice>("/api/user/device"),
+        fetchAgent<UserReport>(`/api/user/report?range_days=${userRangeDays}`),
+        fetchAgent<UserExperience>(`/api/user/experience?range_days=${userRangeDays}`)
+      ]);
+      setUserAnalytics(analyticsData);
+      setUserHistoryRows(historyData.rows);
+      setUserDevice(deviceData);
+      setUserReport(reportData);
+      setUserExperience(experienceData);
       setAgentError("");
     } catch (error) {
-      setAgentError(error instanceof Error ? error.message : "Khong tai duoc dashboard user");
+      setAgentError(error instanceof Error ? error.message : "Không tải được dashboard User");
     } finally {
       setBusy(false);
     }
   }
 
-  function saveAgentToken() {
-    const nextToken = tokenDraft.trim();
-    setAgentToken(nextToken);
-    window.localStorage.setItem("trash-sorter-agent-token", nextToken);
-    setNotice("Da cap nhat token");
-    void refreshIdentity(nextToken);
+  async function requestUserAdvisor() {
+    setBusy(true);
+    try {
+      const data = await fetchAgent<UserAdvisorResponse>("/api/user/advisor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          range_days: userRangeDays,
+          question: userAdvisorQuestion.trim()
+        })
+      });
+      setUserAdvisor(data);
+      setAgentError("");
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không gọi được AI advisor");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function requestUserChat(value?: string) {
+    const message = (value ?? userChatQuestion).trim() || "Hôm nay bạn thấy thói quen bỏ rác của mình thế nào?";
+    setBusy(true);
+    try {
+      const data = await fetchAgent<AiChatResponse>("/api/user/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message })
+      });
+      setUserChat(data);
+      setUserChatQuestion("");
+      setAgentError("");
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không gọi được chatbot User");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changePassword() {
+    setPasswordError("");
+    if (passwordNew !== passwordConfirm) {
+      setPasswordError("Mật khẩu mới không khớp");
+      return;
+    }
+    if (passwordNew.length < 8) {
+      setPasswordError("Mật khẩu mới tối thiểu 8 ký tự");
+      return;
+    }
+    setBusy(true);
+    try {
+      const nextAuth = await fetchAgent<AuthMe>("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          current_password: passwordCurrent,
+          new_password: passwordNew
+        })
+      });
+      setAuth(nextAuth);
+      setPasswordCurrent("");
+      setPasswordNew("");
+      setPasswordConfirm("");
+      setNotice("Đã đổi mật khẩu");
+    } catch (error) {
+      setPasswordError(error instanceof Error ? error.message : "Không đổi được mật khẩu");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshAccounts() {
+    const data = await fetchAgent<AccountsResponse>("/api/admin/accounts");
+    setAccounts(data.accounts);
+    setSelectedOwner((current) => current || data.accounts.find((account) => account.role === "user")?.username || "");
+  }
+
+  async function refreshKnowledge() {
+    const data = await fetchAgent<KnowledgeCatalogResponse>("/api/admin/knowledge");
+    setKnowledgeCatalog(data);
+  }
+
+  async function upsertKnowledge(payload: {
+    id?: string;
+    title: string;
+    roles: AuthRole[];
+    keywords: string[];
+    text: string;
+    enabled: boolean;
+  }) {
+    setBusy(true);
+    try {
+      const data = await fetchAgent<KnowledgeCatalogResponse>("/api/admin/knowledge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      setKnowledgeCatalog(data);
+      setNotice("Đã cập nhật knowledge cho trợ lý AI.");
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không cập nhật được knowledge");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function patchKnowledge(entry: KnowledgeEntry, patch: Partial<Pick<KnowledgeEntry, "enabled">>) {
+    setBusy(true);
+    try {
+      const data = await fetchAgent<KnowledgeCatalogResponse>(`/api/admin/knowledge/${encodeURIComponent(entry.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch)
+      });
+      setKnowledgeCatalog(data);
+      setNotice(patch.enabled === false ? "Đã tắt snippet knowledge." : "Đã bật snippet knowledge.");
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không chỉnh được knowledge");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reloadKnowledge() {
+    setBusy(true);
+    try {
+      const data = await fetchAgent<KnowledgeCatalogResponse>("/api/admin/knowledge/reload", { method: "POST" });
+      setKnowledgeCatalog(data);
+      setNotice("Đã nạp lại knowledge pack.");
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không nạp lại được knowledge");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function evaluateKnowledge(question: string, role: AuthRole) {
+    setBusy(true);
+    try {
+      const data = await fetchAgent<KnowledgeEvaluateResponse>("/api/admin/knowledge/evaluate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, role })
+      });
+      setKnowledgeEvaluation(data);
+      setNotice("Đã chạy kiểm thử retrieval.");
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không kiểm thử được knowledge");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createAccount() {
+    setBusy(true);
+    try {
+      await fetchAgent<AccountDTO>("/api/admin/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: createUsername.trim(),
+          password: createPassword,
+          role: createRole
+        })
+      });
+      setCreateUsername("");
+      setCreatePassword("");
+      setNotice("Đã tạo tài khoản. Tài khoản mới sẽ bị bắt đổi mật khẩu khi đăng nhập.");
+      await refreshAccounts();
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không tạo được tài khoản");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resetAccountPassword(username: string) {
+    setBusy(true);
+    try {
+      await fetchAgent<AccountDTO>(`/api/admin/accounts/${encodeURIComponent(username)}/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: resetPassword })
+      });
+      setResetPassword("");
+      setNotice(`Đã đặt lại mật khẩu cho ${username}`);
+      await refreshAccounts();
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không đặt lại được mật khẩu");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleAccountActive(username: string, activeValue: boolean) {
+    setBusy(true);
+    try {
+      await fetchAgent<AccountDTO>(`/api/admin/accounts/${encodeURIComponent(username)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_active: activeValue })
+      });
+      setNotice(activeValue ? "Đã kích hoạt tài khoản" : "Đã vô hiệu tài khoản");
+      await refreshAccounts();
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không cập nhật được tài khoản");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function backfillOwner() {
+    if (!selectedOwner) {
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await fetchAgent<{ ok: boolean; message: string; count: number }>(
+        `/api/admin/history/backfill-owner?owner_username=${encodeURIComponent(selectedOwner)}`,
+        { method: "POST" }
+      );
+      setNotice(`${result.message}: ${result.count} rows`);
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không gán chủ sở hữu cho lịch sử được");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function requestAdminChat(value?: string) {
+    const message = (value ?? adminChatQuestion).trim() || "Tóm tắt hệ thống hôm nay.";
+    setBusy(true);
+    try {
+      const data = await fetchAgent<AiChatResponse>("/api/admin/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message })
+      });
+      setAdminChat(data);
+      setAdminChatQuestion("");
+      setAgentError("");
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không gọi được chatbot Admin");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function logoutFromAgent() {
+    const token = agentToken;
+    clearSession("");
+    if (token) {
+      try {
+        await agentFetch("/api/auth/logout", { method: "POST" }, token);
+      } catch {
+        // Logout is best-effort because the local session is already cleared.
+      }
+    }
+    setNotice("Đã đăng xuất");
+  }
+
+  function clearSession(message: string) {
+    window.localStorage.removeItem(SESSION_TOKEN_KEY);
+    setAgentToken("");
+    setAuth(null);
+    setStatus(null);
+    setDetections([]);
+    setUserAnalytics(null);
+    setUserAdvisor(null);
+    setUserHistoryRows([]);
+    setUserDevice(null);
+    setUserReport(null);
+    setUserExperience(null);
+    setUserChat(null);
+    setAdminChat(null);
+    setKnowledgeCatalog(null);
+    setKnowledgeEvaluation(null);
+    setAccounts([]);
+    setPasswordCurrent("");
+    setPasswordNew("");
+    setPasswordConfirm("");
+    setPasswordError("");
+    setSessionMessage(message);
+    setAgentError("");
   }
 
   async function refreshAll() {
@@ -299,6 +733,8 @@ export function DashboardClient() {
         mappingRes,
         classesRes,
         commonWasteRes,
+        learnNowRes,
+        sourceQualityRes,
         hardwareRes,
         hardwareDiagnosticsRes,
         actuationRes
@@ -314,6 +750,8 @@ export function DashboardClient() {
           fetchAgent<MappingsResponse>("/api/mappings"),
           fetchAgent<ModelClassesResponse>("/api/model/classes"),
           fetchAgent<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
+          fetchAgent<LearnNowStatus>(learnNowPath()),
+          fetchAgent<SourceQuality>("/api/dataset/source-quality"),
           fetchAgent<HardwareProfile>("/api/hardware/profile"),
           fetchAgent<HardwareDiagnostics>("/api/hardware/diagnostics"),
           fetchAgent<ActuationTestMode>("/api/actuation/test-mode")
@@ -329,6 +767,8 @@ export function DashboardClient() {
       setMappings(mappingRes.mappings);
       setModelClasses(classesRes.classes);
       setCommonWasteItems(commonWasteRes.items);
+      setLearnNow(learnNowRes);
+      setSourceQuality(sourceQualityRes);
       setHardwareProfile(hardwareRes);
       setHardwareDiagnostics(hardwareDiagnosticsRes);
       setActuationMode(actuationRes);
@@ -353,12 +793,22 @@ export function DashboardClient() {
       setTraining(trainingRes);
 
       if (scope === "data") {
-        const [dataRes, itemRes, classesRes, commonWasteRes, captureSessionRes] = await Promise.all([
+        const [
+          dataRes,
+          itemRes,
+          classesRes,
+          commonWasteRes,
+          captureSessionRes,
+          learnNowRes,
+          sourceQualityRes
+        ] = await Promise.all([
           fetchAgent<DatasetSummary>("/api/dataset/summary"),
           fetchAgent<DatasetItemsResponse>(datasetItemsPath()),
           fetchAgent<ModelClassesResponse>("/api/model/classes"),
           fetchAgent<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
-          fetchAgent<CaptureSession>("/api/dataset/capture-session")
+          fetchAgent<CaptureSession>("/api/dataset/capture-session"),
+          fetchAgent<LearnNowStatus>(learnNowPath()),
+          fetchAgent<SourceQuality>("/api/dataset/source-quality")
         ]);
         setSummary(dataRes);
         setDatasetItems(itemRes.rows);
@@ -366,6 +816,8 @@ export function DashboardClient() {
         setModelClasses(classesRes.classes);
         setCommonWasteItems(commonWasteRes.items);
         setCaptureSession(captureSessionRes);
+        setLearnNow(learnNowRes);
+        setSourceQuality(sourceQualityRes);
         setManualClass((current) => current || classesRes.classes[0]?.name || "");
         setSelectedPaths((current) =>
           current.filter((path) => itemRes.rows.some((item) => item.image_path === path))
@@ -375,6 +827,17 @@ export function DashboardClient() {
       if (scope === "history") {
         const historyRes = await fetchAgent<HistoryResponse>("/api/history?limit=20");
         setHistory(historyRes.rows);
+      }
+
+      if (scope === "reports") {
+        const [historyRes, dataRes, sourceQualityRes] = await Promise.all([
+          fetchAgent<HistoryResponse>("/api/history?limit=20"),
+          fetchAgent<DatasetSummary>("/api/dataset/summary"),
+          fetchAgent<SourceQuality>("/api/dataset/source-quality")
+        ]);
+        setHistory(historyRes.rows);
+        setSummary(dataRes);
+        setSourceQuality(sourceQualityRes);
       }
 
       if (scope === "logs") {
@@ -405,6 +868,10 @@ export function DashboardClient() {
         setMappings(mappingRes.mappings);
         setManualClass((current) => current || mappingRes.mappings[0]?.class_name || "");
       }
+
+      if (scope === "accounts") {
+        await Promise.all([refreshAccounts(), refreshKnowledge()]);
+      }
       setAgentError("");
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : "Không kết nối được agent");
@@ -412,7 +879,7 @@ export function DashboardClient() {
   }
 
   useEffect(() => {
-    if (auth?.role !== "admin") {
+    if (auth?.role !== "admin" || auth.password_default) {
       return;
     }
     void refreshActive(active);
@@ -422,48 +889,80 @@ export function DashboardClient() {
     active,
     agentToken,
     auth?.role,
+    auth?.password_default,
     datasetSource,
     datasetClass,
     datasetTrusted,
     datasetOffset,
+    manualClass,
     normalizedSearch
   ]);
 
   useEffect(() => {
-    const savedToken = window.localStorage.getItem("trash-sorter-agent-token") ?? DEFAULT_AGENT_TOKEN;
+    const savedToken = window.localStorage.getItem(SESSION_TOKEN_KEY) ?? "";
+    const savedChatbot = window.localStorage.getItem(USER_CHATBOT_ENABLED_KEY);
     setAgentToken(savedToken);
-    setTokenDraft(savedToken);
+    setUserChatbotEnabled(savedChatbot !== "0");
     setActive(tabFromLocation());
+    setUserView(userViewFromLocation());
     setHasHydrated(true);
   }, []);
 
+  function updateUserChatbotEnabled(enabled: boolean) {
+    setUserChatbotEnabled(enabled);
+    window.localStorage.setItem(USER_CHATBOT_ENABLED_KEY, enabled ? "1" : "0");
+  }
+
   useEffect(() => {
     if (!hasHydrated) {
+      return;
+    }
+    if (!agentToken) {
+      setAuth(null);
       return;
     }
     void refreshIdentity(agentToken);
   }, [agentToken, hasHydrated]);
 
   useEffect(() => {
-    if (auth?.role !== "user") {
+    if (auth?.role !== "user" || auth.password_default) {
       return;
     }
     void refreshUserDashboard();
     const timer = window.setInterval(() => void refreshUserDashboard(), 4000);
     return () => window.clearInterval(timer);
-  }, [agentToken, auth?.role]);
+  }, [agentToken, auth?.role, auth?.password_default, userRangeDays]);
 
   useEffect(() => {
-    if (!hasHydrated) {
+    if (!hasHydrated || auth?.role !== "admin") {
       return;
     }
     const url = new URL(window.location.href);
     url.searchParams.set("tab", active);
     window.history.replaceState(null, "", url.toString());
-  }, [active, hasHydrated]);
+  }, [active, auth?.role, hasHydrated]);
 
   useEffect(() => {
-    if (auth?.role !== "admin") {
+    if (!hasHydrated || auth?.role !== "user" || auth.password_default) {
+      return;
+    }
+    setUserView(userViewFromLocation());
+    if (window.location.pathname.startsWith("/admin")) {
+      window.history.replaceState(null, "", "/user/dashboard");
+    }
+  }, [auth?.role, auth?.password_default, hasHydrated]);
+
+  useEffect(() => {
+    if (!hasHydrated || auth?.role !== "admin" || auth.password_default) {
+      return;
+    }
+    if (window.location.pathname.startsWith("/user")) {
+      window.history.replaceState(null, "", `/admin?tab=${active}`);
+    }
+  }, [active, auth?.role, auth?.password_default, hasHydrated]);
+
+  useEffect(() => {
+    if (auth?.role !== "admin" || auth.password_default) {
       return;
     }
     let socket: WebSocket | null = null;
@@ -482,7 +981,7 @@ export function DashboardClient() {
       socket = null;
     }
     return () => socket?.close();
-  }, [agentToken, auth?.role]);
+  }, [agentToken, auth?.role, auth?.password_default]);
 
   async function runAction(path: string) {
     setBusy(true);
@@ -538,7 +1037,7 @@ export function DashboardClient() {
   async function captureCameraSample() {
     const className = manualClass.trim();
     if (!className) {
-      setNotice("Chua chon class de ghi frame camera");
+      setNotice("Chưa chọn class để ghi frame camera");
       return;
     }
     setBusy(true);
@@ -565,10 +1064,41 @@ export function DashboardClient() {
     }
   }
 
+  async function learnThisObject() {
+    setBusy(true);
+    try {
+      const result = await fetchAgent<UnknownLearnResponse>("/api/learn-now/unknown/capture", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          manual_hint: unknownHint.trim(),
+          approved_cls_name: manualClass.trim(),
+          cls_id: manualClass.trim() ? classIdForName(manualClass.trim()) : -1
+        })
+      });
+      setUnknownLearn(result);
+      const suggestion = result.suggestions[0];
+      if (!manualClass.trim() && suggestion?.canonical_class) {
+        setManualClass(suggestion.canonical_class);
+      }
+      setNotice(result.message);
+      setDatasetSource("manual_camera_capture");
+      setDatasetTrusted("untrusted");
+      setDatasetOffset(0);
+      if (result.item) {
+        setAnnotation({ item: result.item, boxes: result.boxes });
+        setAnnotationBoxes(result.boxes);
+      }
+      await refreshActive("data");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function startCaptureSession() {
     const className = manualClass.trim();
     if (!className) {
-      setNotice("Chua chon class de bat dau phien chup");
+      setNotice("Chưa chọn class để bắt đầu phiên chụp");
       return;
     }
     setBusy(true);
@@ -584,7 +1114,7 @@ export function DashboardClient() {
         })
       });
       setCaptureSession(result);
-      setNotice("Da bat dau phien chup. Xoay hoac doi vi tri but truoc moi lan chup.");
+      setNotice("Đã bắt đầu phiên chụp. Xoay hoặc đổi vị trí bút trước mỗi lần chụp.");
     } finally {
       setBusy(false);
     }
@@ -624,11 +1154,48 @@ export function DashboardClient() {
     }
   }
 
+  async function searchLicensedWeb() {
+    const suggestionClass = unknownLearn?.suggestions?.[0]?.canonical_class ?? "";
+    const className = manualClass.trim() || suggestionClass;
+    if (!className) {
+      setNotice("Chưa có class để tìm nguồn ảnh");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await fetchAgent<WebSourceDiscoveryResponse>("/api/dataset/web-discovery/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cls_name: className,
+          query: webQuery.trim() || unknownHint.trim() || className,
+          limit: 10
+        })
+      });
+      setWebDiscovery(result);
+      setNotice(result.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function useWebCandidate(index: number) {
+    const candidate = webDiscovery?.candidates[index];
+    if (!candidate) {
+      return;
+    }
+    setManualClass(candidate.canonical_class);
+    setManualImageUrl(candidate.image_url);
+    setManualSourcePageUrl(candidate.source_page_url);
+    setManualSourceType(candidate.source_type === "google_cse" ? "licensed_url" : candidate.source_type);
+    setNotice("Đã điền URL/page. Cần xác minh license và tác giả trước khi import.");
+  }
+
   async function importManualImageUrl() {
     const className = manualClass.trim();
     const imageUrl = manualImageUrl.trim();
     if (!className || !imageUrl) {
-      setNotice("Can nhap class va URL anh");
+      setNotice("Cần nhập class và URL ảnh");
       return;
     }
     setBusy(true);
@@ -642,7 +1209,9 @@ export function DashboardClient() {
           cls_id: classIdForName(className),
           source_page_url: manualSourcePageUrl.trim(),
           source_license: manualSourceLicense.trim(),
-          source_author: manualSourceAuthor.trim()
+          source_author: manualSourceAuthor.trim(),
+          source_type: manualSourceType,
+          generated: manualGenerated
         })
       });
       setNotice(result.message);
@@ -771,6 +1340,41 @@ export function DashboardClient() {
       setAnnotationBoxes(result.boxes);
       setNotice(`Đã lưu ${result.boxes.length} bbox cho ảnh ${result.item.item_id}`);
       await refreshActive(active);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshLearnNowReferences() {
+    setBusy(true);
+    try {
+      const result = await fetchAgent<LearnNowStatus>(
+        learnNowPath("/api/learn-now/refresh-references"),
+        { method: "POST" }
+      );
+      setLearnNow(result);
+      setNotice("Đã làm mới nhận diện reference cho mẫu đã review.");
+      await refreshActive("data");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startLearnNowMicroTrain() {
+    const className = manualClass.trim();
+    if (!className) {
+      setNotice("Chưa chọn class để train nhanh");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await fetchAgent<{ ok: boolean; message: string }>("/api/learn-now/micro-train/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cls_name: className, profile: "micro" })
+      });
+      setNotice(result.message);
+      await refreshActive("data");
     } finally {
       setBusy(false);
     }
@@ -918,7 +1522,7 @@ export function DashboardClient() {
         method: "POST"
       });
       setHardwareDiagnostics(result);
-      setNotice(result.uart_connected ? "UART da reconnect va san sang" : result.warning || result.uart_message);
+      setNotice(result.uart_connected ? "UART đã reconnect và sẵn sàng" : result.warning || result.uart_message);
       await refreshActive("settings");
     } finally {
       setBusy(false);
@@ -934,7 +1538,7 @@ export function DashboardClient() {
         body: JSON.stringify({ enabled })
       });
       setActuationMode(result);
-      setNotice(enabled ? "Da bat Actuation Test Mode" : "Da tat Actuation Test Mode");
+      setNotice(enabled ? "Đã bật Actuation Test Mode" : "Đã tắt Actuation Test Mode");
       await refreshActive("settings");
     } finally {
       setBusy(false);
@@ -987,16 +1591,81 @@ export function DashboardClient() {
     });
   }
 
-  if (auth?.role === "user") {
+  if (!auth) {
+    return (
+      <AuthLoginPanel
+        error={sessionMessage}
+        password={loginPassword}
+        pending={busy}
+        sessionMessage={sessionMessage}
+        showPassword={showLoginPassword}
+        username={loginUsername}
+        onPasswordChange={setLoginPassword}
+        onShowPasswordChange={setShowLoginPassword}
+        onSubmit={() => void loginToAgent()}
+        onUsernameChange={setLoginUsername}
+      />
+    );
+  }
+
+  if (auth.password_default) {
+    return (
+      <PasswordChangePanel
+        auth={auth}
+        busy={busy}
+        confirmPassword={passwordConfirm}
+        currentPassword={passwordCurrent}
+        error={passwordError}
+        newPassword={passwordNew}
+        onConfirmPasswordChange={setPasswordConfirm}
+        onCurrentPasswordChange={setPasswordCurrent}
+        onLogout={() => void logoutFromAgent()}
+        onNewPasswordChange={setPasswordNew}
+        onSubmit={() => void changePassword()}
+      />
+    );
+  }
+
+  if (auth.role === "user") {
     return (
       <UserDashboardPanel
         agentError={agentError}
+        advisor={userAdvisor}
+        advisorQuestion={userAdvisorQuestion}
+        analytics={userAnalytics}
+        auth={auth}
         busy={busy}
-        dashboard={userDashboard}
-        tokenDraft={tokenDraft}
+        chatAnswer={userChat}
+        chatQuestion={userChatQuestion}
+        device={userDevice}
+        experience={userExperience}
+        history={userHistoryRows}
+        imageToken={agentToken}
+        passwordConfirm={passwordConfirm}
+        passwordCurrent={passwordCurrent}
+        passwordError={passwordError}
+        passwordNew={passwordNew}
+        rangeDays={userRangeDays}
+        report={userReport}
+        chatbotEnabled={userChatbotEnabled}
+        view={userView}
+        onAdvisorQuestionChange={setUserAdvisorQuestion}
+        onAdvisorRequest={() => void requestUserAdvisor()}
+        onChangePassword={() => void changePassword()}
+        onChatQuestionChange={setUserChatQuestion}
+        onChatRequest={(value) => void requestUserChat(value)}
+        onChatbotEnabledChange={updateUserChatbotEnabled}
+        onLogout={() => void logoutFromAgent()}
+        onPasswordConfirmChange={setPasswordConfirm}
+        onPasswordCurrentChange={setPasswordCurrent}
+        onPasswordNewChange={setPasswordNew}
+        onRangeChange={(value) => {
+          setUserRangeDays(value);
+          setUserAdvisor(null);
+          setUserChat(null);
+        }}
         onRefresh={() => void refreshUserDashboard()}
-        onTokenDraftChange={setTokenDraft}
-        onTokenSave={saveAgentToken}
+        onViewChange={setUserView}
       />
     );
   }
@@ -1050,27 +1719,18 @@ export function DashboardClient() {
             />
           </label>
           <div className="topbar-actions">
-            <label className="token-box" aria-label="Role token">
-              <ShieldCheck size={17} />
-              <input
-                onChange={(event) => setTokenDraft(event.target.value)}
-                placeholder="Role token"
-                type="password"
-                value={tokenDraft}
-              />
-              <button className="round-icon" onClick={saveAgentToken} title="LÆ°u token" type="button">
-                <Save size={16} />
-              </button>
-            </label>
-            <button className="round-icon" title="Camera USB" type="button">
-              <Video size={19} />
-            </button>
-            <button className="round-icon" title="AI model" type="button">
-              <BrainCircuit size={19} />
-            </button>
-            <button className="round-icon online" title="Local agent" type="button">
-              <Wifi size={19} />
-            </button>
+            <AccountControl auth={auth} busy={busy} onLogout={() => void logoutFromAgent()} />
+            <TopbarStatusControls
+              agentError={agentError}
+              auth={auth}
+              busy={busy}
+              status={status}
+              training={training}
+              onCameraStart={() => void runAction("/api/camera/start")}
+              onCameraStop={() => void runAction("/api/camera/stop")}
+              onNavigate={setActive}
+              onRefresh={() => void refreshActive(active)}
+            />
             <button
               className="emergency-button"
               disabled={busy}
@@ -1080,9 +1740,15 @@ export function DashboardClient() {
               <AlertTriangle size={17} />
               <span>Dừng hệ thống</span>
             </button>
-            <button className="icon-button" onClick={() => void refreshActive(active)} type="button">
+            <button
+              aria-label="Làm mới dữ liệu dashboard"
+              className="icon-button"
+              onClick={() => void refreshActive(active)}
+              title="Làm mới"
+              type="button"
+            >
               <RefreshCcw size={18} />
-              <span>Refresh</span>
+              <span>Làm mới</span>
             </button>
           </div>
         </header>
@@ -1127,17 +1793,26 @@ export function DashboardClient() {
             itemTotal={datasetTotal}
             items={datasetItems}
             imageToken={agentToken}
+            learnNow={learnNow}
             manualClass={manualClass}
             manualFileCount={manualFiles?.length ?? 0}
             manualImageUrl={manualImageUrl}
             manualSourceAuthor={manualSourceAuthor}
+            manualGenerated={manualGenerated}
             manualSourceLicense={manualSourceLicense}
             manualSourcePageUrl={manualSourcePageUrl}
+            manualSourceType={manualSourceType}
             search={normalizedSearch}
             selectedPaths={selectedPaths}
             sourceFilter={datasetSource}
+            sourceQuality={sourceQuality}
             summary={summary}
+            training={training}
             trustedFilter={datasetTrusted}
+            unknownHint={unknownHint}
+            unknownLearn={unknownLearn}
+            webDiscovery={webDiscovery}
+            webQuery={webQuery}
             onAnnotate={(itemId) => void openAnnotation(itemId)}
             onAnnotationBoxesChange={setAnnotationBoxes}
             onBulk={(action) => void bulkDataset(action)}
@@ -1151,18 +1826,27 @@ export function DashboardClient() {
             onCaptureSessionFrame={() => void captureSessionFrame()}
             onImageUrlChange={setManualImageUrl}
             onImportImageUrl={() => void importManualImageUrl()}
+            onLearnNowRefresh={() => void refreshLearnNowReferences()}
+            onLearnNowTrain={() => void startLearnNowMicroTrain()}
+            onLearnThisObject={() => void learnThisObject()}
             onManualFiles={setManualFiles}
             onPage={(nextOffset) => setDatasetOffset(Math.max(0, nextOffset))}
             onRelabelItem={(imagePath) => void relabelDatasetItem(imagePath)}
             onSaveAnnotation={() => void saveAnnotation()}
+            onSearchLicensedWeb={() => void searchLicensedWeb()}
             onSourceFilterChange={updateDatasetSource}
             onSync={() => void runAction("/api/dataset/sync")}
             onToggleAll={toggleAllVisible}
             onToggleSelected={toggleSelectedPath}
             onTrustedFilterChange={updateDatasetTrusted}
+            onUnknownHintChange={setUnknownHint}
+            onUseWebCandidate={useWebCandidate}
+            onWebQueryChange={setWebQuery}
             onSourceAuthorChange={setManualSourceAuthor}
+            onSourceGeneratedChange={setManualGenerated}
             onSourceLicenseChange={setManualSourceLicense}
             onSourcePageUrlChange={setManualSourcePageUrl}
+            onSourceTypeChange={setManualSourceType}
             onStartCaptureSession={() => void startCaptureSession()}
             onStopCaptureSession={() => void stopCaptureSession()}
             onUpload={() => void uploadManualData()}
@@ -1200,8 +1884,156 @@ export function DashboardClient() {
           />
         ) : null}
         {active === "logs" ? <LogsPanel lines={filteredLogs} /> : null}
+        {active === "accounts" ? (
+          <AdminAccountsPanel
+            accounts={accounts}
+            busy={busy}
+            chatAnswer={adminChat}
+            chatQuestion={adminChatQuestion}
+            createPassword={createPassword}
+            createRole={createRole}
+            createUsername={createUsername}
+            knowledgeCatalog={knowledgeCatalog}
+            knowledgeEvaluation={knowledgeEvaluation}
+            resetPassword={resetPassword}
+            selectedOwner={selectedOwner}
+            onAskChat={(value) => void requestAdminChat(value)}
+            onBackfillOwner={() => void backfillOwner()}
+            onChatQuestionChange={setAdminChatQuestion}
+            onCreateAccount={() => void createAccount()}
+            onCreatePasswordChange={setCreatePassword}
+            onCreateRoleChange={setCreateRole}
+            onCreateUsernameChange={setCreateUsername}
+            onEvaluateKnowledge={(question, role) => void evaluateKnowledge(question, role)}
+            onPatchKnowledge={(entry, patch) => void patchKnowledge(entry, patch)}
+            onRefresh={() => void Promise.all([refreshAccounts(), refreshKnowledge()])}
+            onReloadKnowledge={() => void reloadKnowledge()}
+            onResetPassword={(username) => void resetAccountPassword(username)}
+            onResetPasswordChange={setResetPassword}
+            onSelectedOwnerChange={setSelectedOwner}
+            onToggleActive={(username, activeValue) => void toggleAccountActive(username, activeValue)}
+            onUpsertKnowledge={(payload) => void upsertKnowledge(payload)}
+          />
+        ) : null}
+        {active === "reports" ? (
+          <AdminReportsPanel
+            history={filteredHistory}
+            sourceQuality={sourceQuality}
+            summary={summary}
+            token={agentToken}
+          />
+        ) : null}
+        {active !== "accounts" ? (
+          <RoleChatbotLauncher
+            answer={adminChat}
+            busy={busy}
+            label="Chatbot Admin"
+            placeholder="Hỏi về trạng thái camera, AI model, UART, dataset hoặc vận hành hôm nay."
+            question={adminChatQuestion}
+            role="admin"
+            statusText="DeepSeek backend-only. Nếu chưa sẵn sàng, điền DEEPSEEK_API_KEY trong .env.local rồi khởi động lại agent."
+            title="Trợ lý vận hành"
+            onAsk={(value) => void requestAdminChat(value)}
+            onQuestionChange={setAdminChatQuestion}
+          />
+        ) : null}
       </main>
     </div>
+  );
+}
+
+function AdminReportsPanel({
+  history,
+  sourceQuality,
+  summary,
+  token
+}: {
+  history: HistoryRow[];
+  sourceQuality: SourceQuality | null;
+  summary: DatasetSummary | null;
+  token: string;
+}) {
+  const exportHref = adminHistoryExportUrl(token);
+  const topClasses = Object.entries(summary?.classes ?? {})
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .slice(0, 8);
+  const priorityIssues =
+    sourceQuality?.classes
+      .filter((item) => item.source_issue_count || item.missing_for_strong_train)
+      .slice(0, 8) ?? [];
+  return (
+    <section className="content-grid admin-reports-grid">
+      <div className="stat-row">
+        <MetricCard label="Dòng lịch sử" value={formatNumber(history.length)} detail="Đang hiển thị gần đây" />
+        <MetricCard label="Ảnh dataset" value={formatNumber(summary?.images ?? 0)} detail="Hàng đợi training" />
+        <MetricCard label="Boxes" value={formatNumber(summary?.boxes ?? 0)} detail="BBox đã index" />
+        <MetricCard
+          label="Lỗi nguồn"
+          value={formatNumber(sourceQuality?.invalid_source_images ?? 0)}
+          detail="Nguồn cần kiểm tra"
+        />
+      </div>
+      <div className="panel report-export-panel">
+        <div className="panel-toolbar">
+          <div>
+            <span className="eyebrow">Báo cáo vận hành</span>
+            <strong>Export lịch sử và chất lượng nguồn</strong>
+          </div>
+          <a className="primary-button" href={exportHref}>
+            <Download size={17} />
+            <span>Tải CSV Admin</span>
+          </a>
+        </div>
+        <p className="muted-copy">
+          CSV Admin giữ đủ trường vận hành hiện có để audit nội bộ. User export riêng chỉ trả
+          các cột an toàn, không có path ảnh.
+        </p>
+      </div>
+      <div className="panel">
+        <div className="panel-toolbar">
+          <div>
+            <span className="eyebrow">Top class</span>
+            <strong>Phân bố dataset</strong>
+          </div>
+        </div>
+        <div className="class-list">
+          {topClasses.length ? (
+            topClasses.map(([name, count]) => (
+              <div className="class-row" key={name}>
+                <span>{name}</span>
+                <strong>{formatNumber(Number(count))}</strong>
+              </div>
+            ))
+          ) : (
+            <div className="empty-state">Chưa có dataset summary.</div>
+          )}
+        </div>
+      </div>
+      <div className="panel">
+        <div className="panel-toolbar">
+          <div>
+            <span className="eyebrow">Chất lượng nguồn</span>
+            <strong>Class cần ưu tiên</strong>
+          </div>
+        </div>
+        <div className="class-list">
+          {priorityIssues.length ? (
+            priorityIssues.map((item) => (
+              <div className="class-row" key={item.class_name}>
+                <span>
+                  {item.class_name}
+                  <small>{item.priority}</small>
+                </span>
+                <strong>{formatNumber(item.source_issue_count + item.missing_for_strong_train)}</strong>
+              </div>
+            ))
+          ) : (
+            <div className="empty-state">Chưa có cảnh báo source quality.</div>
+          )}
+        </div>
+      </div>
+      <HistoryPanel imageToken={token} rows={history.slice(0, 10)} />
+    </section>
   );
 }
 
@@ -1238,23 +2070,32 @@ function LivePanel({
   return (
     <section className="content-grid live-grid">
       <div className="stat-row">
-        <MetricCard label="Camera" value={status?.camera.running ? "ON" : "OFF"} detail={status?.camera.message} />
+        <MetricCard
+          label="Camera"
+          value={status?.camera.running ? "ON" : "OFF"}
+          detail={cameraHealthDetail(status)}
+        />
         <MetricCard label="FPS" value={formatNumber(status?.fps ?? 0)} detail="Stream realtime" />
         <MetricCard label="Độ trễ" value={`${formatNumber(status?.latency_ms ?? 0)} ms`} detail="Nhận diện" />
         <MetricCard label="UART" value={status?.uart.connected ? "ON" : "OFF"} detail={status?.uart.message} />
         <MetricCard label="Training" value={trainEpoch} detail={trainDetail} />
+        <MetricCard
+          label="3-Bin"
+          value={status?.three_bin_classifier.running ? "ON" : "OFF"}
+          detail={status?.three_bin_classifier.message || "Kaggle fallback"}
+        />
       </div>
 
       <div className="camera-panel">
         <div className="panel-toolbar">
           <div>
-            <span className="eyebrow">Live Camera</span>
+            <span className="eyebrow">Camera trực tiếp</span>
             <strong>{status?.current_source || "USB camera chưa chọn"}</strong>
           </div>
           <div className="button-row">
             <button className="secondary-button" disabled={busy} onClick={onRefreshDevices} type="button">
               <RefreshCcw size={17} />
-              <span>Refresh USB</span>
+              <span>Làm mới USB</span>
             </button>
             <button className="primary-button" disabled={busy} onClick={onStart} type="button">
               <Play size={17} />
@@ -1295,12 +2136,13 @@ function LivePanel({
                 <div>
                   <strong>{item.cls_name}</strong>
                   <small>
-                    {item.route_label || "Chua mapping"} {item.bin_index ? `- thung ${item.bin_index}` : ""}
+                    {item.route_label || "Chưa mapping"} {item.bin_index ? `- thùng ${item.bin_index}` : ""}
                   </small>
                   <small>
                     {item.serial_payload ? `Serial: ${item.serial_payload}` : "UART payload: -"}
                     {item.ack ? ` - ${item.ack}` : ""}
                   </small>
+                  <small>Nguồn: {item.source || "YOLO"}</small>
                 </div>
                 <span>{Math.round(item.confidence * 100)}%</span>
               </div>
@@ -1322,7 +2164,8 @@ function DetectionOverlay({ detections }: { detections: Detection[] }) {
     <div className="ai-tags">
       {detections.slice(0, 3).map((item, index) => (
         <div className="ai-tag" key={`${item.timestamp}-overlay-${index}`}>
-          <span>{item.cls_name}{item.bin_index ? ` -> thung ${item.bin_index}` : ""}</span>
+          <span>{item.cls_name}{item.bin_index ? ` -> thùng ${item.bin_index}` : ""}</span>
+          <small>{item.source || "YOLO"}</small>
           <strong>{Math.round(item.confidence * 100)}%</strong>
         </div>
       ))}
@@ -1344,17 +2187,26 @@ function DataPanel({
   itemTotal,
   items,
   imageToken,
+  learnNow,
   manualClass,
   manualFileCount,
+  manualGenerated,
   manualImageUrl,
   manualSourceAuthor,
   manualSourceLicense,
   manualSourcePageUrl,
+  manualSourceType,
   search,
   selectedPaths,
   sourceFilter,
+  sourceQuality,
   summary,
+  training,
   trustedFilter,
+  unknownHint,
+  unknownLearn,
+  webDiscovery,
+  webQuery,
   onAnnotate,
   onAnnotationBoxesChange,
   onBulk,
@@ -1368,18 +2220,27 @@ function DataPanel({
   onCaptureSessionFrame,
   onImageUrlChange,
   onImportImageUrl,
+  onLearnNowRefresh,
+  onLearnNowTrain,
+  onLearnThisObject,
   onManualFiles,
   onPage,
   onRelabelItem,
   onSaveAnnotation,
+  onSearchLicensedWeb,
   onSourceFilterChange,
   onSync,
   onToggleAll,
   onToggleSelected,
   onTrustedFilterChange,
+  onUnknownHintChange,
+  onUseWebCandidate,
+  onWebQueryChange,
   onSourceAuthorChange,
+  onSourceGeneratedChange,
   onSourceLicenseChange,
   onSourcePageUrlChange,
+  onSourceTypeChange,
   onStartCaptureSession,
   onStopCaptureSession,
   onUpload
@@ -1397,17 +2258,26 @@ function DataPanel({
   itemTotal: number;
   items: DatasetItem[];
   imageToken: string;
+  learnNow: LearnNowStatus | null;
   manualClass: string;
   manualFileCount: number;
+  manualGenerated: boolean;
   manualImageUrl: string;
   manualSourceAuthor: string;
   manualSourceLicense: string;
   manualSourcePageUrl: string;
+  manualSourceType: string;
   search: string;
   selectedPaths: string[];
   sourceFilter: string;
+  sourceQuality: SourceQuality | null;
   summary: DatasetSummary | null;
+  training: TrainingStatus | null;
   trustedFilter: TrustedFilter;
+  unknownHint: string;
+  unknownLearn: UnknownLearnResponse | null;
+  webDiscovery: WebSourceDiscoveryResponse | null;
+  webQuery: string;
   onAnnotate: (itemId: string) => void;
   onAnnotationBoxesChange: (boxes: DatasetBox[]) => void;
   onBulk: (action: BulkAction) => void;
@@ -1421,18 +2291,27 @@ function DataPanel({
   onCaptureSessionFrame: () => void;
   onImageUrlChange: (value: string) => void;
   onImportImageUrl: () => void;
+  onLearnNowRefresh: () => void;
+  onLearnNowTrain: () => void;
+  onLearnThisObject: () => void;
   onManualFiles: (files: FileList | null) => void;
   onPage: (offset: number) => void;
   onRelabelItem: (imagePath: string) => void;
   onSaveAnnotation: () => void;
+  onSearchLicensedWeb: () => void;
   onSourceFilterChange: (value: string) => void;
   onSync: () => void;
   onToggleAll: (checked: boolean) => void;
   onToggleSelected: (path: string) => void;
   onTrustedFilterChange: (value: TrustedFilter) => void;
+  onUnknownHintChange: (value: string) => void;
+  onUseWebCandidate: (index: number) => void;
+  onWebQueryChange: (value: string) => void;
   onSourceAuthorChange: (value: string) => void;
+  onSourceGeneratedChange: (value: boolean) => void;
   onSourceLicenseChange: (value: string) => void;
   onSourcePageUrlChange: (value: string) => void;
+  onSourceTypeChange: (value: string) => void;
   onStartCaptureSession: () => void;
   onStopCaptureSession: () => void;
   onUpload: () => void;
@@ -1468,6 +2347,15 @@ function DataPanel({
   const allVisibleSelected = items.length > 0 && items.every((item) => selectedPaths.includes(item.image_path));
   const pageStart = itemTotal ? itemOffset + 1 : 0;
   const pageEnd = Math.min(itemOffset + itemLimit, itemTotal);
+  const learnNowSelected =
+    learnNow?.selected ??
+    learnNow?.classes.find((item) => item.class_name.toLowerCase() === manualClass.toLowerCase()) ??
+    null;
+  const canMicroTrain = Boolean(learnNowSelected?.ready_for_micro_train) && !training?.running;
+  const phase8Targets = (sourceQuality?.classes ?? [])
+    .filter((item) => item.priority !== "other")
+    .sort((a, b) => a.priority.localeCompare(b.priority) || b.missing_for_strong_train - a.missing_for_strong_train)
+    .slice(0, 12);
 
   return (
     <section className="content-grid data-grid">
@@ -1617,9 +2505,206 @@ function DataPanel({
           </button>
         </div>
         <div className="capture-note">
+          <BrainCircuit size={16} />
+          <span>Unknown Learn: chụp vật lạ trong ROI, tắt đổ phần cứng, duyệt bbox rồi reference nhận ngay.</span>
+        </div>
+        <div className="form-grid two-col">
+          <label>
+            Gợi ý/alias vật lạ
+            <input
+              maxLength={80}
+              onChange={(event) => onUnknownHintChange(event.target.value)}
+              placeholder="but bi, vi thuoc, khau trang..."
+              value={unknownHint}
+            />
+          </label>
+          <label>
+            Tìm nguồn web
+            <input
+              maxLength={120}
+              onChange={(event) => onWebQueryChange(event.target.value)}
+              placeholder="Wikimedia/Open Images query"
+              value={webQuery}
+            />
+          </label>
+        </div>
+        <div className="button-row">
+          <button className="primary-button" disabled={busy} onClick={onLearnThisObject} type="button">
+            <Camera size={17} />
+            <span>Learn this object</span>
+          </button>
+          <button
+            className="secondary-button"
+            disabled={busy || !(manualClass || unknownLearn?.suggestions?.[0]?.canonical_class)}
+            onClick={onSearchLicensedWeb}
+            type="button"
+          >
+            <Search size={17} />
+            <span>Tìm ảnh licensed</span>
+          </button>
+        </div>
+        {unknownLearn ? (
+          <div className="class-list">
+            <div className="class-row">
+              <span>Learn capture</span>
+              <strong>{unknownLearn.item?.item_id || "pending"}</strong>
+            </div>
+            <div className="class-row">
+              <span>Hardware</span>
+              <strong>{unknownLearn.hardware_blocked ? "blocked" : "on"}</strong>
+            </div>
+            <div className="class-row">
+              <span>Provider</span>
+              <strong>{unknownLearn.provider_available ? unknownLearn.provider : "manual fallback"}</strong>
+            </div>
+            {unknownLearn.suggestions.length ? (
+              unknownLearn.suggestions.map((item) => (
+                <button
+                  className="source-tile active"
+                  key={`${item.canonical_class}-${item.source}`}
+                  onClick={() => onClassChange(item.canonical_class)}
+                  type="button"
+                >
+                  <span>{item.label}</span>
+                  <strong>{`${item.canonical_class} -> ${item.command}/bin ${item.bin_index}`}</strong>
+                </button>
+              ))
+            ) : (
+              <div className="empty-state">Chưa có suggestion hợp lệ. Nhập alias Việt Nam rồi chụp lại hoặc chọn class thủ công.</div>
+            )}
+          </div>
+        ) : null}
+        {webDiscovery ? (
+          <div className="class-list">
+            <div className="class-row">
+              <span>Web discovery</span>
+              <strong>{webDiscovery.available ? `${webDiscovery.candidates.length} candidate` : "chưa cấu hình"}</strong>
+            </div>
+            <div className="path-line">{webDiscovery.message}</div>
+            {webDiscovery.candidates.slice(0, 6).map((item, index) => (
+              <button
+                className="source-tile"
+                key={`${item.image_url}-${index}`}
+                onClick={() => onUseWebCandidate(index)}
+                title={item.reason}
+                type="button"
+              >
+                <span>{item.source_type}</span>
+                <strong>{item.title || item.canonical_class}</strong>
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <div className="class-list">
+          <div className="class-row">
+            <span>Learn Now class</span>
+            <strong>{learnNowSelected?.class_name || manualClass || "-"}</strong>
+          </div>
+          <div className="class-row">
+            <span>Priority</span>
+            <strong>{learnNowSelected?.priority || "other"}</strong>
+          </div>
+          <div className="class-row">
+            <span>Route</span>
+            <strong>
+              {learnNowSelected
+                ? `${learnNowSelected.command} / bin ${learnNowSelected.bin_index}`
+                : "-"}
+            </strong>
+          </div>
+          <div className="class-row">
+            <span>Reviewed / reference</span>
+            <strong>
+              {learnNowSelected
+                ? `${learnNowSelected.reviewed_count} / ${learnNowSelected.reference_count}`
+                : "0 / 0"}
+            </strong>
+          </div>
+          <div className="class-row">
+            <span>Holdout</span>
+            <strong>{learnNowSelected?.holdout_count ?? 0}</strong>
+          </div>
+          <div className="class-row">
+            <span>Missing ref / strong</span>
+            <strong>
+              {learnNowSelected
+                ? `${learnNowSelected.missing_for_reference} / ${learnNowSelected.missing_for_strong_train}+${learnNowSelected.missing_holdout_for_strong} holdout`
+                : "0 / 0"}
+            </strong>
+          </div>
+          <div className="class-row">
+            <span>Generated / source issues</span>
+            <strong>
+              {learnNowSelected
+                ? `${learnNowSelected.generated_count}/${learnNowSelected.generated_cap} / ${learnNowSelected.source_issue_count}`
+                : "0 / 0"}
+            </strong>
+          </div>
+          <div className="path-line">
+            {learnNowSelected?.message || "Review bbox để nhận diện ngay và mở khóa train nhanh."}
+          </div>
+          {learnNow?.blocked_labels && Object.keys(learnNow.blocked_labels).length ? (
+            <div className="capture-warning">
+              <AlertTriangle size={16} />
+              <span>
+                Nhận ngoài 45 class:{" "}
+                {Object.entries(learnNow.blocked_labels)
+                  .slice(0, 6)
+                  .map(([name, count]) => `${name} (${count})`)
+                  .join(", ")}
+              </span>
+            </div>
+          ) : null}
+        </div>
+        <div className="button-row">
+          <button
+            className="secondary-button"
+            disabled={busy || !manualClass}
+            onClick={onLearnNowRefresh}
+            type="button"
+          >
+            <RefreshCcw size={17} />
+            <span>Làm mới nhận diện</span>
+          </button>
+          <button
+            className="primary-button"
+            disabled={busy || !manualClass || !canMicroTrain}
+            onClick={onLearnNowTrain}
+            title={
+              training?.running
+                ? "Training đang chạy"
+                : learnNowSelected?.message || "Cần ít nhất 6 ảnh đã review"
+            }
+            type="button"
+          >
+            <BrainCircuit size={17} />
+            <span>Train nhanh candidate</span>
+          </button>
+        </div>
+        <div className="class-list">
+          <div className="class-row">
+            <span>Phase 8 quality</span>
+            <strong>
+              {sourceQuality
+                ? `${sourceQuality.invalid_source_images} source lỗi, ${sourceQuality.duplicate_images} trùng, ${sourceQuality.blurry_images} mờ, ${sourceQuality.augmented_images} augmented`
+                : "-"}
+            </strong>
+          </div>
+          {phase8Targets.map((item) => (
+            <div className="class-row" key={`${item.priority}-${item.class_name}`}>
+              <span>
+                {item.priority} {item.class_name}
+              </span>
+              <strong>
+                {item.reviewed_count}/24, H{item.holdout_count}/6, G{item.generated_count}/{item.generated_cap}, A{item.augmented_count}
+              </strong>
+            </div>
+          ))}
+        </div>
+        <div className="capture-note">
           <Camera size={16} />
           <span>
-            Phien chup Pen giu Test Mode tat, loai anh mo/trung va tach 6 anh holdout.
+            Phiên chụp Pen giữ Test Mode tắt, loại ảnh mờ/trùng và tách 6 ảnh holdout.
           </span>
         </div>
         {captureSession?.session_id ? (
@@ -1647,7 +2732,7 @@ function DataPanel({
             type="button"
           >
             <Play size={17} />
-            <span>Bat dau 24 anh</span>
+            <span>Bắt đầu 24 ảnh</span>
           </button>
           <button
             className="primary-button"
@@ -1656,7 +2741,7 @@ function DataPanel({
             type="button"
           >
             <Camera size={17} />
-            <span>Chup tu the tiep theo</span>
+            <span>Chụp tư thế tiếp theo</span>
           </button>
           <button
             className="secondary-button"
@@ -1665,16 +2750,16 @@ function DataPanel({
             type="button"
           >
             <Square size={17} />
-            <span>Dung phien</span>
+            <span>Dừng phiên</span>
           </button>
         </div>
         <div className="capture-note">
           <Search size={16} />
-          <span>URL anh web/Google phai co nguon ro; luu xong can review bbox va quyen su dung truoc khi train.</span>
+          <span>URL ảnh web/Google phải có nguồn rõ; lưu xong cần review bbox và quyền sử dụng trước khi train.</span>
         </div>
         <div className="form-grid two-col">
           <label>
-            URL anh truc tiep
+            URL ảnh trực tiếp
             <input
               maxLength={1000}
               onChange={(event) => onImageUrlChange(event.target.value)}
@@ -1683,7 +2768,7 @@ function DataPanel({
             />
           </label>
           <label>
-            Trang nguon
+            Trang nguồn
             <input
               maxLength={1000}
               onChange={(event) => onSourcePageUrlChange(event.target.value)}
@@ -1696,18 +2781,37 @@ function DataPanel({
             <input
               maxLength={120}
               onChange={(event) => onSourceLicenseChange(event.target.value)}
-              placeholder="CC-BY, tu chup, duoc phep dung..."
+              placeholder="CC-BY, tự chụp, được phép dùng..."
               value={manualSourceLicense}
             />
           </label>
           <label>
-            Tac gia / nguon
+            Tác giả / nguồn
             <input
               maxLength={160}
               onChange={(event) => onSourceAuthorChange(event.target.value)}
-              placeholder="Ten tac gia, website, hoac ghi chu"
+              placeholder="Tên tác giả, website, hoặc ghi chú"
               value={manualSourceAuthor}
             />
+          </label>
+          <label>
+            Loại nguồn
+            <select onChange={(event) => onSourceTypeChange(event.target.value)} value={manualSourceType}>
+              <option value="licensed_url">Licensed URL</option>
+              <option value="open_images">Open Images</option>
+              <option value="wikimedia">Wikimedia Commons</option>
+              <option value="roboflow">Roboflow</option>
+              <option value="generated">Generated</option>
+              <option value="other">Other licensed</option>
+            </select>
+          </label>
+          <label className="checkbox-line">
+            <input
+              checked={manualGenerated}
+              onChange={(event) => onSourceGeneratedChange(event.target.checked)}
+              type="checkbox"
+            />
+            Generated chỉ dùng train
           </label>
         </div>
         <button
@@ -2413,6 +3517,118 @@ function SettingsPanel({
       </div>
 
       <div className="panel">
+        <span className="eyebrow">Kaggle 3-Bin Fallback</span>
+        <div className="capture-warning">
+          <BrainCircuit size={16} />
+          <span>Chỉ dùng classifier này khi YOLO thấy Unknown trong ROI; không thay model YOLO production.</span>
+        </div>
+        <div className="form-grid two-col">
+          <label className="check-field">
+            <input
+              checked={config.three_bin_classifier.enabled}
+              onChange={(event) =>
+                onChange((cfg) => ({
+                  ...cfg,
+                  three_bin_classifier: {
+                    ...cfg.three_bin_classifier,
+                    enabled: event.target.checked
+                  }
+                }))
+              }
+              type="checkbox"
+            />
+            Bật fallback 3 thùng
+          </label>
+          <label className="check-field">
+            <input
+              checked={config.three_bin_classifier.unknown_only}
+              onChange={(event) =>
+                onChange((cfg) => ({
+                  ...cfg,
+                  three_bin_classifier: {
+                    ...cfg.three_bin_classifier,
+                    unknown_only: event.target.checked
+                  }
+                }))
+              }
+              type="checkbox"
+            />
+            Chỉ sửa Unknown object
+          </label>
+          <label>
+            Đường dẫn classifier
+            <input
+              value={config.three_bin_classifier.model_path}
+              onChange={(event) =>
+                onChange((cfg) => ({
+                  ...cfg,
+                  three_bin_classifier: {
+                    ...cfg.three_bin_classifier,
+                    model_path: event.target.value
+                  }
+                }))
+              }
+            />
+          </label>
+          <NumberField
+            label="3-bin confidence"
+            max={1}
+            min={0}
+            step={0.01}
+            value={config.three_bin_classifier.min_confidence}
+            onValue={(value) =>
+              onChange((cfg) => ({
+                ...cfg,
+                three_bin_classifier: {
+                  ...cfg.three_bin_classifier,
+                  min_confidence: value
+                }
+              }))
+            }
+          />
+          <NumberField
+            label="3-bin margin"
+            max={1}
+            min={0}
+            step={0.01}
+            value={config.three_bin_classifier.min_margin}
+            onValue={(value) =>
+              onChange((cfg) => ({
+                ...cfg,
+                three_bin_classifier: {
+                  ...cfg.three_bin_classifier,
+                  min_margin: value
+                }
+              }))
+            }
+          />
+          <NumberField
+            label="Min crop area"
+            max={1}
+            min={0}
+            step={0.001}
+            value={config.three_bin_classifier.min_crop_area_ratio}
+            onValue={(value) =>
+              onChange((cfg) => ({
+                ...cfg,
+                three_bin_classifier: {
+                  ...cfg.three_bin_classifier,
+                  min_crop_area_ratio: value
+                }
+              }))
+            }
+          />
+        </div>
+        <div className="policy-strip">
+          <ShieldCheck size={18} />
+          <div>
+            <strong>{status?.three_bin_classifier.running ? "Fallback đang bật" : "Fallback đang tắt"}</strong>
+            <span>{status?.three_bin_classifier.message || "models/three_bin_classifier.pt"}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="panel">
         <div className="panel-toolbar no-pad">
           <div>
             <span className="eyebrow">Camera USB</span>
@@ -2420,7 +3636,7 @@ function SettingsPanel({
           </div>
           <button className="secondary-button" disabled={busy} onClick={onRefreshDevices} type="button">
             <RefreshCcw size={17} />
-            <span>Refresh USB</span>
+            <span>Làm mới USB</span>
           </button>
         </div>
         <div className="policy-strip">
@@ -2565,7 +3781,7 @@ function SettingsPanel({
               }
               type="checkbox"
             />
-            Bat ROI vung khay
+            Bật ROI vùng khay
           </label>
           <label className="check-field">
             <input
@@ -2581,7 +3797,7 @@ function SettingsPanel({
               }
               type="checkbox"
             />
-            Bat buoc ROI de do
+            Bắt buộc ROI để đổ
           </label>
           <NumberField
             label="ROI X"
@@ -2636,6 +3852,45 @@ function SettingsPanel({
               onChange((cfg) => ({
                 ...cfg,
                 dispatch_guard: { ...cfg.dispatch_guard, empty_rearm_seconds: value }
+              }))
+            }
+          />
+          <NumberField
+            label="Số class tối đa mỗi lần đổ"
+            min={1}
+            max={5}
+            step={1}
+            value={config.dispatch_guard.max_classes_per_dispatch}
+            onValue={(value) =>
+              onChange((cfg) => ({
+                ...cfg,
+                dispatch_guard: { ...cfg.dispatch_guard, max_classes_per_dispatch: Math.round(value) }
+              }))
+            }
+          />
+          <NumberField
+            label="Cooldown cảnh báo nhiều rác (s)"
+            min={0}
+            max={120}
+            step={1}
+            value={config.dispatch_guard.multi_class_warning_cooldown_seconds}
+            onValue={(value) =>
+              onChange((cfg) => ({
+                ...cfg,
+                dispatch_guard: { ...cfg.dispatch_guard, multi_class_warning_cooldown_seconds: value }
+              }))
+            }
+          />
+          <NumberField
+            label="Track loa cảnh báo"
+            min={0}
+            max={8}
+            step={1}
+            value={config.dispatch_guard.multi_class_warning_audio_track}
+            onValue={(value) =>
+              onChange((cfg) => ({
+                ...cfg,
+                dispatch_guard: { ...cfg.dispatch_guard, multi_class_warning_audio_track: Math.round(value) }
               }))
             }
           />
@@ -2779,7 +4034,7 @@ function HardwareProfilePanel({
   onTest: (command: "O" | "R" | "I") => void;
 }) {
   if (!profile) {
-    return <div className="empty-state">Dang tai mapping phan cung...</div>;
+    return <div className="empty-state">Đang tải mapping phần cứng...</div>;
   }
   const waitDegrees = profile.servo.wait_degrees as Record<string, unknown> | undefined;
   const calibration = profile.calibration ?? {};
@@ -2801,7 +4056,7 @@ function HardwareProfilePanel({
   const homeCandidates = Array.isArray(calibration.home_candidates)
     ? calibration.home_candidates.map(readAngleCandidate).filter((item) => item !== null)
     : [
-        { label: "Home current", command: "I" as const, d6: Number(waitDegrees?.D6 ?? 90), d7: Number(waitDegrees?.D7 ?? 85) },
+        { label: "Home hiện tại", command: "I" as const, d6: Number(waitDegrees?.D6 ?? 90), d7: Number(waitDegrees?.D7 ?? 85) },
         { label: "Home D7 -2", command: "I" as const, d6: 90, d7: 83 },
         { label: "Home D7 +2", command: "I" as const, d6: 90, d7: 87 },
         { label: "Home D6 -2", command: "I" as const, d6: 88, d7: 85 },
@@ -2810,14 +4065,14 @@ function HardwareProfilePanel({
   const inorganicCandidates = Array.isArray(calibration.inorganic_replay_candidates)
     ? calibration.inorganic_replay_candidates.map(readAngleCandidate).filter((item) => item !== null)
     : [
-        { label: "Vo co current", command: "R" as const, d6: 90, d7: 0 },
-        { label: "Vo co previous", command: "R" as const, d6: 145, d7: 180 },
-        { label: "Vo co max max", command: "R" as const, d6: 180, d7: 180 },
-        { label: "Vo co D6 min", command: "R" as const, d6: 0, d7: 180 },
-        { label: "Vo co D7 min", command: "R" as const, d6: 180, d7: 0 },
-        { label: "Vo co both min", command: "R" as const, d6: 0, d7: 0 },
-        { label: "Vo co D6 45", command: "R" as const, d6: 45, d7: 180 },
-        { label: "Vo co D7 45", command: "R" as const, d6: 180, d7: 45 }
+        { label: "Vô cơ hiện tại", command: "R" as const, d6: 90, d7: 0 },
+        { label: "Vô cơ trước đó", command: "R" as const, d6: 145, d7: 180 },
+        { label: "Vô cơ max max", command: "R" as const, d6: 180, d7: 180 },
+        { label: "Vô cơ D6 min", command: "R" as const, d6: 0, d7: 180 },
+        { label: "Vô cơ D7 min", command: "R" as const, d6: 180, d7: 0 },
+        { label: "Vô cơ cả hai min", command: "R" as const, d6: 0, d7: 0 },
+        { label: "Vô cơ D6 45", command: "R" as const, d6: 45, d7: 180 },
+        { label: "Vô cơ D7 45", command: "R" as const, d6: 180, d7: 45 }
       ];
   const calibrationPositions = [
     {
@@ -2843,12 +4098,12 @@ function HardwareProfilePanel({
   ];
   const audioTracks = [
     { label: "Startup", track: Number(profile.gd5800.startup_track ?? 1) },
-    { label: "Huu co sort", track: 2 },
-    { label: "Vo co sort", track: 3 },
-    { label: "Tai che sort", track: 4 },
-    { label: "Huu co sensor", track: 5 },
-    { label: "Tai che sensor", track: 6 },
-    { label: "Vo co sensor", track: 7 }
+    { label: "Hữu cơ sort", track: 2 },
+    { label: "Vô cơ sort", track: 3 },
+    { label: "Tái chế sort", track: 4 },
+    { label: "Hữu cơ sensor", track: 5 },
+    { label: "Tái chế sensor", track: 6 },
+    { label: "Vô cơ sensor", track: 7 }
   ];
   const mp3Tests = [
     { label: "Mode Primary D5/D4", command: "MODE_PRIMARY" as const },
@@ -2867,9 +4122,9 @@ function HardwareProfilePanel({
     <div className="panel full-span">
       <div className="panel-toolbar no-pad">
         <div>
-          <span className="eyebrow">Mapping phan cung</span>
+          <span className="eyebrow">Mapping phần cứng</span>
           <strong>{profile.profile_id || profile.current_port || "UART OFF"}</strong>
-          <p className="muted">{profile.uart_message || "Chua co trang thai UART."}</p>
+          <p className="muted">{profile.uart_message || "Chưa có trạng thái UART."}</p>
         </div>
         <button
           className="secondary-button"
@@ -2906,7 +4161,7 @@ function HardwareProfilePanel({
                 {"\\n"}
               </strong>
               <small>
-                Thung {String(route.bin_index)} - servo {String(route.servo_pin)}
+                Thùng {String(route.bin_index)} - servo {String(route.servo_pin)}
                 {positions ? ` (${positions})` : ""} - GD5800 sort track{" "}
                 {String(route.gd5800_track)}
               </small>
@@ -2927,8 +4182,8 @@ function HardwareProfilePanel({
         <div className="policy-strip">
           <MousePointer2 size={18} />
           <div>
-            <strong>Home/upright calibration</strong>
-            <span>Replay small offsets and choose the one where the tray stands straight, not tilted.</span>
+            <strong>Hiệu chuẩn home/upright</strong>
+            <span>Replay offset nhỏ và chọn góc khi khay đứng thẳng, không bị nghiêng.</span>
           </div>
         </div>
         <div className="hardware-grid">
@@ -2952,8 +4207,8 @@ function HardwareProfilePanel({
         <div className="policy-strip">
           <MousePointer2 size={18} />
           <div>
-            <strong>Tai che direction replay</strong>
-            <span>Each button plays track 3, dumps with the candidate angle, then returns to current home.</span>
+            <strong>Replay hướng tái chế</strong>
+            <span>Mỗi nút phát track 3, đổ theo góc thử, rồi trở về home hiện tại.</span>
           </div>
         </div>
         <div className="hardware-grid">
@@ -2977,8 +4232,8 @@ function HardwareProfilePanel({
         <div className="policy-strip">
           <MousePointer2 size={18} />
           <div>
-            <strong>Raw servo calibration D6/D7</strong>
-            <span>Use raw angle pairs only for inspection; they do not play sort audio.</span>
+            <strong>Hiệu chuẩn servo thô D6/D7</strong>
+            <span>Chỉ dùng cặp góc thô để kiểm tra; thao tác này không phát audio phân loại.</span>
           </div>
         </div>
         <div className="hardware-grid">
@@ -3012,7 +4267,7 @@ function HardwareProfilePanel({
         <div className="device-list">
           {(profile.proximity_sensors ?? []).map((sensor) => (
             <div className="device-row" key={String(sensor.pin)}>
-              <strong>Cam bien am thanh {String(sensor.label || sensor.command)}</strong>
+              <strong>Cảm biến âm thanh {String(sensor.label || sensor.command)}</strong>
               <span>
                 pin {String(sensor.pin)}, active {String(sensor.active_level)}, track{" "}
                 {String(sensor.gd5800_track)}, action {String(sensor.action || "audio_only")}
@@ -3078,9 +4333,9 @@ function HardwareProfilePanel({
             <strong>Current home / routes</strong>
             <span>
               home D6={String(diagnostics.current_home.D6 ?? "-")}, D7={String(diagnostics.current_home.D7 ?? "-")};
-              vo co D6={String((diagnostics.current_vo_co ?? diagnostics.current_inorganic).D6 ?? "-")},
+              vô cơ D6={String((diagnostics.current_vo_co ?? diagnostics.current_inorganic).D6 ?? "-")},
               D7={String((diagnostics.current_vo_co ?? diagnostics.current_inorganic).D7 ?? "-")};
-              tai che D6={String(diagnostics.current_tai_che?.D6 ?? "-")},
+              tái chế D6={String(diagnostics.current_tai_che?.D6 ?? "-")},
               D7={String(diagnostics.current_tai_che?.D7 ?? "-")};
               firmware home {JSON.stringify(diagnostics.last_servo.detail || {})}
             </span>
@@ -3132,7 +4387,7 @@ function HardwareProfilePanel({
             ["TF", "VOL", "PLAY", "PLAYVOL", "NEXT", "ONLINE", "STATUS", "RESET", "MODE_PRIMARY", "MODE_REVERSE", "MODE_QUERY"].includes(
               String(test.command || "")
             )) ? (
-            <span> - ACK OK chi xac nhan Arduino da gui lenh MP3; neu khong nghe hay kiem tra microSD, file track, loa, nguon, TX/RX D4-D5.</span>
+            <span> - ACK OK chỉ xác nhận Arduino đã gửi lệnh MP3; nếu không nghe hãy kiểm tra microSD, file track, loa, nguồn, TX/RX D4-D5.</span>
           ) : null}
         </div>
       ) : null}
@@ -3156,7 +4411,7 @@ function ActuationTestModePanel({
       <div className="panel-toolbar no-pad">
         <div>
           <span className="eyebrow">Actuation Test Mode</span>
-          <strong>{enabled ? "Dang bat" : "Dang tat"}</strong>
+          <strong>{enabled ? "Đang bật" : "Đang tắt"}</strong>
           <p className="muted">{"Kiem chung camera -> group -> bin -> payload -> ACK -> history."}</p>
         </div>
         <button
@@ -3166,7 +4421,7 @@ function ActuationTestModePanel({
           type="button"
         >
           {enabled ? <Square size={17} /> : <ShieldCheck size={17} />}
-          <span>{enabled ? "Tat test mode" : "Bat test mode"}</span>
+          <span>{enabled ? "Tắt test mode" : "Bật test mode"}</span>
         </button>
       </div>
       {warning ? (
@@ -3202,7 +4457,7 @@ function ActuationTestModePanel({
         ))}
       </div>
       {mode && !mode.evidence.length ? (
-        <div className="empty-state">Chua co evidence. Bat camera live va dua tung loai rac vao vung nhan dien.</div>
+        <div className="empty-state">Chưa có evidence. Bật camera live và đưa từng loại rác vào vùng nhận diện.</div>
       ) : null}
     </div>
   );
@@ -3334,6 +4589,26 @@ function StatusPill({ ok, text }: { ok: boolean; text: string }) {
   return <span className={ok ? "status-pill ok" : "status-pill warn"}>{text}</span>;
 }
 
+function cameraHealthDetail(status: RuntimeStatus | null) {
+  if (!status) {
+    return "";
+  }
+  const diagnostics = status.camera_diagnostics ?? {};
+  const reason = diagnostics.reason ? String(diagnostics.reason) : status.camera.message;
+  const mean = numericDiagnostic(diagnostics.mean_brightness);
+  const nonBlack = numericDiagnostic(diagnostics.non_black_ratio);
+  const metrics = [
+    mean == null ? "" : `mean ${Math.round(mean)}`,
+    nonBlack == null ? "" : `non-black ${Math.round(nonBlack * 100)}%`
+  ].filter(Boolean);
+  return [reason, ...metrics].filter(Boolean).join(" | ");
+}
+
+function numericDiagnostic(value: unknown) {
+  const numeric = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(Math.round(value));
 }
@@ -3357,7 +4632,32 @@ function tabFromLocation(): TabId {
   return tabs.some((item) => item.id === raw) ? (raw as TabId) : "live";
 }
 
+function userViewFromLocation(): UserView {
+  if (typeof window === "undefined") {
+    return "dashboard";
+  }
+  const segments = window.location.pathname.split("/").filter(Boolean);
+  const segment = segments[segments.length - 1] ?? "dashboard";
+  const views: UserView[] = [
+    "dashboard",
+    "ecopet",
+    "advice",
+    "history",
+    "device",
+    "analytics",
+    "reports",
+    "notifications",
+    "community",
+    "leaderboard",
+    "account"
+  ];
+  return views.includes(segment as UserView) ? (segment as UserView) : "dashboard";
+}
+
 function subtitleFor(tab: TabId) {
+  if (tab === "reports") {
+    return "Tổng hợp history, export CSV và chất lượng dataset cho Admin";
+  }
   if (tab === "live") {
     return "Giám sát camera USB, AI detection và trạng thái UART theo thời gian thực";
   }
@@ -3373,7 +4673,18 @@ function subtitleFor(tab: TabId) {
   if (tab === "settings") {
     return "Cấu hình model, camera USB-only, UART USB và capture queue";
   }
+  if (tab === "accounts") {
+    return "Quản lý tài khoản, force password change, backfill owner và chatbot vận hành";
+  }
   return "Theo dõi log local agent và runtime";
+}
+
+function adminHistoryExportUrl(token: string) {
+  const url = new URL(`${AGENT_URL}/api/history/export.csv`);
+  if (token) {
+    url.searchParams.set("token", token);
+  }
+  return url.toString();
 }
 
 function labelSource(source: string) {

@@ -8,6 +8,8 @@ export type RuntimeStatus = {
   camera: DeviceState;
   uart: DeviceState;
   model: DeviceState;
+  three_bin_classifier: DeviceState;
+  camera_diagnostics?: Record<string, unknown>;
   fps: number;
   latency_ms: number;
   current_source: string;
@@ -39,6 +41,45 @@ export type CommonWasteItem = {
   notes: string;
 };
 
+export type LearnNowClassStatus = {
+  class_name: string;
+  class_id?: number | null;
+  command: string;
+  bin_index: number;
+  route_label: string;
+  priority: "P0" | "P1" | "P2" | "other";
+  images: number;
+  trainable_count: number;
+  reviewed_count: number;
+  manual_reviewed_count: number;
+  reference_count: number;
+  holdout_count: number;
+  generated_count: number;
+  augmented_count: number;
+  generated_cap: number;
+  generated_over_cap: boolean;
+  source_issue_count: number;
+  missing_for_reference: number;
+  missing_for_micro_train: number;
+  missing_for_strong_train: number;
+  missing_holdout_for_strong: number;
+  ready_for_reference: boolean;
+  ready_for_micro_train: boolean;
+  ready_for_strong_train: boolean;
+  recommended_action: "reference_only" | "micro_train" | "strong_train";
+  message: string;
+};
+
+export type LearnNowStatus = {
+  selected_class: string;
+  selected?: LearnNowClassStatus | null;
+  classes: LearnNowClassStatus[];
+  blocked_labels: Record<string, number>;
+  total_images: number;
+  total_boxes: number;
+  queue_dir: string;
+};
+
 export type AppConfig = {
   camera: {
     source: string;
@@ -62,6 +103,12 @@ export type AppConfig = {
     ack_timeout_ms: number;
     protocol: "plain_group" | "sort_line";
   };
+  device: {
+    device_id: string;
+    device_name: string;
+    location: string;
+    owner_username: string;
+  };
   mappings: ClassMapping[];
   roi: {
     enabled: boolean;
@@ -77,6 +124,10 @@ export type AppConfig = {
     empty_rearm_seconds: number;
     empty_rearm_frames: number;
     require_roi_for_dispatch: boolean;
+    max_classes_per_dispatch: number;
+    multi_class_warning_cooldown_seconds: number;
+    multi_class_warning_text: string;
+    multi_class_warning_audio_track: number;
   };
   manual_reference_recognition: {
     enabled: boolean;
@@ -88,6 +139,15 @@ export type AppConfig = {
     max_references_per_class: number;
     cache_refresh_seconds: number;
     query_cache_seconds: number;
+  };
+  three_bin_classifier: {
+    enabled: boolean;
+    model_path: string;
+    min_confidence: number;
+    min_margin: number;
+    unknown_only: boolean;
+    min_crop_area_ratio: number;
+    input_size: number;
   };
   capture: {
     mode: "off" | "manual" | "auto_low_conf";
@@ -116,6 +176,7 @@ export type Detection = {
   bin_index?: number | null;
   serial_payload?: string | null;
   ack?: string | null;
+  source: string;
 };
 
 export type HardwareProfile = {
@@ -214,6 +275,37 @@ export type DatasetSummary = {
   catalog_path: string;
 };
 
+export type SourceQualityClass = {
+  class_name: string;
+  priority: "P0" | "P1" | "P2" | "other";
+  images: number;
+  trainable_count: number;
+  reviewed_count: number;
+  holdout_count: number;
+  generated_count: number;
+  augmented_count: number;
+  generated_cap: number;
+  generated_over_cap: boolean;
+  source_issue_count: number;
+  missing_for_reference: number;
+  missing_for_strong_train: number;
+  missing_holdout_for_strong: number;
+};
+
+export type SourceQuality = {
+  queue_dir: string;
+  total_images: number;
+  manual_web_images: number;
+  generated_images: number;
+  augmented_images: number;
+  invalid_source_images: number;
+  duplicate_images: number;
+  blurry_images: number;
+  sources: Record<string, number>;
+  classes: SourceQualityClass[];
+  issues: Array<{ image: string; reason: string; score?: number | null }>;
+};
+
 export type DatasetItem = {
   item_id: string;
   image_path: string;
@@ -242,6 +334,49 @@ export type DatasetBox = {
 export type DatasetAnnotationResponse = {
   item: DatasetItem;
   boxes: DatasetBox[];
+};
+
+export type VisionLabelSuggestion = {
+  label: string;
+  canonical_class: string;
+  class_id: number;
+  confidence: number;
+  command: string;
+  bin_index: number;
+  route_label: string;
+  source: string;
+  reason: string;
+};
+
+export type UnknownLearnResponse = {
+  ok: boolean;
+  message: string;
+  provider: string;
+  provider_available: boolean;
+  hardware_blocked: boolean;
+  item?: DatasetItem | null;
+  boxes: DatasetBox[];
+  suggestions: VisionLabelSuggestion[];
+  learn_status?: LearnNowClassStatus | null;
+};
+
+export type WebSourceCandidate = {
+  title: string;
+  image_url: string;
+  source_page_url: string;
+  source_type: string;
+  canonical_class: string;
+  license: string;
+  author: string;
+  thumbnail_url: string;
+  import_ready: boolean;
+  reason: string;
+};
+
+export type WebSourceDiscoveryResponse = {
+  available: boolean;
+  message: string;
+  candidates: WebSourceCandidate[];
 };
 
 export type DatasetItemsResponse = {
@@ -280,6 +415,9 @@ export type HistoryRow = {
   uart_command?: string | null;
   ack_status?: string | null;
   rtt_ms?: number | null;
+  owner_account_id?: number | null;
+  owner_username?: string | null;
+  device_id?: string | null;
 };
 
 export type TrainingStatus = {
@@ -312,6 +450,35 @@ export type AuthMe = {
   role: AuthRole;
   capabilities: string[];
   auth_required: boolean;
+  account_id?: number | null;
+  username?: string | null;
+  token_source: "session" | "env" | "dev" | string;
+  session_expires_at?: string | null;
+  password_default: boolean;
+};
+
+export type AuthLoginResponse = {
+  token: string;
+  role: AuthRole;
+  account_id?: number | null;
+  username: string;
+  capabilities: string[];
+  expires_at: string;
+  password_default: boolean;
+};
+
+export type AccountDTO = {
+  id: number;
+  username: string;
+  role: AuthRole;
+  is_active: boolean;
+  password_default: boolean;
+  created_at: string;
+  last_login_at?: string | null;
+};
+
+export type AccountsResponse = {
+  accounts: AccountDTO[];
 };
 
 export type BinFullness = {
@@ -327,6 +494,7 @@ export type WasteClassCount = {
   count: number;
   bin_index?: number | null;
   route_label?: string | null;
+  percent: number;
 };
 
 export type WellnessInsight = {
@@ -344,10 +512,254 @@ export type UserDashboard = {
   sample_size: number;
 };
 
+export type AnalyticsRangeDays = 7 | 30 | 90 | 180;
+
+export type UserRouteTotal = {
+  command: "O" | "R" | "I";
+  route_label: string;
+  bin_index: number;
+  count: number;
+  percent: number;
+};
+
+export type UserDailyWaste = {
+  date: string;
+  total: number;
+  organic: number;
+  inorganic: number;
+  recyclable: number;
+};
+
+export type UserMonthlyWaste = {
+  month: string;
+  total: number;
+  organic: number;
+  inorganic: number;
+  recyclable: number;
+};
+
+export type UserPeriodComparison = {
+  previous_total: number;
+  delta: number;
+  delta_percent: number;
+};
+
+export type UserYesterdaySummary = {
+  date: string;
+  total: number;
+  top_classes: WasteClassCount[];
+  route_totals: UserRouteTotal[];
+};
+
+export type DeviceStatus = {
+  device_id: string;
+  device_name: string;
+  location: string;
+  owner_username: string;
+  online: boolean;
+  status: "online" | "offline" | "warning";
+  message: string;
+  last_active_at?: string | null;
+  bins: BinFullness[];
+};
+
+export type EcoScore = {
+  score: number;
+  label: string;
+  recyclable_rate: number;
+  inorganic_rate: number;
+  organic_rate: number;
+  consistency_score: number;
+};
+
+export type UserHistoryItem = {
+  id: number;
+  ts: string;
+  cls_name: string;
+  confidence: number;
+  route_label?: string | null;
+  bin_index?: number | null;
+  category: "organic" | "inorganic" | "recyclable";
+  ack_status?: string | null;
+  device_id?: string | null;
+  image_available: boolean;
+};
+
+export type UserHistoryResponse = {
+  rows: UserHistoryItem[];
+  total: number;
+};
+
+export type UserAnalytics = {
+  generated_at: string;
+  range_days: AnalyticsRangeDays;
+  total: number;
+  today_total: number;
+  seven_day_total: number;
+  thirty_day_total: number;
+  average_confidence: number;
+  eco_score: EcoScore;
+  device_status: DeviceStatus;
+  advice: WellnessInsight[];
+  recent_classifications: UserHistoryItem[];
+  comparison: UserPeriodComparison;
+  bins: BinFullness[];
+  route_totals: UserRouteTotal[];
+  top_classes: WasteClassCount[];
+  daily: UserDailyWaste[];
+  monthly: UserMonthlyWaste[];
+  yesterday: UserYesterdaySummary;
+  insights: WellnessInsight[];
+  advisor_available: boolean;
+  advisor_model: string;
+};
+
+export type UserDevice = {
+  generated_at: string;
+  device_status: DeviceStatus;
+  bins: BinFullness[];
+  recent_activity: UserHistoryItem[];
+  owner_username: string;
+};
+
+export type UserReportCard = {
+  title: string;
+  value: string;
+  detail: string;
+  tone: "neutral" | "success" | "warning" | "danger";
+};
+
+export type UserReport = {
+  generated_at: string;
+  range_days: AnalyticsRangeDays;
+  analytics: UserAnalytics;
+  summary_cards: UserReportCard[];
+  export_url: string;
+  csv_safe_fields: string[];
+};
+
+export type UserNotification = {
+  id: string;
+  title: string;
+  message: string;
+  severity: "info" | "success" | "warning" | "danger";
+  created_at: string;
+  route: string;
+  action_label: string;
+};
+
+export type UserChallenge = {
+  id: string;
+  title: string;
+  description: string;
+  progress: number;
+  target: number;
+  unit: string;
+  completed: boolean;
+  reward_label: string;
+};
+
+export type UserLeaderboardRow = {
+  rank: number;
+  label: string;
+  score: number;
+  detail: string;
+  current_user: boolean;
+};
+
+export type UserCommunityCard = {
+  id: string;
+  title: string;
+  message: string;
+  metric: string;
+  share_text: string;
+  tone: "neutral" | "success" | "warning";
+};
+
+export type UserExperience = {
+  generated_at: string;
+  range_days: AnalyticsRangeDays;
+  notifications: UserNotification[];
+  challenges: UserChallenge[];
+  leaderboard: UserLeaderboardRow[];
+  community_cards: UserCommunityCard[];
+  quick_actions: Array<{ label: string; route: string }>;
+};
+
+export type UserAdvisorResponse = {
+  generated_at: string;
+  available: boolean;
+  provider: string;
+  model: string;
+  profile: string;
+  range_days: AnalyticsRangeDays;
+  message: string;
+  local_insights: WellnessInsight[];
+  knowledge_used: string[];
+  safety_notice: string;
+};
+
+export type AiChatResponse = {
+  generated_at: string;
+  available: boolean;
+  provider: string;
+  model: string;
+  role: AuthRole;
+  profile: string;
+  message: string;
+  quick_prompts: string[];
+  knowledge_used: string[];
+  safety_notice: string;
+};
+
+export type KnowledgeEntry = {
+  id: string;
+  title: string;
+  roles: AuthRole[];
+  keywords: string[];
+  text: string;
+  enabled: boolean;
+  updated_at: string;
+  source: "seed" | "local";
+};
+
+export type KnowledgeCatalogResponse = {
+  entries: KnowledgeEntry[];
+  total: number;
+  enabled_total: number;
+  local_path: string;
+  status: string;
+  error: string;
+};
+
+export type KnowledgeScore = {
+  id: string;
+  title: string;
+  score: number;
+};
+
+export type KnowledgeEvaluateResponse = {
+  role: AuthRole;
+  question: string;
+  snippets: KnowledgeEntry[];
+  scores: KnowledgeScore[];
+  payload_chars: number;
+};
+
 export const AGENT_URL =
   process.env.NEXT_PUBLIC_AGENT_URL?.replace(/\/$/, "") || "http://localhost:8765";
 
 export const DEFAULT_AGENT_TOKEN = process.env.NEXT_PUBLIC_AGENT_TOKEN || "";
+
+export class AgentApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "AgentApiError";
+    this.status = status;
+  }
+}
 
 export function streamUrl(token = DEFAULT_AGENT_TOKEN) {
   const url = new URL(`${AGENT_URL}/api/camera/stream`);
@@ -387,6 +799,28 @@ export function historyImageUrl(
   return url.toString();
 }
 
+export function userHistoryImageUrl(
+  rowId: number,
+  kind: "annotated" | "raw" = "annotated",
+  token = DEFAULT_AGENT_TOKEN
+) {
+  const url = new URL(`${AGENT_URL}/api/user/history/${encodeURIComponent(String(rowId))}/image`);
+  url.searchParams.set("kind", kind);
+  if (token) {
+    url.searchParams.set("token", token);
+  }
+  return url.toString();
+}
+
+export function userHistoryExportUrl(rangeDays: AnalyticsRangeDays, token = DEFAULT_AGENT_TOKEN) {
+  const url = new URL(`${AGENT_URL}/api/user/history/export.csv`);
+  url.searchParams.set("range_days", String(rangeDays));
+  if (token) {
+    url.searchParams.set("token", token);
+  }
+  return url.toString();
+}
+
 export async function agentFetch<T>(
   path: string,
   init?: RequestInit,
@@ -403,7 +837,7 @@ export async function agentFetch<T>(
   });
   if (!res.ok) {
     const detail = await res.text();
-    throw new Error(detail || `${res.status} ${res.statusText}`);
+    throw new AgentApiError(detail || `${res.status} ${res.statusText}`, res.status);
   }
   return (await res.json()) as T;
 }

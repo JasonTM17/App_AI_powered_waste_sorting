@@ -16,6 +16,9 @@ dist/
 web/node_modules/
 web/.next/
 web/out/
+web/.playwright-tmp/
+web/playwright-report/
+web/test-results/
 
 # IDE
 .vscode/
