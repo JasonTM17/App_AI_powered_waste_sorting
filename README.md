@@ -159,6 +159,13 @@ Model vẫn nhận diện 42 class chi tiết, nhưng app điều khiển máy t
 
 Khi pipeline emit một object mới, app lưu lịch sử, gửi lệnh UART tương ứng và phát loa theo nhóm rác. Loa có cooldown mặc định `2.5s` để không đọc lặp liên tục khi camera thấy cùng một loại rác.
 
+Nếu chọn `Loa máy tính`, app phát MP3 từ `assets/audio/gd5800/Giọng nữ` ngay lúc lệnh UART được chấp nhận và chuẩn bị gửi, không chờ ACK. Ánh xạ hiện tại:
+
+- `O` -> `Phân loại hữu cơ.mp3`
+- `R` -> `Phân loại Vô cơ.mp3`
+- `I` -> `Phân loại rác tái chế.mp3`
+- cảnh báo nhiều object -> `Xin chỉ bỏ 1 loại rác thôi.mp3`
+
 ## Data Và Train
 
 Audit dataset:
@@ -342,8 +349,10 @@ The current real hardware profile follows the user-provided block diagram and re
 | Tai che | I | `taiche\n` | 3 | D6=145, D7=180 | track 3 |
 
 - Wait/upright position after every dump: D6=90, D7=85.
-- PC speaker is off by default. Valid sort audio is the OPEN-SMART hardware
-  speaker; set `TRASH_SORTER_ENABLE_PC_SPEAKER=1` only for debug speech.
+- Audio output defaults to the OPEN-SMART hardware speaker. Admin can switch
+  Settings -> Am thanh / Loa phan loai to `Loa may tinh` for bundled MP3
+  playback from `assets/audio/gd5800/Giọng nữ`. PC speech fires at UART send
+  time, not after ACK.
 - Startup audio: OPEN-SMART track `1`.
 - OPEN-SMART Serial MP3 Player A wiring after real probe: Arduino TX `D5` to MP3 RX, Arduino RX `D4` from MP3 TX (`MP3:MODE:REVERSE`, `MP3RX` confirmed). Original D4/D5 primary mode remains available for diagnostics.
 - Audio protocol: select TF `7E 03 35 01 EF`, set volume `7E 03 31 <volume> EF`, play track `7E 04 41 00 <track> EF`.

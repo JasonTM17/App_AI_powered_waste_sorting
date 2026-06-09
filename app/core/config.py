@@ -11,6 +11,11 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 DEFAULT_UART_ACK_TIMEOUT_MS = 4500
+MULTI_CLASS_WARNING_TEXT = "Chỉ đặt 1 vật trong khay. Đang thấy nhiều loại/vật nên không phân loại."
+
+
+def normalize_multi_class_warning_text(_text: str) -> str:
+    return MULTI_CLASS_WARNING_TEXT
 
 
 class CameraConfig(BaseModel):
@@ -68,6 +73,7 @@ class CaptureConfig(BaseModel):
 
 class SpeakerConfig(BaseModel):
     enabled: bool = False
+    output_mode: Literal["hardware", "computer_speaker"] = "hardware"
     cooldown_seconds: float = Field(2.5, ge=0.0, le=60.0)
 
 
@@ -91,7 +97,7 @@ class DispatchGuardConfig(BaseModel):
     require_roi_for_dispatch: bool = True
     max_classes_per_dispatch: int = Field(1, ge=1, le=5)
     multi_class_warning_cooldown_seconds: float = Field(5.0, ge=0.0, le=120.0)
-    multi_class_warning_text: str = "Số lượng rác bạn đặt chỉ nên là 1 loại."
+    multi_class_warning_text: str = MULTI_CLASS_WARNING_TEXT
     multi_class_warning_audio_track: int = Field(8, ge=0, le=8)
 
 
@@ -105,6 +111,9 @@ class ManualReferenceRecognitionConfig(BaseModel):
     max_references_per_class: int = Field(30, ge=1, le=500)
     cache_refresh_seconds: float = Field(30.0, ge=0.0, le=300.0)
     query_cache_seconds: float = Field(1.0, ge=0.0, le=30.0)
+    correctable_yolo_classes: list[str] = Field(default_factory=lambda: ["Cardboard"])
+    correction_target_classes: list[str] = Field(default_factory=lambda: ["Textile"])
+    min_correction_area_ratio: float = Field(0.25, ge=0.0, le=1.0)
 
 
 class ThreeBinClassifierConfig(BaseModel):
@@ -140,7 +149,7 @@ def default_dispatch_guard_config() -> DispatchGuardConfig:
         require_roi_for_dispatch=True,
         max_classes_per_dispatch=1,
         multi_class_warning_cooldown_seconds=5.0,
-        multi_class_warning_text="Số lượng rác bạn đặt chỉ nên là 1 loại.",
+        multi_class_warning_text=MULTI_CLASS_WARNING_TEXT,
         multi_class_warning_audio_track=8,
     )
 
@@ -156,6 +165,9 @@ def default_manual_reference_recognition_config() -> ManualReferenceRecognitionC
         max_references_per_class=30,
         cache_refresh_seconds=30.0,
         query_cache_seconds=1.0,
+        correctable_yolo_classes=["Cardboard"],
+        correction_target_classes=["Textile"],
+        min_correction_area_ratio=0.25,
     )
 
 
@@ -186,7 +198,11 @@ class AppConfig(BaseModel):
         default_factory=lambda: CaptureConfig(low_conf_threshold=0.6)
     )
     speaker: SpeakerConfig = Field(
-        default_factory=lambda: SpeakerConfig(enabled=False, cooldown_seconds=2.5)
+        default_factory=lambda: SpeakerConfig(
+            enabled=False,
+            output_mode="hardware",
+            cooldown_seconds=2.5,
+        )
     )
     unknown_fallback: UnknownObjectFallbackConfig = Field(
         default_factory=default_unknown_object_fallback_config
@@ -202,6 +218,19 @@ class AppConfig(BaseModel):
     language: Literal["vi", "en"] = "vi"
     minimize_to_tray: bool = True
     autostart: bool = False
+
+
+def computer_speaker_enabled(cfg: AppConfig) -> bool:
+    return cfg.speaker.output_mode == "computer_speaker" and cfg.speaker.enabled
+
+
+def normalize_speaker_output_config(cfg: AppConfig) -> AppConfig:
+    clean = cfg.model_copy(deep=True)
+    if clean.speaker.output_mode == "computer_speaker":
+        clean.speaker.enabled = True
+    elif clean.speaker.enabled:
+        clean.speaker.output_mode = "computer_speaker"
+    return clean
 
 
 def merge_missing_mappings(cfg: AppConfig, seed: AppConfig) -> tuple[AppConfig, bool]:
@@ -241,11 +270,18 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     if cfg.uart.protocol == "plain_group" and cfg.uart.ack_timeout_ms < 3000:
         cfg.uart.ack_timeout_ms = DEFAULT_UART_ACK_TIMEOUT_MS
         changed = True
-    if cfg.speaker.enabled and not _allow_pc_speaker_debug():
-        cfg.speaker.enabled = False
+    normalized_speaker = normalize_speaker_output_config(cfg)
+    if normalized_speaker.speaker != cfg.speaker:
+        cfg = normalized_speaker
         changed = True
     if cfg.manual_reference_recognition.cache_refresh_seconds == 3.0:
         cfg.manual_reference_recognition.cache_refresh_seconds = 30.0
+        changed = True
+    normalized_warning = normalize_multi_class_warning_text(
+        cfg.dispatch_guard.multi_class_warning_text
+    )
+    if cfg.dispatch_guard.multi_class_warning_text != normalized_warning:
+        cfg.dispatch_guard.multi_class_warning_text = normalized_warning
         changed = True
     seed = _load_example_config(path)
     if seed is not None:
@@ -295,18 +331,10 @@ def _is_usb_uart_port(port: str) -> bool:
     )
 
 
-def _allow_pc_speaker_debug() -> bool:
-    return os.getenv("TRASH_SORTER_ENABLE_PC_SPEAKER", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
 def save_config(cfg: AppConfig, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
+    cfg = normalize_speaker_output_config(cfg)
     payload = cfg.model_dump(mode="json")
     tmp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
     os.replace(tmp, path)

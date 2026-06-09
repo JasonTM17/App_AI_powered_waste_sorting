@@ -13,7 +13,12 @@ from typing import Any, TypedDict
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from app.core.config import AppConfig, ClassMapping
+from app.core.config import (
+    AppConfig,
+    ClassMapping,
+    computer_speaker_enabled,
+    normalize_multi_class_warning_text,
+)
 from app.core.dispatch_guard import DispatchGuard
 from app.core.events import Detection, TrackedDetection
 from app.core.history import HistoryService
@@ -82,6 +87,17 @@ def _clamp_box(
     x2 = max(x1 + 1, min(int(x2), width))
     y2 = max(y1 + 1, min(int(y2), height))
     return x1, y1, x2, y2
+
+
+def _box_area_ratio(
+    xyxy: tuple[int, int, int, int],
+    width: int,
+    height: int,
+) -> float:
+    if width <= 0 or height <= 0:
+        return 0.0
+    x1, y1, x2, y2 = _clamp_box(xyxy, width, height)
+    return float((x2 - x1) * (y2 - y1)) / float(width * height)
 
 
 class _NoopUart:
@@ -465,16 +481,39 @@ class Pipeline:
         detections: list[Detection],
     ) -> list[Detection]:
         recognizer = self._manual_reference_recognizer
-        if recognizer is None or not self.cfg.manual_reference_recognition.enabled:
+        ref_cfg = self.cfg.manual_reference_recognition
+        if recognizer is None or not ref_cfg.enabled:
             return detections
         fallback_name = self.cfg.unknown_fallback.class_name
+        correctable_classes = {
+            str(name).strip()
+            for name in ref_cfg.correctable_yolo_classes
+            if str(name).strip()
+        }
+        correction_targets = {
+            str(name).strip()
+            for name in ref_cfg.correction_target_classes
+            if str(name).strip()
+        }
+        height, width = frame_bgr.shape[:2] if frame_bgr.ndim >= 2 else (0, 0)
         out: list[Detection] = []
         for detection in detections:
-            if detection.cls_name != fallback_name:
+            mode = ""
+            area_ratio = 0.0
+            if detection.cls_name == fallback_name:
+                mode = "unknown"
+            elif detection.cls_name in correctable_classes:
+                area_ratio = _box_area_ratio(detection.xyxy, width, height)
+                if area_ratio >= ref_cfg.min_correction_area_ratio:
+                    mode = "correction"
+            if not mode:
                 out.append(detection)
                 continue
             match = recognizer.classify(frame_bgr, detection)
             if match is None:
+                out.append(detection)
+                continue
+            if mode == "correction" and correction_targets and match.cls_name not in correction_targets:
                 out.append(detection)
                 continue
             out.append(
@@ -487,15 +526,28 @@ class Pipeline:
                 )
             )
             self.dispatch_status = f"manual reference {match.cls_name}"
-            logger.info(
-                "manual reference matched unknown as {} similarity={:.3f} votes={} margin={:.3f} backend={} source={}",
-                match.cls_name,
-                match.similarity,
-                match.votes,
-                match.margin,
-                match.backend,
-                match.image_path,
-            )
+            if mode == "correction":
+                logger.info(
+                    "manual reference corrected {} as {} similarity={:.3f} votes={} margin={:.3f} area={:.3f} backend={} source={}",
+                    detection.cls_name,
+                    match.cls_name,
+                    match.similarity,
+                    match.votes,
+                    match.margin,
+                    area_ratio,
+                    match.backend,
+                    match.image_path,
+                )
+            else:
+                logger.info(
+                    "manual reference matched unknown as {} similarity={:.3f} votes={} margin={:.3f} backend={} source={}",
+                    match.cls_name,
+                    match.similarity,
+                    match.votes,
+                    match.margin,
+                    match.backend,
+                    match.image_path,
+                )
         return out
 
     def _apply_three_bin_classifier(
@@ -644,12 +696,13 @@ class Pipeline:
                 continue
             if self._has_uart():
                 self._track_to_row[t.track_id] = row_id
-                self._track_to_speech[t.track_id] = (
-                    mapping.command,
-                    int(mapping.bin_index),
-                    t.detection.cls_name,
-                    t.detection.conf,
-                )
+                if computer_speaker_enabled(self.cfg):
+                    self._speak_dispatch(
+                        command=mapping.command,
+                        bin_index=int(mapping.bin_index),
+                        cls_name=t.detection.cls_name,
+                        confidence=t.detection.conf,
+                    )
                 self._dispatch_guard.begin_dispatch(
                     track_id=t.track_id,
                     now=now_mono,
@@ -668,30 +721,51 @@ class Pipeline:
         return detections_for_render
 
     def _speak_multi_class_warning(self, class_names: tuple[str, ...]) -> None:
-        text = self.cfg.dispatch_guard.multi_class_warning_text
+        text = normalize_multi_class_warning_text(self.cfg.dispatch_guard.multi_class_warning_text)
         cooldown = self.cfg.dispatch_guard.multi_class_warning_cooldown_seconds
         now = time.monotonic()
         if now - self._last_multi_class_warning_at < cooldown:
             return
         self._last_multi_class_warning_at = now
         track = self.cfg.dispatch_guard.multi_class_warning_audio_track
+        use_computer_speaker = computer_speaker_enabled(self.cfg)
         try:
             audio_warning = getattr(self.uart, "send_audio_warning", None)
             if (
-                self._hardware_dispatch_enabled
+                not use_computer_speaker
+                and self._hardware_dispatch_enabled
                 and track > 0
                 and self._has_uart()
                 and callable(audio_warning)
             ):
                 audio_warning(track)
-            self.speaker.speak_text(
-                text=text,
-                key="multi_class_dispatch_blocked",
-                cooldown_seconds=cooldown,
-            )
+            if use_computer_speaker:
+                self.speaker.speak_text(
+                    text=text,
+                    key="multi_class_dispatch_blocked",
+                    cooldown_seconds=cooldown,
+                )
             logger.info("dispatch blocked multiple classes={}", ", ".join(class_names))
         except Exception as e:
             logger.warning("multi-class warning speaker failed: {}", e)
+
+    def _speak_dispatch(
+        self,
+        *,
+        command: str,
+        bin_index: int,
+        cls_name: str,
+        confidence: float,
+    ) -> None:
+        try:
+            self.speaker.speak(
+                command=command,
+                bin_index=bin_index,
+                cls_name=cls_name,
+                confidence=confidence,
+            )
+        except Exception as e:
+            logger.warning("speaker dispatch failed: {}", e)
 
     def on_ack(self, track_id: int, command: str, status: str, rtt_ms):
         self._dispatch_guard.complete_dispatch(track_id=track_id, now=time.monotonic())
@@ -700,19 +774,7 @@ class Pipeline:
         if row_id is None:
             return
         self.history.update_ack(row_id, status=status, rtt_ms=rtt_ms)
-        speech = self._track_to_speech.pop(track_id, None)
-        if status != "ok" or speech is None:
-            return
-        speech_command, bin_index, cls_name, confidence = speech
-        try:
-            self.speaker.speak(
-                command=speech_command,
-                bin_index=bin_index,
-                cls_name=cls_name,
-                confidence=confidence,
-            )
-        except Exception as e:
-            logger.warning("speaker dispatch failed: {}", e)
+        self._track_to_speech.pop(track_id, None)
 
     def close(self):
         self.history.close()

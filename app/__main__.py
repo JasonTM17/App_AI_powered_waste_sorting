@@ -6,15 +6,15 @@ import os
 import shutil
 import sys
 
-from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from app.core.config import load_config
 from app.ui.controller import AppController
+from app.ui.live_status import live_ack_status_text, multi_object_warning_text
 from app.ui.main_window import MainWindow
 from app.ui.widgets.theme import apply_theme
 from app.utils.logging import logger, setup_logging
-from app.utils.paths import config_path, db_path, example_config_path, resource_path
+from app.utils.paths import config_path, db_path, example_config_path
 
 
 def _seed_config_if_missing() -> None:
@@ -71,6 +71,11 @@ def main() -> int:
     controller.camera_status.connect(window.title_bar.set_camera_on)
     controller.model_status.connect(window.set_model_status)
 
+    def _sync_speaker_output_mode(mode: str) -> None:
+        window.live_page.set_speaker_output_mode(mode)
+        if window.settings_page is not None:
+            window.settings_page.audio_section.set_output_mode(mode)
+
     def _on_camera_request(on: bool):
         if on:
             controller.start_camera()
@@ -79,6 +84,25 @@ def main() -> int:
 
     window.live_page.camera_toggled.connect(_on_camera_request)
     window.title_bar.camera_toggled.connect(_on_camera_request)
+
+    def _sync_actuation_test_mode(enabled: bool) -> None:
+        window.live_page.set_actuation_test_mode(enabled)
+        if window.settings_page is not None:
+            window.settings_page.set_actuation_test_mode(enabled)
+
+    def _on_actuation_test_mode_request(enabled: bool) -> None:
+        controller.set_actuation_test_mode(enabled)
+        _sync_actuation_test_mode(controller.is_actuation_test_mode_enabled())
+
+    window.live_page.actuation_test_mode_toggled.connect(_on_actuation_test_mode_request)
+
+    def _on_speaker_output_mode_request(mode: str) -> None:
+        new_cfg = controller.cfg.model_copy(deep=True)
+        new_cfg.speaker.output_mode = mode
+        controller.update_config(new_cfg)
+        _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
+
+    window.live_page.speaker_output_mode_changed.connect(_on_speaker_output_mode_request)
 
     def _open_web_dashboard(tab: str = "live") -> None:
         from PySide6.QtCore import QPoint, QUrl
@@ -121,6 +145,7 @@ def main() -> int:
         def _on_config_saved(new_cfg):
             apply_theme(app, new_cfg.theme)
             controller.update_config(new_cfg)
+            _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
             from PySide6.QtCore import QPoint
 
             from app.ui.widgets.toast import Toast
@@ -133,10 +158,12 @@ def main() -> int:
         window.settings_page.test_camera_requested.connect(controller.test_camera)
         window.settings_page.test_uart_requested.connect(controller.test_uart_ping)
         window.settings_page.test_hardware_requested.connect(controller.test_hardware_command)
-        window.settings_page.actuation_test_mode_changed.connect(controller.set_actuation_test_mode)
+        window.settings_page.test_voice_requested.connect(controller.test_laptop_voice)
+        window.settings_page.actuation_test_mode_changed.connect(_on_actuation_test_mode_request)
         window.settings_page.reload_model_requested.connect(controller.reload_model)
         controller.test_uart_result.connect(window.settings_page.set_uart_test_result)
-        window.settings_page.set_actuation_test_mode(controller.is_actuation_test_mode_enabled())
+        _sync_actuation_test_mode(controller.is_actuation_test_mode_enabled())
+        _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
     if window.mapping_page is not None:
 
         def _on_mappings(lst):
@@ -172,6 +199,12 @@ def main() -> int:
         window.live_page.set_fps(fps)
         window.live_page.set_latency(latency)
         window.set_fps(fps)
+        guard_status = controller.dispatch_status()
+        warning_text = multi_object_warning_text(
+            guard_status,
+            controller.cfg.dispatch_guard.multi_class_warning_text,
+        )
+        window.live_page.set_warning(warning_text)
         # Push each detection into the side stream so user can see what
         # the model classified (= app cũ's "system log under camera")
         if detections:
@@ -215,18 +248,12 @@ def main() -> int:
                     except ValueError:
                         payload = "-"
                     test_mode_enabled = controller.is_actuation_test_mode_enabled()
-                    if not test_mode_enabled:
-                        ack = "TEST OFF, khong gui xuong phan cung"
-                    else:
-                        guard_status = controller.dispatch_status()
-                        if guard_status:
-                            ack = guard_status
-                        else:
-                            ack = (
-                                "pending"
-                                if controller.is_uart_connected()
-                                else "UART OFF, khong gui xuong phan cung"
-                            )
+                    ack = live_ack_status_text(
+                        test_mode_enabled=test_mode_enabled,
+                        dispatch_status=guard_status,
+                        uart_connected=controller.is_uart_connected(),
+                        multi_class_warning_text=controller.cfg.dispatch_guard.multi_class_warning_text,
+                    )
                     mode = "TEST ON" if test_mode_enabled else "TEST OFF"
                     detail = (
                         f"{mode}; {category.name}; bin {bin_index}; "
@@ -262,11 +289,18 @@ def main() -> int:
         tray.quit_requested.connect(window.force_quit)
         window.tray = tray
         window._minimize_to_tray = cfg.minimize_to_tray
-        controller.uart_status.connect(
-            lambda ok: (
-                tray.notify("UART", "Mất kết nối" if not ok else "Đã kết nối") if not ok else None
-            )
-        )
+        uart_tray_state = {"was_connected": False}
+
+        def _notify_uart_disconnect(ok: bool) -> None:
+            if ok:
+                uart_tray_state["was_connected"] = True
+                return
+            if not uart_tray_state["was_connected"]:
+                return
+            uart_tray_state["was_connected"] = False
+            tray.notify("UART", "Mất kết nối")
+
+        controller.uart_status.connect(_notify_uart_disconnect)
 
     controller.start()
     if os.environ.get("TRASH_SORTER_AUTOSTART_CAMERA") == "1":
@@ -291,12 +325,10 @@ def main() -> int:
     return rc
 
 
-def _app_icon() -> QIcon:
-    for rel in ("app/ui/resources/icons/app.ico", "app/ui/resources/icons/logo.svg"):
-        path = resource_path(rel)
-        if path.exists():
-            return QIcon(str(path))
-    return QIcon()
+def _app_icon():
+    from app.ui.brand_assets import brand_icon
+
+    return brand_icon()
 
 
 if __name__ == "__main__":

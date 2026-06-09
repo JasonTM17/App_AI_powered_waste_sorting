@@ -10,7 +10,12 @@ import numpy as np
 from PySide6.QtCore import QObject, QThread, QTimer, Signal
 
 from app.core.camera import CameraWorker, SharedCameraWorker
-from app.core.config import AppConfig, save_config
+from app.core.config import (
+    AppConfig,
+    computer_speaker_enabled,
+    normalize_speaker_output_config,
+    save_config,
+)
 from app.core.hardware_profile import route_for_command
 from app.core.inference import InferenceEngine
 from app.core.inference_worker import InferenceWorker
@@ -169,7 +174,7 @@ class AppController(QObject):
         self._uart_lock: RuntimeLock | None = None
         self._pipeline: Pipeline | None = None
         self._speaker = WasteSpeaker(
-            enabled=self.cfg.speaker.enabled,
+            enabled=computer_speaker_enabled(self.cfg),
             cooldown_seconds=self.cfg.speaker.cooldown_seconds,
         )
         self._inference_worker: InferenceWorker | None = None
@@ -452,7 +457,7 @@ class AppController(QObject):
         self.frame_processed.emit(frame, detections, self._fps, self._latency)
 
     def update_config(self, new_cfg: AppConfig) -> None:
-        new_cfg = self._sanitize_uart_config(new_cfg)
+        new_cfg = normalize_speaker_output_config(self._sanitize_uart_config(new_cfg))
         cam_changed = (
             self.cfg.camera.source != new_cfg.camera.source
             or self.cfg.camera.width != new_cfg.camera.width
@@ -478,7 +483,7 @@ class AppController(QObject):
             self.stop_camera()
         self.cfg = new_cfg
         self._speaker.configure(
-            enabled=new_cfg.speaker.enabled,
+            enabled=computer_speaker_enabled(new_cfg),
             cooldown_seconds=new_cfg.speaker.cooldown_seconds,
         )
         save_config(new_cfg, self.config_path)
@@ -566,6 +571,18 @@ class AppController(QObject):
         worker.finished.connect(worker.deleteLater)
         self._probes.append(worker)
         worker.start()
+
+    def test_laptop_voice(self, command: str) -> None:
+        command_key = str(command or "").strip()
+        ok = (
+            self._speaker.preview_warning()
+            if command_key == "warning"
+            else self._speaker.preview_command(command_key)
+        )
+        if ok:
+            self.test_uart_result.emit(True, "Da phat thu giong nu tren loa may tinh.")
+        else:
+            self.test_uart_result.emit(False, f"Khong co file giong cho lenh: {command_key}")
 
     def set_actuation_test_mode(self, enabled: bool) -> None:
         self._actuation_test_enabled = bool(enabled)

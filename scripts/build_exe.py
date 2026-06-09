@@ -16,6 +16,7 @@ APP_NAME = "TrashSorterPro"
 def _datas() -> list[str]:
     items: list[tuple[Path, str]] = [
         (ROOT / "app" / "ui" / "resources", "app/ui/resources"),
+        (ROOT / "assets" / "audio", "assets/audio"),
         (ROOT / "config.example.json", "."),
     ]
     out: list[str] = []

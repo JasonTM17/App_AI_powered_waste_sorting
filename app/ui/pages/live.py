@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.events import Detection
+from app.core.voice_pack import voice_pack_status
 from app.ui.widgets.stat_card import StatCard
 from app.ui.widgets.video_view import VideoView
 from app.utils.paths import resource_path
@@ -39,12 +41,14 @@ class LivePage(QWidget):
     snapshot_requested = Signal()
     camera_toggled = Signal(bool)
     actuation_test_mode_toggled = Signal(bool)
+    speaker_output_mode_changed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._paused = False
         self._cam_on = False
         self._actuation_test_mode = False
+        self._speaker_output_mode = "hardware"
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 24)
@@ -103,6 +107,42 @@ class LivePage(QWidget):
         header.addWidget(self.btn_pause)
         header.addWidget(self.btn_snap)
         root.addLayout(header)
+
+        speaker_bar = QFrame()
+        speaker_bar.setObjectName("toolbar")
+        speaker_layout = QHBoxLayout(speaker_bar)
+        speaker_layout.setContentsMargins(16, 10, 16, 10)
+        speaker_layout.setSpacing(10)
+        speaker_label = QLabel("Loa")
+        speaker_label.setObjectName("mono")
+        speaker_layout.addWidget(speaker_label)
+        self._speaker_group = QButtonGroup(self)
+        self._speaker_group.setExclusive(True)
+        self.btn_hw_speaker = QPushButton("Loa phần cứng")
+        self.btn_hw_speaker.setCheckable(True)
+        self.btn_hw_speaker.setObjectName("segmented")
+        self.btn_hw_speaker.setIcon(_icon("hardware"))
+        self.btn_hw_speaker.setIconSize(QSize(18, 18))
+        self.btn_hw_speaker.clicked.connect(
+            lambda: self.set_speaker_output_mode("hardware", emit=True)
+        )
+        self.btn_pc_speaker = QPushButton("Loa laptop")
+        self.btn_pc_speaker.setCheckable(True)
+        self.btn_pc_speaker.setObjectName("segmented")
+        self.btn_pc_speaker.setIcon(_icon("speaker"))
+        self.btn_pc_speaker.setIconSize(QSize(18, 18))
+        self.btn_pc_speaker.clicked.connect(
+            lambda: self.set_speaker_output_mode("computer_speaker", emit=True)
+        )
+        self._speaker_group.addButton(self.btn_hw_speaker, 0)
+        self._speaker_group.addButton(self.btn_pc_speaker, 1)
+        speaker_layout.addWidget(self.btn_hw_speaker)
+        speaker_layout.addWidget(self.btn_pc_speaker)
+        self.speaker_status = QLabel("")
+        self.speaker_status.setObjectName("muted")
+        self.speaker_status.setWordWrap(True)
+        speaker_layout.addWidget(self.speaker_status, 1)
+        root.addWidget(speaker_bar)
 
         self.warning = QLabel("")
         self.warning.setObjectName("warning-banner")
@@ -178,6 +218,7 @@ class LivePage(QWidget):
         for col in range(3):
             cards.setColumnStretch(col, 1)
         root.addLayout(cards)
+        self.set_speaker_output_mode("hardware")
         self.set_actuation_test_mode(False)
 
     def _toggle_camera(self) -> None:
@@ -213,6 +254,32 @@ class LivePage(QWidget):
         message = str(text or "").strip()
         self.warning.setText(message)
         self.warning.setVisible(bool(message))
+
+    def set_speaker_output_mode(self, mode: str, emit: bool = False) -> None:
+        normalized = "computer_speaker" if str(mode or "").strip() == "computer_speaker" else "hardware"
+        self._speaker_output_mode = normalized
+        self.btn_hw_speaker.blockSignals(True)
+        self.btn_pc_speaker.blockSignals(True)
+        self.btn_hw_speaker.setChecked(normalized == "hardware")
+        self.btn_pc_speaker.setChecked(normalized == "computer_speaker")
+        self.btn_hw_speaker.blockSignals(False)
+        self.btn_pc_speaker.blockSignals(False)
+        self.speaker_status.setText(self._speaker_status_text())
+        if emit:
+            self.speaker_output_mode_changed.emit(normalized)
+
+    def _speaker_status_text(self) -> str:
+        status = voice_pack_status()
+        ready = sum(1 for ok in status.values() if ok)
+        total = len(status)
+        missing = [name for name, ok in status.items() if not ok]
+        if self._speaker_output_mode == "computer_speaker":
+            if not missing:
+                return f"Loa laptop: sẵn sàng ({ready}/{total} file)."
+            return f"Loa laptop: thiếu {len(missing)} file: {', '.join(missing)}."
+        if not missing:
+            return f"Loa laptop sẵn sàng ({ready}/{total} file)."
+        return f"Loa laptop thiếu {len(missing)} file: {', '.join(missing)}."
 
     def _toggle_actuation_test_mode(self, checked: bool) -> None:
         self.set_actuation_test_mode(bool(checked), emit=True)

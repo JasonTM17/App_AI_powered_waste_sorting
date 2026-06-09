@@ -1,7 +1,15 @@
-# GD5800 Audio Assets
+# GD5800 Voice Pack
 
-Track `0008-multi-object-warning.mp3` says: `So luong rac ban dat chi nen la mot loai.`
+This folder bundles the laptop-speaker MP3 files used when the Settings page is
+switched to `Loa máy tính`.
 
-Use it for the Phase 11 multi-object warning. Copy the MP3 to the TF card with
-the same track order expected by the OPEN-SMART/GD5800 module, then test with
-`AUDIO:8` before enabling camera-driven hardware dispatch.
+## File map
+
+- `Giọng nữ/Phân loại hữu cơ.mp3` -> `O`
+- `Giọng nữ/Phân loại Vô cơ.mp3` -> `R`
+- `Giọng nữ/Phân loại rác tái chế.mp3` -> `I`
+- `Giọng nữ/Xin chỉ bỏ 1 loại rác thôi.mp3` -> multi-object warning
+
+The desktop app plays these files when the UART dispatch is accepted and is
+about to be sent, so the laptop speaker stays in sync with the actual dispatch
+moment. Hardware mode still uses the GD5800 / OPEN-SMART audio tracks.
