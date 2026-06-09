@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import QSplashScreen
 
 from app import __version__
-from app.utils.paths import resource_path
+from app.ui.brand_assets import brand_mark_path
+
+SPLASH_TITLE = "Trash Sorter Pro"
+SPLASH_TAGLINE = "Phân loại rác bằng AI"
+SPLASH_VERSION = f"v{__version__}"
 
 
 def _make_splash_pixmap(width: int = 520, height: int = 320) -> QPixmap:
@@ -16,44 +20,41 @@ def _make_splash_pixmap(width: int = 520, height: int = 320) -> QPixmap:
     painter = QPainter(pix)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-    # subtle accent bar at top
     painter.fillRect(0, 0, width, 4, QColor("#10B981"))
+    painter.setPen(QColor(20, 184, 166, 70))
+    painter.drawRoundedRect(126, 50, 268, 206, 18, 18)
+    painter.setPen(QColor(148, 163, 184, 45))
+    painter.drawLine(154, 229, width - 154, 229)
 
-    # logo
-    logo_path = resource_path("app/ui/resources/icons/logo.svg")
+    logo_size = 92
+    logo_y = 44
+    logo_path = brand_mark_path()
     if logo_path.exists():
-        icon = QIcon(str(logo_path))
-        logo_size = 88
-        logo_pix = icon.pixmap(logo_size, logo_size)
-        painter.drawPixmap(
-            (width - logo_size) // 2, 56, logo_pix
-        )
+        logo_pix = QIcon(str(logo_path)).pixmap(logo_size, logo_size)
+        painter.drawPixmap((width - logo_size) // 2, logo_y, logo_pix)
 
-    # title
-    painter.setPen(QColor("#F1F5F9"))
-    painter.setFont(QFont("Inter", 24, QFont.Weight.Bold))
+    painter.setPen(QColor("#F8FAFC"))
+    painter.setFont(QFont("Segoe UI", 27, QFont.Weight.Bold))
     painter.drawText(
-        pix.rect().adjusted(0, 60, 0, 60),
-        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
-        "Trash Sorter Pro",
+        QRect(0, logo_y + logo_size + 20, width, 40),
+        Qt.AlignmentFlag.AlignCenter,
+        SPLASH_TITLE,
     )
 
-    # tagline
-    painter.setPen(QColor("#10B981"))
-    painter.setFont(QFont("Inter", 12, QFont.Weight.DemiBold))
+    painter.setPen(QColor("#34D399"))
+    painter.setFont(QFont("Segoe UI", 13, QFont.Weight.DemiBold))
     painter.drawText(
-        pix.rect().adjusted(0, 92, 0, 92),
-        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
-        "AI Phân loại rác thông minh",
+        QRect(0, logo_y + logo_size + 60, width, 26),
+        Qt.AlignmentFlag.AlignCenter,
+        SPLASH_TAGLINE,
     )
 
-    # version
-    painter.setPen(QColor("#64748B"))
-    painter.setFont(QFont("Inter", 10))
+    painter.setPen(QColor("#94A3B8"))
+    painter.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
     painter.drawText(
-        pix.rect().adjusted(0, 0, 0, -16),
-        Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom,
-        f"v{__version__}",
+        QRect(0, logo_y + logo_size + 90, width, 22),
+        Qt.AlignmentFlag.AlignCenter,
+        SPLASH_VERSION,
     )
 
     painter.end()
@@ -61,7 +62,7 @@ def _make_splash_pixmap(width: int = 520, height: int = 320) -> QPixmap:
 
 
 class Splash(QSplashScreen):
-    def __init__(self, message: str = "Loading model…"):
+    def __init__(self, message: str = "Loading model..."):
         super().__init__(_make_splash_pixmap(), Qt.WindowType.WindowStaysOnTopHint)
         self.set_message(message)
 
@@ -69,5 +70,5 @@ class Splash(QSplashScreen):
         self.showMessage(
             msg,
             Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter,
-            QColor("#94A3B8"),
+            QColor("#CBD5E1"),
         )
