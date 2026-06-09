@@ -8,8 +8,6 @@ import {
   HeartPulse,
   History,
   Home,
-  RefreshCcw,
-  Recycle,
   Server,
   Trophy,
   UserRound,
@@ -17,8 +15,8 @@ import {
   type LucideIcon
 } from "lucide-react";
 
-import { AGENT_URL } from "@/lib/agent";
 import { AccountControl } from "@/components/account-control";
+import { TrashSorterLogo } from "@/components/brand/trash-sorter-logo";
 import { RoleChatbotLauncher } from "@/components/chat/role-chatbot-launcher";
 import { RangeSelector } from "@/components/user-dashboard/range-selector";
 import type { UserDashboardPanelProps, UserView } from "@/components/user-dashboard/user-dashboard-types";
@@ -48,11 +46,11 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
       <aside className="sidebar user-sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <Recycle size={24} />
+            <TrashSorterLogo />
           </div>
           <div>
-            <strong>EcoFlow MS</strong>
-            <span>Waste Management v2.1</span>
+            <strong>Trash Sorter Pro</strong>
+            <span>EcoSort AI</span>
           </div>
         </div>
         <nav className="nav-list user-nav-list" aria-label="User navigation">
@@ -61,8 +59,8 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
           <UserNavGroup items={secondaryNav} view={view} onViewChange={props.onViewChange} />
         </nav>
         <div className="agent-card user-agent-card">
-          <span className="eyebrow">Support</span>
-          <strong>{AGENT_URL}</strong>
+          <span className="eyebrow">Hỗ trợ</span>
+          <strong>Thiết bị EcoSort</strong>
           <div className={agentError ? "system-pill offline" : "system-pill"}>
             <span className="pulse-dot" />
             <span>{agentError ? "Cần tải lại dữ liệu" : "Đang đồng bộ"}</span>
@@ -72,22 +70,11 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
 
       <main className="workspace user-workspace">
         <header className="topbar user-topbar">
-          <strong className="stitch-topbar-title">EcoFlow Admin</strong>
-          <div className="stitch-user-search" aria-label="Thanh tìm kiếm minh họa">
-            <span>Search data...</span>
+          <strong className="stitch-topbar-title">Trash Sorter Pro</strong>
+          <div className="stitch-user-search" aria-label="Trạng thái dữ liệu người dùng">
+            <span>Dữ liệu từ thiết bị EcoSort local</span>
           </div>
           <AccountControl auth={auth} busy={busy} onLogout={props.onLogout} />
-          <button
-            aria-label="Làm mới dashboard người dùng"
-            className="icon-button"
-            disabled={busy}
-            onClick={props.onRefresh}
-            title="Làm mới"
-            type="button"
-          >
-            <RefreshCcw size={18} />
-            <span>Làm mới</span>
-          </button>
         </header>
 
         <UserHeroSummary analytics={analytics} auth={auth} busy={busy} />
@@ -102,7 +89,7 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
           </div>
         ) : null}
 
-        {agentError ? <div className="alert">Agent chưa sẵn sàng: {agentError}</div> : null}
+        {agentError ? <div className="alert">Dữ liệu chưa sẵn sàng: {agentError}</div> : null}
 
         <section className="content-grid user-dashboard-grid">
           <UserRouteContent {...props} />
@@ -113,11 +100,11 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
             answer={chatAnswer}
             busy={busy}
             defaultOpen={view === "ecopet"}
-            label="DeepSeek chatbot"
-            placeholder="Hỏi trợ lý..."
+            label="EcoPet"
+            placeholder="Hỏi EcoPet..."
             question={chatQuestion}
             role="user"
-            statusText="DeepSeek backend-only. Nếu chưa sẵn sàng, điền DEEPSEEK_API_KEY trong .env.local rồi khởi động lại agent."
+            statusText="EcoPet sẵn sàng đồng hành cùng thói quen phân loại rác của bạn."
             title="EcoPet"
             onAsk={props.onChatRequest}
             onQuestionChange={props.onChatQuestionChange}
@@ -146,7 +133,11 @@ function UserNavGroup({
             className={view === item.id ? "nav-item active" : "nav-item"}
             href={item.href}
             key={item.id}
-            onClick={() => onViewChange(item.id)}
+            onClick={(event) => {
+              event.preventDefault();
+              window.history.pushState(null, "", item.href);
+              onViewChange(item.id);
+            }}
           >
             <Icon size={18} />
             <span>{item.label}</span>

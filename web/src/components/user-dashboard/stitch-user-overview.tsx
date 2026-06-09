@@ -45,7 +45,7 @@ function DailyWasteBars({ analytics }: { analytics: UserAnalytics | null }) {
     <section className="user-panel stitch-chart-card">
       <div className="user-panel-heading inline">
         <div>
-          <span className="eyebrow">Daily Waste Volume</span>
+          <span className="eyebrow">Lượng rác hằng ngày</span>
           <strong>Lượng rác theo ngày</strong>
         </div>
         <BarChart3 size={21} />
@@ -79,7 +79,7 @@ function AdviceCard({ title, message }: { title: string; message: string }) {
         <strong>{title}</strong>
       </div>
       <p>{message}</p>
-      <button type="button">Xem hướng dẫn tối ưu</button>
+      <span className="stitch-advice-action">Gợi ý được tạo từ lịch sử rác của bạn</span>
     </section>
   );
 }
@@ -119,7 +119,7 @@ function RecentClassifications({ rows }: { rows: UserHistoryItem[] }) {
     <section className="user-panel stitch-recent-card">
       <div className="user-panel-heading inline">
         <div>
-          <span className="eyebrow">Recent Classifications</span>
+          <span className="eyebrow">Phân loại gần đây</span>
           <strong>Phân loại gần đây</strong>
         </div>
         <Clock size={21} />

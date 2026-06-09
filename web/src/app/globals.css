@@ -70,13 +70,13 @@ button {
 
 .brand-mark {
   align-items: center;
-  background: #b0f0d6;
-  border-radius: 8px;
+  background: transparent;
+  border-radius: 10px;
   display: grid;
-  height: 42px;
+  height: 54px;
   justify-content: center;
-  color: var(--green-dark);
-  width: 42px;
+  overflow: visible;
+  width: 54px;
 }
 
 .brand strong,
@@ -91,6 +91,33 @@ button {
   display: block;
   font-size: 13px;
   line-height: 18px;
+}
+
+.trash-sorter-logo {
+  align-items: center;
+  display: inline-grid;
+  line-height: 1;
+  place-items: center;
+}
+
+.trash-sorter-logo-mark-only {
+  height: 100%;
+  width: 100%;
+}
+
+.trash-sorter-logo-image {
+  display: block;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  width: 100%;
+}
+
+.trash-sorter-logo-lockup {
+  border-radius: 18px;
+  height: 150px;
+  overflow: hidden;
+  width: 150px;
 }
 
 .nav-list {
@@ -1276,6 +1303,23 @@ td {
   height: 46px;
   justify-content: center;
   width: 46px;
+}
+
+.auth-brand .trash-sorter-logo-wordmark span,
+.auth-brand .trash-sorter-logo-wordmark strong {
+  background: linear-gradient(90deg, #0fa66a, #76ffad);
+  background-clip: text;
+  color: transparent;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: none;
+}
+
+.auth-brand .trash-sorter-logo-wordmark strong {
+  color: #bcf0ae;
+  text-shadow: 0 0 8px rgba(125, 255, 177, 0.42);
 }
 
 .auth-banner {
@@ -3672,11 +3716,11 @@ td {
 }
 
 .polished-user-shell .brand-mark {
-  background: #000101;
-  border-radius: 4px;
+  background: transparent;
+  border-radius: 10px;
   color: #ffffff;
-  height: 28px;
-  width: 28px;
+  height: 52px;
+  width: 52px;
 }
 
 .polished-user-shell .brand strong {
@@ -3962,15 +4006,16 @@ td {
   margin: 0;
 }
 
-.stitch-advice-card button {
+.stitch-advice-action {
   align-self: end;
   background: #ffffff;
   border: 1px solid #2d5a27;
   border-radius: 4px;
   color: #2d5a27;
+  display: inline-flex;
   font-weight: 700;
-  min-height: 36px;
-  padding: 0 12px;
+  line-height: 18px;
+  padding: 8px 12px;
   width: fit-content;
 }
 
@@ -4361,6 +4406,118 @@ td {
   margin-top: 7px;
 }
 
+.user-account-screen {
+  display: grid;
+  gap: 18px;
+}
+
+.user-account-header {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid var(--stitch-border, #c5c6ca);
+  border-radius: 14px;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 20px;
+}
+
+.user-account-header h2 {
+  color: var(--stitch-text, #1a1c1e);
+  font-size: 28px;
+  line-height: 34px;
+  margin: 2px 0 4px;
+}
+
+.user-account-header p,
+.account-note {
+  color: var(--stitch-muted, #44474a);
+  font-size: 13px;
+  line-height: 20px;
+  margin: 0;
+}
+
+.account-avatar {
+  align-items: center;
+  background: linear-gradient(145deg, #eef9eb, #ffffff);
+  border: 1px solid rgba(45, 90, 39, 0.18);
+  border-radius: 999px;
+  color: var(--stitch-green, #2d5a27);
+  display: grid;
+  flex: 0 0 56px;
+  height: 56px;
+  justify-content: center;
+  width: 56px;
+}
+
+.user-account-grid {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) minmax(310px, 0.72fr);
+}
+
+.account-card {
+  border-radius: 14px;
+  min-height: 0;
+}
+
+.security-card {
+  grid-row: span 2;
+}
+
+.account-readonly-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.account-readonly-list div {
+  align-items: center;
+  background: #f6f8f4;
+  border: 1px solid #e1e8de;
+  border-radius: 10px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 10px 12px;
+}
+
+.account-readonly-list.compact div {
+  min-height: 40px;
+}
+
+.account-readonly-list span {
+  color: var(--stitch-muted, #44474a);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 17px;
+}
+
+.account-readonly-list strong {
+  color: var(--stitch-text, #1a1c1e);
+  font-size: 13px;
+  line-height: 18px;
+  text-align: right;
+}
+
+.quota-meter {
+  background: #edf2ea;
+  border-radius: 999px;
+  height: 10px;
+  margin: 18px 0 12px;
+  overflow: hidden;
+}
+
+.quota-meter span {
+  background: var(--stitch-green, #2d5a27);
+  display: block;
+  height: 100%;
+  min-width: 0;
+  transition: width 0.2s ease;
+}
+
 .user-preference-row {
   align-items: center;
   border-top: 1px solid var(--stitch-border, #c5c6ca);
@@ -4572,6 +4729,34 @@ td {
 
   .stitch-chat-body {
     min-height: 220px;
+  }
+
+  .user-account-header {
+    align-items: flex-start;
+    padding: 16px;
+  }
+
+  .user-account-header h2 {
+    font-size: 22px;
+    line-height: 28px;
+  }
+
+  .user-account-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .security-card {
+    grid-row: auto;
+  }
+
+  .account-readonly-list div,
+  .user-preference-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .account-readonly-list strong {
+    text-align: left;
   }
 
   .chatbot-pet-trigger {

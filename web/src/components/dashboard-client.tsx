@@ -16,7 +16,6 @@ import {
   Pencil,
   Play,
   RefreshCcw,
-  Recycle,
   Save,
   Search,
   Settings,
@@ -31,6 +30,8 @@ import {
   Zap
 } from "lucide-react";
 import { ChangeEvent, MouseEvent, useEffect, useMemo, useState } from "react";
+
+import { TrashSorterLogo } from "@/components/brand/trash-sorter-logo";
 import {
   AGENT_URL,
   AccountDTO,
@@ -330,7 +331,7 @@ export function DashboardClient() {
       return await agentFetch<T>(path, init, agentToken);
     } catch (error) {
       if (error instanceof AgentApiError && error.status === 401) {
-        clearSession("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
+        setAgentError("Phiên đăng nhập cần được kiểm tra lại. Vui lòng đăng xuất rồi đăng nhập nếu lỗi còn tiếp diễn.");
       }
       throw error;
     }
@@ -929,8 +930,6 @@ export function DashboardClient() {
       return;
     }
     void refreshUserDashboard();
-    const timer = window.setInterval(() => void refreshUserDashboard(), 4000);
-    return () => window.clearInterval(timer);
   }, [agentToken, auth?.role, auth?.password_default, userRangeDays]);
 
   useEffect(() => {
@@ -1675,11 +1674,11 @@ export function DashboardClient() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <Recycle size={24} />
+            <TrashSorterLogo />
           </div>
           <div>
-            <strong>EcoSort AI</strong>
-            <span>Trash Sorter Pro</span>
+            <strong>Trash Sorter Pro</strong>
+            <span>EcoSort AI</span>
           </div>
         </div>
         <nav className="nav-list" aria-label="Main navigation">

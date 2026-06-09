@@ -17,7 +17,7 @@ export function UserHeroSummary({
   return (
     <section className="user-hero-summary" aria-label="Tổng quan nhật ký rác">
       <div className="user-hero-copy">
-        <span className="eyebrow">EcoFlow Admin</span>
+        <span className="eyebrow">Trash Sorter Pro</span>
         <h1>Xin chào, {username}</h1>
         <p>Nhật ký rác của bạn được tổng hợp từ thiết bị EcoSort local.</p>
       </div>
@@ -25,26 +25,26 @@ export function UserHeroSummary({
         <HeroStat
           detail={analytics ? `${analytics.today_total} lượt hôm nay` : "Đang tải dữ liệu"}
           icon="total"
-          label="Total Waste Today"
+          label="Tổng lượt hôm nay"
           suffix="lượt"
           value={analytics?.total ?? 0}
         />
         <HeroStat
           detail={analytics ? "Tỷ lệ rác tái chế" : "Đang tính"}
           icon="recycle"
-          label="Recycling Rate"
+          label="Tỷ lệ tái chế"
           suffix="%"
           value={Math.round(recyclableRate)}
         />
         <HeroStat
-          detail="High Accuracy"
+          detail="Độ tin cậy trung bình"
           icon="confidence"
-          label="Avg AI Confidence"
+          label="Độ tin cậy AI"
           suffix="%"
           value={Math.round((analytics?.average_confidence ?? 0) * 100)}
         />
         <HeroStat
-          detail={busy ? "Đang tải" : analytics?.eco_score.label || "Status: Good"}
+          detail={busy ? "Đang tải" : analytics?.eco_score.label || "Cần theo dõi"}
           icon="score"
           label="Eco Score"
           suffix="/100"

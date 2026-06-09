@@ -54,6 +54,7 @@ export function ChatPanel({
   const answerText =
     answer?.message || initialMessage(persona);
   const dockPrompts = prompts.length ? prompts.slice(0, 3) : defaultPrompts(persona);
+  const userQuotaText = persona === "ecopet" ? quotaLabel(answer) : "";
   useEffect(() => {
     if (!isDock) {
       return;
@@ -85,7 +86,7 @@ export function ChatPanel({
               <small>{chatSubtitle(persona)}</small>
               <span className={online ? "stitch-online" : "stitch-offline"}>
                 <i />
-                {online ? "Online" : "Cần cấu hình"}
+                {online ? "Online" : persona === "admin" ? "Cần cấu hình" : "Đang nghỉ"}
               </span>
             </div>
           </div>
@@ -97,10 +98,16 @@ export function ChatPanel({
         </div>
 
         <div className="stitch-chat-body" aria-live="polite" ref={bodyRef}>
-          <div className="stitch-chat-context-row" aria-label="Trạng thái trợ lý AI">
-            <span>{answer?.available ? "Bộ nhớ dự án đang bật" : "Chế độ local an toàn"}</span>
-            <span>{answer?.model || "deepseek-v4-flash"}</span>
-          </div>
+          {persona === "admin" ? (
+            <div className="stitch-chat-context-row" aria-label="Trạng thái trợ lý AI">
+              <span>{answer?.available ? "Bộ nhớ dự án đang bật" : "Chế độ local an toàn"}</span>
+              <span>{answer?.model || "deepseek-v4-flash"}</span>
+            </div>
+          ) : userQuotaText ? (
+            <div className="stitch-chat-context-row user-quota-row" aria-label="Lượt hỏi EcoPet">
+              <span>{userQuotaText}</span>
+            </div>
+          ) : null}
           {dockMessages.map((message) => (
             <div className={`stitch-chat-message-row ${message.role}`} key={message.id}>
               {message.role === "assistant" ? <ChatbotAvatar compact /> : null}
@@ -172,9 +179,15 @@ export function ChatPanel({
       </div>
       <div className={statusClass}>
         <Sparkles size={16} />
-        <span>{answer ? `${answer.provider} ${answer.model || ""}`.trim() : statusText}</span>
+        <span>
+          {persona === "admin"
+            ? answer
+              ? `${answer.provider} ${answer.model || ""}`.trim()
+              : statusText
+            : userStatusText(answer, statusText)}
+        </span>
       </div>
-      {answer?.profile ? (
+      {persona === "admin" && answer?.profile ? (
         <div className="chat-meta-row">
           <span>{answer.profile}</span>
           {answer.knowledge_used?.slice(0, 2).map((item) => (
@@ -267,6 +280,26 @@ function initialMessage(persona: "admin" | "ecopet") {
 
 function chatSubtitle(persona: "admin" | "ecopet") {
   return persona === "admin" ? "Theo dõi vận hành máy" : "Bạn đồng hành phân loại rác";
+}
+
+function quotaLabel(answer: AiChatResponse | null) {
+  if (!answer || typeof answer.quota_limit !== "number" || typeof answer.quota_remaining !== "number") {
+    return "";
+  }
+  if (answer.quota_exceeded || answer.quota_remaining <= 0) {
+    return `Đã dùng hết ${answer.quota_limit} lượt hỏi tháng này`;
+  }
+  return `Còn ${answer.quota_remaining}/${answer.quota_limit} lượt hỏi tháng này`;
+}
+
+function userStatusText(answer: AiChatResponse | null, fallback: string) {
+  if (answer?.quota_exceeded) {
+    return "EcoPet sẽ mở lại lượt hỏi vào đầu tháng tới.";
+  }
+  if (answer?.available) {
+    return "EcoPet đã sẵn sàng đồng hành cùng bạn.";
+  }
+  return answer ? "EcoPet đang dùng gợi ý có sẵn trong ứng dụng." : fallback;
 }
 
 function ChatbotAvatar({ compact = false }: { compact?: boolean }) {

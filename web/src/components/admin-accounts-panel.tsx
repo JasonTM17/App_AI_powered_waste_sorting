@@ -208,6 +208,7 @@ export function AdminAccountsPanel({
         question={chatQuestion}
         statusText="DeepSeek dùng ngữ cảnh tổng hợp của hệ thống, không gửi ảnh/path/token."
         title="Trợ lý vận hành"
+        persona="admin"
         onAsk={onAskChat}
         onQuestionChange={onChatQuestionChange}
       />

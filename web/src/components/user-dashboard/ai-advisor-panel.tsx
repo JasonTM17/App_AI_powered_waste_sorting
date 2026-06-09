@@ -21,22 +21,27 @@ export function AiAdvisorPanel({
   onRequest: () => void;
 }) {
   const localMessage = analytics?.insights.map((item) => `${item.title}: ${item.message}`).join(" ") || "";
+  const quotaText = advisor?.quota_limit
+    ? advisor.quota_exceeded || (advisor.quota_remaining ?? 0) <= 0
+      ? `Bạn đã dùng hết ${advisor.quota_limit} lượt hỏi trong tháng này.`
+      : `Bạn còn ${advisor.quota_remaining}/${advisor.quota_limit} lượt hỏi trong tháng này.`
+    : "Bạn có 36 lượt hỏi EcoPet mỗi tháng.";
   return (
     <section className="user-panel advisor-panel compact-advisor-panel">
       <div className="user-panel-heading inline">
         <div>
-          <span className="eyebrow">AI Advisor</span>
+          <span className="eyebrow">EcoPet</span>
           <strong>Gợi ý sức khỏe và thói quen</strong>
         </div>
         <BrainCircuit size={21} />
       </div>
       <div className={analytics?.advisor_available ? "advisor-status online" : "advisor-status"}>
         <ShieldCheck size={16} />
-        <span>
-          {analytics?.advisor_available
-            ? `DeepSeek sẵn sàng (${analytics.advisor_model})`
-            : "Chưa cấu hình DEEPSEEK_API_KEY, sẽ dùng gợi ý local"}
-        </span>
+        <span>{analytics?.advisor_available ? "EcoPet đã sẵn sàng đồng hành." : "EcoPet đang dùng gợi ý có sẵn trong ứng dụng."}</span>
+      </div>
+      <div className="advisor-status user-quota-status">
+        <ShieldCheck size={16} />
+        <span>{quotaText}</span>
       </div>
       <textarea
         className="advisor-question"

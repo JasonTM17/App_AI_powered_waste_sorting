@@ -123,7 +123,7 @@ export function RoleChatbotLauncher({
             ? {
                 id: pendingId,
                 role: "assistant",
-                text: "Chưa nhận được phản hồi từ trợ lý. Bạn kiểm tra kết nối agent hoặc cấu hình DeepSeek rồi thử lại."
+                text: fallbackAssistantMessage(role)
               }
             : message
         )
@@ -401,6 +401,12 @@ function defaultAssistantMessage(role: "admin" | "user") {
   return role === "admin"
     ? "Chào bạn, mình sẵn sàng hỗ trợ vận hành EcoSort. Bạn muốn kiểm tra phần nào?"
     : "Chào bạn, hôm nay mình cùng xem thói quen phân loại rác nhé.";
+}
+
+function fallbackAssistantMessage(role: "admin" | "user") {
+  return role === "admin"
+    ? "Chưa nhận được phản hồi từ trợ lý. Bạn kiểm tra kết nối agent hoặc cấu hình DeepSeek rồi thử lại."
+    : "EcoPet chưa phản hồi kịp. Bạn thử hỏi lại sau một chút nhé; biểu đồ và lịch sử vẫn dùng bình thường.";
 }
 
 function panelPositionNearTrigger(position: FloatingPosition): CSSProperties {
