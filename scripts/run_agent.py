@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -12,10 +13,31 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+def _agent_host_port() -> tuple[str, int]:
+    host = os.getenv("TRASH_SORTER_AGENT_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    port = _env_port("TRASH_SORTER_AGENT_PORT", 8765)
+    return host, port
+
+
+def _env_port(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    if value < 1 or value > 65535:
+        return default
+    return value
+
+
 def main() -> None:
     from app.agent.api import create_app
 
-    uvicorn.run(create_app(), host="127.0.0.1", port=8765, log_level="info")
+    host, port = _agent_host_port()
+    log_level = os.getenv("TRASH_SORTER_AGENT_LOG_LEVEL", "info").strip() or "info"
+    uvicorn.run(create_app(), host=host, port=port, log_level=log_level)
 
 
 if __name__ == "__main__":

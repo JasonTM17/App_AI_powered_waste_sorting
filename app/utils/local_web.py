@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import http.client
+import os
 import socket
 import subprocess
 import sys
@@ -11,11 +12,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.utils.logging import logger
+from app.utils.paths import auth_db_path
 
 AGENT_PORT = 8765
 WEB_PORT = 3000
 AGENT_URL = f"http://127.0.0.1:{AGENT_PORT}"
 WEB_URL = f"http://127.0.0.1:{WEB_PORT}/?tab=live"
+AUTH_DEV_DEFAULTS_ENV = "TRASH_SORTER_AUTH_DEV_DEFAULTS"
+AUTH_DB_ENV = "TRASH_SORTER_AUTH_DB"
+AUTH_DATABASE_URL_ENV = "TRASH_SORTER_AUTH_DATABASE_URL"
+DATABASE_URL_ENV = "DATABASE_URL"
+BOOTSTRAP_ADMIN_USERNAME_ENV = "TRASH_SORTER_BOOTSTRAP_ADMIN_USERNAME"
+BOOTSTRAP_ADMIN_PASSWORD_ENV = "TRASH_SORTER_BOOTSTRAP_ADMIN_PASSWORD"
+NEXT_PUBLIC_AGENT_URL_ENV = "NEXT_PUBLIC_AGENT_URL"
+LOCAL_ENV_FILES = (".env", ".env.local")
 
 
 @dataclass(frozen=True)
@@ -37,7 +47,7 @@ def ensure_local_web_stack() -> LocalWebResult:
         agent = root / "scripts" / "run_agent.py"
         if not agent.exists():
             return LocalWebResult(ok=False, message="Không tìm thấy scripts/run_agent.py.")
-        _start_hidden([_python_executable(), str(agent)], cwd=root)
+        _start_hidden([_python_executable(), str(agent)], cwd=root, env_overrides=_agent_env(root))
         logger.info("local web launcher started agent")
 
     if not _wait_http(f"{AGENT_URL}/api/health", timeout_s=20):
@@ -47,13 +57,71 @@ def ensure_local_web_stack() -> LocalWebResult:
         web_root = root / "web"
         if not (web_root / "package.json").exists():
             return LocalWebResult(ok=False, message="Không tìm thấy thư mục web/package.json.")
-        _start_hidden([_npm_executable(), "run", "dev"], cwd=web_root)
+        _start_hidden(
+            [_npm_executable(), "run", "dev"],
+            cwd=web_root,
+            env_overrides={NEXT_PUBLIC_AGENT_URL_ENV: AGENT_URL},
+        )
         logger.info("local web launcher started Next.js web")
 
     if not _wait_http(f"http://127.0.0.1:{WEB_PORT}/?tab=live", timeout_s=35):
         return LocalWebResult(ok=False, message="Web chưa sẵn sàng ở cổng 3000.")
 
-    return LocalWebResult(ok=True, message="Web dashboard đã sẵn sàng.", url=WEB_URL)
+    return LocalWebResult(ok=True, message="Web dashboard đã sẵn sàng. Vui lòng đăng nhập.", url=WEB_URL)
+
+
+def _agent_env(root: Path) -> dict[str, str]:
+    env = _local_env(root)
+    if not _auth_explicitly_configured(env):
+        env[AUTH_DEV_DEFAULTS_ENV] = "1"
+    return env
+
+
+def _auth_explicitly_configured(extra_env: dict[str, str] | None = None) -> bool:
+    extra_env = extra_env or {}
+    for key in (
+        AUTH_DEV_DEFAULTS_ENV,
+        AUTH_DB_ENV,
+        AUTH_DATABASE_URL_ENV,
+        DATABASE_URL_ENV,
+        BOOTSTRAP_ADMIN_USERNAME_ENV,
+        BOOTSTRAP_ADMIN_PASSWORD_ENV,
+    ):
+        if extra_env.get(key, "").strip() or os.getenv(key, "").strip():
+            return True
+    try:
+        return auth_db_path().exists()
+    except OSError:
+        return False
+
+
+def _local_env(root: Path) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for name in LOCAL_ENV_FILES:
+        env.update(_read_env_file(root / name))
+    return env
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        if key:
+            values[key] = value
+    return values
 
 
 def _project_root() -> Path | None:
@@ -127,13 +195,17 @@ def _http_ok(url: str) -> bool:
         return False
 
 
-def _start_hidden(command: list[str], *, cwd: Path) -> None:
+def _start_hidden(command: list[str], *, cwd: Path, env_overrides: dict[str, str] | None = None) -> None:
     kwargs: dict = {
         "cwd": str(cwd),
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
         "stdin": subprocess.DEVNULL,
     }
+    if env_overrides:
+        env = os.environ.copy()
+        env.update(env_overrides)
+        kwargs["env"] = env
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS
     else:

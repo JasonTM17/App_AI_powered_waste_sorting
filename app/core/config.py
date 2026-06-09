@@ -38,6 +38,13 @@ class UartConfig(BaseModel):
     protocol: Literal["plain_group", "sort_line"] = "plain_group"
 
 
+class DeviceConfig(BaseModel):
+    device_id: str = "local-trash-sorter"
+    device_name: str = "Trash Sorter Pro"
+    location: str = "Local station"
+    owner_username: str = ""
+
+
 class ClassMapping(BaseModel):
     class_name: str
     command: str = Field(..., min_length=1, max_length=1)
@@ -82,6 +89,10 @@ class DispatchGuardConfig(BaseModel):
     empty_rearm_seconds: float = Field(2.0, ge=0.0, le=60.0)
     empty_rearm_frames: int = Field(10, ge=1, le=300)
     require_roi_for_dispatch: bool = True
+    max_classes_per_dispatch: int = Field(1, ge=1, le=5)
+    multi_class_warning_cooldown_seconds: float = Field(5.0, ge=0.0, le=120.0)
+    multi_class_warning_text: str = "Số lượng rác bạn đặt chỉ nên là 1 loại."
+    multi_class_warning_audio_track: int = Field(8, ge=0, le=8)
 
 
 class ManualReferenceRecognitionConfig(BaseModel):
@@ -94,6 +105,16 @@ class ManualReferenceRecognitionConfig(BaseModel):
     max_references_per_class: int = Field(30, ge=1, le=500)
     cache_refresh_seconds: float = Field(30.0, ge=0.0, le=300.0)
     query_cache_seconds: float = Field(1.0, ge=0.0, le=30.0)
+
+
+class ThreeBinClassifierConfig(BaseModel):
+    enabled: bool = False
+    model_path: str = "models/three_bin_classifier.pt"
+    min_confidence: float = Field(0.72, ge=0.0, le=1.0)
+    min_margin: float = Field(0.12, ge=0.0, le=1.0)
+    unknown_only: bool = True
+    min_crop_area_ratio: float = Field(0.003, ge=0.0, le=1.0)
+    input_size: int = Field(224, ge=64, le=640)
 
 
 def default_unknown_object_fallback_config() -> UnknownObjectFallbackConfig:
@@ -117,6 +138,10 @@ def default_dispatch_guard_config() -> DispatchGuardConfig:
         empty_rearm_seconds=2.0,
         empty_rearm_frames=10,
         require_roi_for_dispatch=True,
+        max_classes_per_dispatch=1,
+        multi_class_warning_cooldown_seconds=5.0,
+        multi_class_warning_text="Số lượng rác bạn đặt chỉ nên là 1 loại.",
+        multi_class_warning_audio_track=8,
     )
 
 
@@ -134,6 +159,18 @@ def default_manual_reference_recognition_config() -> ManualReferenceRecognitionC
     )
 
 
+def default_three_bin_classifier_config() -> ThreeBinClassifierConfig:
+    return ThreeBinClassifierConfig(
+        enabled=False,
+        model_path="models/three_bin_classifier.pt",
+        min_confidence=0.72,
+        min_margin=0.12,
+        unknown_only=True,
+        min_crop_area_ratio=0.003,
+        input_size=224,
+    )
+
+
 class AppConfig(BaseModel):
     camera: CameraConfig = Field(default_factory=lambda: CameraConfig())
     model: ModelConfig = Field(
@@ -142,6 +179,7 @@ class AppConfig(BaseModel):
     uart: UartConfig = Field(
         default_factory=lambda: UartConfig(ack_timeout_ms=DEFAULT_UART_ACK_TIMEOUT_MS)
     )
+    device: DeviceConfig = Field(default_factory=lambda: DeviceConfig())
     mappings: list[ClassMapping] = Field(default_factory=list)
     roi: RoiConfig = Field(default_factory=lambda: RoiConfig())
     capture: CaptureConfig = Field(
@@ -156,6 +194,9 @@ class AppConfig(BaseModel):
     dispatch_guard: DispatchGuardConfig = Field(default_factory=default_dispatch_guard_config)
     manual_reference_recognition: ManualReferenceRecognitionConfig = Field(
         default_factory=default_manual_reference_recognition_config
+    )
+    three_bin_classifier: ThreeBinClassifierConfig = Field(
+        default_factory=default_three_bin_classifier_config
     )
     theme: Literal["dark", "light"] = "dark"
     language: Literal["vi", "en"] = "vi"

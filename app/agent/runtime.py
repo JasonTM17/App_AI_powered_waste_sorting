@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Event, Lock, RLock, Thread, current_thread
+from typing import Any
 
 import numpy as np
 
@@ -21,6 +22,7 @@ from app.core.history import HistoryService
 from app.core.inference import InferenceEngine
 from app.core.pipeline import Pipeline
 from app.core.speaker import WasteSpeaker
+from app.core.three_bin_classifier import parse_three_bin_class_name
 from app.core.uart_protocol import (
     UartProtocol,
     encode_angle_test,
@@ -40,7 +42,12 @@ from app.core.waste_categories import (
     category_for_command,
     normalize_mapping_to_three_bins,
 )
-from app.utils.camera_enum import find_readable_usb_camera, list_pnp_cameras
+from app.utils.camera_enum import list_pnp_cameras, probe_usb_cameras
+from app.utils.camera_frame_quality import (
+    FrameQuality,
+    evaluate_frame_quality,
+    frame_quality_diagnostics,
+)
 from app.utils.camera_source import backend_hint, normalize_camera_source
 from app.utils.logging import logger
 from app.utils.paths import resource_path
@@ -50,7 +57,11 @@ from app.utils.serial_enum import (
     list_serial_ports,
     select_single_usb_serial_port,
 )
-from app.utils.shared_camera_stream import SharedFramePublisher, read_shared_frame
+from app.utils.shared_camera_stream import (
+    SharedFramePublisher,
+    read_shared_frame,
+    shared_frame_diagnostics,
+)
 
 STREAM_INFERENCE_INTERVAL_S = 0.15
 STREAM_FRAME_INTERVAL_S = 0.05
@@ -169,6 +180,13 @@ class ThreadUartSender:
                 self.on_ack(track_id, command, status, rtt_ms)
             except Exception as e:
                 logger.warning("agent uart ack callback failed: {}", e)
+
+    def send_audio_warning(self, track: int) -> None:
+        Thread(
+            target=lambda: self.send_audio_test(int(track)),
+            name="agent-uart-audio-warning",
+            daemon=True,
+        ).start()
 
     def send_test(self, command: str, conf: float = 0.99) -> dict[str, object]:
         payload = encode_sort(command, conf, protocol=self.protocol)
@@ -697,6 +715,13 @@ class AgentRuntime:
         self._last_frame_at = 0.0
         self._camera_connected = False
         self._camera_message = "Camera idle"
+        self._camera_diagnostics: dict[str, object] = {
+            "mode": "idle",
+            "source": "",
+            "usable": False,
+            "black_frame": True,
+            "reason": "Camera idle",
+        }
         self._model_message = ""
         self._detections: list[DetectionDTO] = []
         self._bin_readings: dict[int, tuple[int, float, str]] = {}
@@ -730,6 +755,7 @@ class AgentRuntime:
             model_path = resource_path(self.cfg.model.path)
             model_ok = self._engine is not None or model_path.exists()
             model_msg = self._model_message or (str(model_path) if model_ok else "Model missing")
+            three_bin = self._three_bin_status_locked()
             uart_running = self._uart is not None
             uart_connected = self._uart.connected if self._uart is not None else False
             uart_msg = self._uart.message if self._uart is not None else self._uart_warning or "UART off"
@@ -737,6 +763,9 @@ class AgentRuntime:
             current_source = ""
             if camera_running:
                 current_source = "shared-camera" if self._camera_shared_mode else self.cfg.camera.source
+            camera_diagnostics = dict(self._camera_diagnostics)
+            if self._last_frame_at:
+                camera_diagnostics["frame_age_s"] = round(max(0.0, time.time() - self._last_frame_at), 2)
             return RuntimeStatus(
                 camera=DeviceState(
                     connected=self._camera_connected,
@@ -749,6 +778,12 @@ class AgentRuntime:
                     message=uart_msg,
                 ),
                 model=DeviceState(connected=model_ok, running=self._engine is not None, message=model_msg),
+                three_bin_classifier=DeviceState(
+                    connected=bool(three_bin.get("ready")),
+                    running=bool(three_bin.get("enabled")),
+                    message=str(three_bin.get("message") or ""),
+                ),
+                camera_diagnostics=camera_diagnostics,
                 fps=round(self._fps, 2),
                 latency_ms=round(self._latency_ms, 2),
                 current_source=current_source,
@@ -763,6 +798,19 @@ class AgentRuntime:
             self._cached_usb_cameras = []
             self._cached_serial_ports = []
         return self.status()
+
+    def _three_bin_status_locked(self) -> dict[str, object]:
+        if self._pipeline is not None:
+            return self._pipeline.three_bin_classifier_status()
+        cfg = self.cfg.three_bin_classifier
+        path = resource_path(cfg.model_path)
+        return {
+            "enabled": cfg.enabled,
+            "ready": False,
+            "model_path": str(path),
+            "exists": path.exists(),
+            "message": "ready after pipeline load" if cfg.enabled and path.exists() else "disabled" if not cfg.enabled else "missing artifact",
+        }
 
     def hardware_profile(self) -> dict[str, object]:
         payload = hardware_profile_payload()
@@ -959,6 +1007,14 @@ class AgentRuntime:
         logger.info("actuation test mode {}", state)
         return self.actuation_test_mode()
 
+    def _force_actuation_off_for_camera_fault(self) -> None:
+        with self._state_lock:
+            self._actuation_test_enabled = False
+            pipeline = self._pipeline
+        if pipeline is not None:
+            pipeline.set_hardware_dispatch_enabled(False)
+            pipeline.reset_dispatch_state()
+
     def actuation_evidence(self, limit: int = 3) -> list[dict[str, object]]:
         service = HistoryService(self.history_file)
         try:
@@ -1046,11 +1102,15 @@ class AgentRuntime:
         if self.is_camera_running():
             return True, "Camera already running"
 
-        usb_source = find_readable_usb_camera()
+        self._force_actuation_off_for_camera_fault()
+        probes = probe_usb_cameras()
+        usb_source = next((str(item.get("source") or "") for item in probes if item.get("usable")), "")
         if not usb_source:
+            shared_diag = shared_frame_diagnostics()
             if read_shared_frame() is not None:
                 self._start_shared_camera_mode("Direct USB camera unavailable")
                 return True, "Camera shared from another local runtime"
+            reason = _camera_probe_failure_reason(probes, shared_diag)
             with self._state_lock:
                 self.cfg.camera.source = ""
                 self._latest_jpeg = _black_jpeg()
@@ -1058,11 +1118,24 @@ class AgentRuntime:
                 self._latest_frame_id += 1
                 self._latest_jpeg_frame_id = self._latest_frame_id
                 self._camera_connected = False
+                self._camera_message = reason
+                self._camera_diagnostics = {
+                    "mode": "probe",
+                    "source": "",
+                    "usable": False,
+                    "black_frame": True,
+                    "reason": reason,
+                    "probes": probes[:6],
+                    "shared": shared_diag,
+                }
+                self._camera_message = reason
                 self._camera_message = "Không tìm thấy camera USB; màn hình giữ màu đen"
+                self._camera_message = reason
                 self._fps = 0.0
                 self._latency_ms = 0.0
                 self._detections = []
             save_config(self.cfg, self.config_file)
+            return False, reason
             return False, "Không tìm thấy camera USB"
 
         try:
@@ -1080,6 +1153,13 @@ class AgentRuntime:
             self._last_frame_at = 0.0
             self._fps = 0.0
             self._latency_ms = 0.0
+            self._camera_diagnostics = {
+                "mode": "direct",
+                "source": usb_source,
+                "usable": False,
+                "black_frame": True,
+                "reason": "opening",
+            }
         self._camera_thread = Thread(target=self._camera_loop, args=(usb_source,), daemon=True)
         self._inference_thread = Thread(target=self._inference_loop, daemon=True)
         self._camera_thread.start()
@@ -1117,6 +1197,13 @@ class AgentRuntime:
             self.cfg.camera.source = ""
             self._camera_connected = False
             self._camera_message = "Camera stopped"
+            self._camera_diagnostics = {
+                "mode": "idle",
+                "source": "",
+                "usable": False,
+                "black_frame": True,
+                "reason": "Camera stopped",
+            }
             self._latest_jpeg = _black_jpeg()
             self._latest_frame = None
             self._latest_frame_id += 1
@@ -1170,6 +1257,48 @@ class AgentRuntime:
             int(cls_id),
             xyxy=bbox,
             catalog_path=self.dataset_file,
+        )
+
+    def capture_unknown_learn_sample(
+        self,
+        cls_name: str,
+        cls_id: int,
+        *,
+        suggestions: list[dict[str, object]] | None = None,
+    ) -> Path:
+        """Save latest unknown object for review while forcing hardware off."""
+        self.set_actuation_test_mode(False)
+        class_name = str(cls_name or "Unknown object").strip() or "Unknown object"
+        with self._state_lock:
+            if not self.is_camera_running() or self._latest_frame is None:
+                raise RuntimeError("Camera is not running or has no frame yet")
+            frame = self._latest_frame.copy()
+            detections = list(self._detections)
+            cfg = self.cfg.model_copy(deep=True)
+        bbox = _unknown_learn_bbox(detections)
+        if bbox is None and cfg.roi.enabled and cfg.roi.width > 0 and cfg.roi.height > 0:
+            bbox = (
+                cfg.roi.x,
+                cfg.roi.y,
+                cfg.roi.x + cfg.roi.width,
+                cfg.roi.y + cfg.roi.height,
+            )
+        session_id = datetime.now().strftime("unknown_learn_%Y%m%d_%H%M%S_%f")
+        return import_manual_camera_frame(
+            frame,
+            self._queue_dir_for_config(cfg),
+            class_name,
+            int(cls_id),
+            xyxy=bbox,
+            catalog_path=self.dataset_file,
+            extra_meta={
+                "learn_session_id": session_id,
+                "learn_mode": "unknown_object",
+                "hardware_blocked": True,
+                "ai_label_suggestions": suggestions or [],
+                "annotation_hint": "Choose the approved class and review this bbox before reference/train.",
+                "unknown_labels": ["needs_label_review"] if class_name == "Unknown object" else [],
+            },
         )
 
     def start_capture_session(
@@ -1326,30 +1455,58 @@ class AgentRuntime:
     def _camera_loop(self, source: str) -> None:
         cap = None
         try:
-            cap = _open_capture(source, self.cfg.camera.width, self.cfg.camera.height)
-            if cap is None:
+            opened = _open_capture(source, self.cfg.camera.width, self.cfg.camera.height)
+            if opened is None:
                 with self._state_lock:
                     self._camera_connected = False
                     self._camera_message = "Open camera failed"
+                    self._camera_diagnostics = {
+                        "mode": "direct",
+                        "source": source,
+                        "usable": False,
+                        "black_frame": True,
+                        "reason": "open camera failed",
+                    }
                 return
+            cap, backend_name, initial_quality = opened
             with self._state_lock:
                 self._camera_connected = True
                 self._camera_message = f"Connected {source}"
+                self._camera_diagnostics = frame_quality_diagnostics(
+                    initial_quality,
+                    mode="direct",
+                    source=source,
+                    backend=backend_name,
+                    stale_shared=False,
+                )
             read_failures = 0
             while not self._camera_stop.is_set():
                 ok, frame = cap.read()
-                if not ok or frame is None:
+                quality = evaluate_frame_quality(frame if ok else None)
+                if not ok or frame is None or not quality.usable:
                     read_failures += 1
                     if read_failures >= 30:
+                        reason = "Camera USB black frame" if ok else "Camera USB read failed"
                         with self._state_lock:
                             self._latest_jpeg = _black_jpeg()
                             self._latest_frame = None
                             self._latest_frame_id += 1
                             self._latest_jpeg_frame_id = self._latest_frame_id
                             self._camera_connected = False
+                            self._camera_message = reason
+                            self._camera_diagnostics = frame_quality_diagnostics(
+                                quality,
+                                mode="direct",
+                                source=source,
+                                backend=backend_name,
+                                stale_shared=False,
+                                reason=reason,
+                            )
                             self._camera_message = "Mất tín hiệu camera USB; màn hình giữ màu đen"
+                            self._camera_message = reason
                             self._fps = 0.0
                             self._detections = []
+                        self._force_actuation_off_for_camera_fault()
                         break
                     time.sleep(0.05)
                     continue
@@ -1368,6 +1525,13 @@ class AgentRuntime:
                 with self._state_lock:
                     self._latest_frame = frame.copy()
                     self._latest_frame_id += 1
+                    self._camera_diagnostics = frame_quality_diagnostics(
+                        quality,
+                        mode="direct",
+                        source=source,
+                        backend=backend_name,
+                        stale_shared=False,
+                    )
         except Exception as e:
             logger.warning("agent camera loop failed: {}", e)
             with self._state_lock:
@@ -1392,9 +1556,19 @@ class AgentRuntime:
                 shared = read_shared_frame()
                 if shared is None:
                     missing_reads += 1
+                    shared_diag = shared_frame_diagnostics()
                     with self._state_lock:
                         self._camera_connected = False
                         self._camera_message = "Waiting for shared camera stream"
+                        self._camera_diagnostics = {
+                            "mode": "shared",
+                            "source": "shared-camera",
+                            "usable": False,
+                            "black_frame": True,
+                            "stale_shared": bool(shared_diag.get("stale", True)),
+                            "reason": str(shared_diag.get("reason") or "waiting for shared camera stream"),
+                            "shared": shared_diag,
+                        }
                         if missing_reads >= 20:
                             self._latest_jpeg = _black_jpeg()
                             self._latest_frame = None
@@ -1402,6 +1576,7 @@ class AgentRuntime:
                             self._latest_jpeg_frame_id = self._latest_frame_id
                             self._fps = 0.0
                             self._detections = []
+                    self._force_actuation_off_for_camera_fault()
                     time.sleep(0.1)
                     continue
 
@@ -1418,6 +1593,13 @@ class AgentRuntime:
                     self._latest_jpeg_frame_id = self._latest_frame_id
                     self._camera_connected = True
                     self._camera_message = "Connected via shared camera stream"
+                    self._camera_diagnostics = frame_quality_diagnostics(
+                        shared.quality,
+                        mode="shared",
+                        source="shared-camera",
+                        stale_shared=False,
+                        shared_age_s=round(shared.age_s, 2),
+                    )
                 time.sleep(STREAM_FRAME_INTERVAL_S)
         finally:
             with self._state_lock:
@@ -1468,12 +1650,19 @@ class AgentRuntime:
                 bin_index=fallback.bin_index,
                 enabled=True,
             )
+        three_bin_command = parse_three_bin_class_name(detection.cls_name)
         command = None
         route_label = None
         bin_index = None
         serial_payload = None
         ack = None
-        if mapping is not None:
+        if three_bin_command is not None:
+            category = category_for_command(three_bin_command)
+            if category is not None:
+                command = category.code
+                route_label = category.name
+                bin_index = category.bin_index
+        elif mapping is not None:
             mapping = normalize_mapping_to_three_bins(mapping)
             category = category_for_command(mapping.command)
             if category is not None:
@@ -1483,22 +1672,22 @@ class AgentRuntime:
             else:
                 command = mapping.command.strip().upper()
                 bin_index = int(mapping.bin_index)
-            if command:
-                try:
-                    serial_payload = encode_sort(
-                        command,
-                        detection.conf,
-                        protocol=self.cfg.uart.protocol,
-                    ).decode("utf-8").rstrip("\n")
-                except ValueError:
-                    serial_payload = None
-                guard_status = ""
-                if self._pipeline is not None:
-                    guard_status = str(getattr(self._pipeline, "dispatch_status", "") or "")
-                ack = (
-                    guard_status
-                    or ("pending" if self._uart is not None and self._uart.connected else "uart_off")
-                )
+        if command:
+            try:
+                serial_payload = encode_sort(
+                    command,
+                    detection.conf,
+                    protocol=self.cfg.uart.protocol,
+                ).decode("utf-8").rstrip("\n")
+            except ValueError:
+                serial_payload = None
+            guard_status = ""
+            if self._pipeline is not None:
+                guard_status = str(getattr(self._pipeline, "dispatch_status", "") or "")
+            ack = (
+                guard_status
+                or ("pending" if self._uart is not None and self._uart.connected else "uart_off")
+            )
         return DetectionDTO(
             cls_id=detection.cls_id,
             cls_name=detection.cls_name,
@@ -1510,6 +1699,7 @@ class AgentRuntime:
             bin_index=bin_index,
             serial_payload=serial_payload,
             ack=ack,
+            source=str(getattr(detection, "source", "YOLO") or "YOLO"),
         )
 
     def _ensure_pipeline(self) -> bool:
@@ -1641,7 +1831,22 @@ class AgentRuntime:
             self._camera_lock = None
 
 
-def _open_capture(source: str, width: int, height: int):
+def _unknown_learn_bbox(detections: list[DetectionDTO]) -> tuple[int, int, int, int] | None:
+    if not detections:
+        return None
+    unknown = [d for d in detections if d.cls_name.casefold() == "unknown object"]
+    pool = unknown or detections
+    best = max(pool, key=lambda item: _bbox_area(item.bbox))
+    if _bbox_area(best.bbox) <= 0:
+        return None
+    return tuple(int(value) for value in best.bbox)
+
+
+def _bbox_area(bbox: tuple[int, int, int, int]) -> int:
+    return max(0, int(bbox[2]) - int(bbox[0])) * max(0, int(bbox[3]) - int(bbox[1]))
+
+
+def _open_capture(source: str, width: int, height: int) -> tuple[Any, str, FrameQuality] | None:
     import cv2
 
     src_raw = normalize_camera_source(source)
@@ -1657,7 +1862,7 @@ def _open_capture(source: str, width: int, height: int):
         hint = backend_hint(source)
         if hint:
             attempts = [item for item in attempts if item[0] == hint]
-    for _name, backend in attempts:
+    for name, backend in attempts:
         cap = cv2.VideoCapture(src, backend) if is_index else cv2.VideoCapture(src)
         if not cap.isOpened():
             cap.release()
@@ -1668,11 +1873,54 @@ def _open_capture(source: str, width: int, height: int):
             cap.set(cv2.CAP_PROP_FPS, 30)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        ok, _frame = cap.read()
-        if ok:
-            return cap
+        quality = _capture_best_quality(cap)
+        if quality.usable:
+            return cap, name, quality
+        logger.warning(
+            "agent camera source={} backend={} rejected frame: {}",
+            source,
+            name,
+            quality.reason,
+        )
         cap.release()
     return None
+
+
+def _capture_best_quality(cap, *, frames: int = 5) -> FrameQuality:
+    qualities: list[FrameQuality] = []
+    for _ in range(max(1, frames)):
+        ok, frame = cap.read()
+        if ok and frame is not None:
+            qualities.append(evaluate_frame_quality(frame))
+        time.sleep(0.03)
+    if not qualities:
+        return FrameQuality(reason="no frame")
+    return max(
+        qualities,
+        key=lambda item: (
+            item.usable,
+            item.non_black_ratio,
+            item.mean_brightness,
+            item.variance,
+        ),
+    )
+
+
+def _camera_probe_failure_reason(
+    probes: list[dict[str, object]], shared_diag: dict[str, object]
+) -> str:
+    if probes:
+        reasons = [
+            str(item.get("reason") or "unknown")
+            for item in probes
+            if str(item.get("reason") or "").strip()
+        ]
+        if any("black" in reason.lower() for reason in reasons):
+            return "USB Camera detected but frame is black"
+        return f"USB Camera detected but no usable frame: {', '.join(reasons[:3])}"
+    if bool(shared_diag.get("exists")):
+        return f"No usable USB Camera frame; shared camera {shared_diag.get('reason')}"
+    return "No usable USB Camera detected"
 
 
 def _encode_jpeg(frame: np.ndarray, *, max_width: int | None = None) -> bytes:

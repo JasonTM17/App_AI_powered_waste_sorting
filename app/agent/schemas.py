@@ -19,6 +19,8 @@ class RuntimeStatus(BaseModel):
     camera: DeviceState = Field(default_factory=DeviceState)
     uart: DeviceState = Field(default_factory=DeviceState)
     model: DeviceState = Field(default_factory=DeviceState)
+    three_bin_classifier: DeviceState = Field(default_factory=DeviceState)
+    camera_diagnostics: dict[str, object] = Field(default_factory=dict)
     fps: float = 0.0
     latency_ms: float = 0.0
     current_source: str = ""
@@ -31,6 +33,120 @@ class AuthMeResponse(BaseModel):
     role: Literal["admin", "user"]
     capabilities: list[str] = Field(default_factory=list)
     auth_required: bool = False
+    account_id: int | None = None
+    username: str | None = None
+    token_source: str = "dev"
+    session_expires_at: str | None = None
+    password_default: bool = False
+
+
+class AuthLoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=80)
+    password: str = Field(..., min_length=1, max_length=200)
+
+
+class AuthLoginResponse(BaseModel):
+    token: str
+    role: Literal["admin", "user"]
+    account_id: int | None = None
+    username: str
+    capabilities: list[str] = Field(default_factory=list)
+    expires_at: str
+    password_default: bool = False
+
+
+class AuthLogoutResponse(BaseModel):
+    ok: bool = True
+    message: str = "Logged out"
+
+
+class AuthChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=200)
+    new_password: str = Field(..., min_length=8, max_length=200)
+
+
+class AccountDTO(BaseModel):
+    id: int
+    username: str
+    role: Literal["admin", "user"]
+    is_active: bool
+    password_default: bool = False
+    created_at: str = ""
+    last_login_at: str | None = None
+
+
+class AccountsResponse(BaseModel):
+    accounts: list[AccountDTO] = Field(default_factory=list)
+
+
+class AccountCreateRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=80)
+    password: str = Field(..., min_length=8, max_length=200)
+    role: Literal["admin", "user"]
+
+
+class AccountPasswordResetRequest(BaseModel):
+    password: str = Field(..., min_length=8, max_length=200)
+
+
+class AccountPatchRequest(BaseModel):
+    is_active: bool
+
+
+class KnowledgeEntryDTO(BaseModel):
+    id: str
+    title: str
+    roles: list[Literal["admin", "user"]] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    text: str
+    enabled: bool = True
+    updated_at: str = ""
+    source: Literal["seed", "local"] = "seed"
+
+
+class KnowledgeCatalogResponse(BaseModel):
+    entries: list[KnowledgeEntryDTO] = Field(default_factory=list)
+    total: int = 0
+    enabled_total: int = 0
+    local_path: str = ""
+    status: str = "ok"
+    error: str = ""
+
+
+class KnowledgeEntryUpsertRequest(BaseModel):
+    id: str = Field("", max_length=80)
+    title: str = Field(..., min_length=1, max_length=140)
+    roles: list[Literal["admin", "user"]] = Field(default_factory=lambda: ["admin", "user"])
+    keywords: list[str] = Field(default_factory=list, max_length=30)
+    text: str = Field(..., min_length=1, max_length=1600)
+    enabled: bool = True
+
+
+class KnowledgeEntryPatchRequest(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=140)
+    roles: list[Literal["admin", "user"]] | None = None
+    keywords: list[str] | None = Field(default=None, max_length=30)
+    text: str | None = Field(default=None, min_length=1, max_length=1600)
+    enabled: bool | None = None
+
+
+class KnowledgeEvaluateRequest(BaseModel):
+    role: Literal["admin", "user"] = "admin"
+    question: str = Field(..., min_length=1, max_length=800)
+
+
+class KnowledgeScoreDTO(BaseModel):
+    id: str
+    title: str
+    score: int = 0
+
+
+class KnowledgeEvaluateResponse(BaseModel):
+    role: Literal["admin", "user"]
+    question: str
+    snippets: list[KnowledgeEntryDTO] = Field(default_factory=list)
+    scores: list[KnowledgeScoreDTO] = Field(default_factory=list)
+    payload_chars: int = 0
 
 
 class DetectionDTO(BaseModel):
@@ -45,6 +161,7 @@ class DetectionDTO(BaseModel):
     bin_index: int | None = None
     serial_payload: str | None = None
     ack: str | None = None
+    source: str = "YOLO"
 
 
 class ActuationEvidenceDTO(BaseModel):
@@ -96,6 +213,49 @@ class CommonWasteCatalogResponse(BaseModel):
     items: list[CommonWasteItemDTO]
 
 
+class LearnNowClassStatusDTO(BaseModel):
+    class_name: str
+    class_id: int | None = None
+    command: str
+    bin_index: int
+    route_label: str
+    priority: Literal["P0", "P1", "P2", "other"] = "other"
+    images: int = 0
+    trainable_count: int = 0
+    reviewed_count: int = 0
+    manual_reviewed_count: int = 0
+    reference_count: int = 0
+    holdout_count: int = 0
+    generated_count: int = 0
+    generated_cap: int = 0
+    generated_over_cap: bool = False
+    source_issue_count: int = 0
+    missing_for_reference: int = 0
+    missing_for_micro_train: int = 0
+    missing_for_strong_train: int = 0
+    missing_holdout_for_strong: int = 0
+    ready_for_reference: bool = False
+    ready_for_micro_train: bool = False
+    ready_for_strong_train: bool = False
+    recommended_action: Literal["reference_only", "micro_train", "strong_train"] = "reference_only"
+    message: str = ""
+
+
+class LearnNowStatusResponse(BaseModel):
+    selected_class: str = ""
+    selected: LearnNowClassStatusDTO | None = None
+    classes: list[LearnNowClassStatusDTO] = Field(default_factory=list)
+    blocked_labels: dict[str, int] = Field(default_factory=dict)
+    total_images: int = 0
+    total_boxes: int = 0
+    queue_dir: str = ""
+
+
+class LearnNowTrainRequest(BaseModel):
+    cls_name: str
+    profile: Literal["micro", "strong"] = "micro"
+
+
 class DatasetSummaryDTO(BaseModel):
     images: int
     boxes: int
@@ -113,6 +273,43 @@ class DatasetSummaryDTO(BaseModel):
     catalog_path: str
 
 
+class SourceQualityIssueDTO(BaseModel):
+    image: str
+    reason: str
+    score: float | None = None
+
+
+class SourceQualityClassDTO(BaseModel):
+    class_name: str
+    priority: Literal["P0", "P1", "P2", "other"] = "other"
+    images: int = 0
+    trainable_count: int = 0
+    reviewed_count: int = 0
+    holdout_count: int = 0
+    generated_count: int = 0
+    augmented_count: int = 0
+    generated_cap: int = 0
+    generated_over_cap: bool = False
+    source_issue_count: int = 0
+    missing_for_reference: int = 0
+    missing_for_strong_train: int = 0
+    missing_holdout_for_strong: int = 0
+
+
+class SourceQualityResponse(BaseModel):
+    queue_dir: str = ""
+    total_images: int = 0
+    manual_web_images: int = 0
+    generated_images: int = 0
+    augmented_images: int = 0
+    invalid_source_images: int = 0
+    duplicate_images: int = 0
+    blurry_images: int = 0
+    sources: dict[str, int] = Field(default_factory=dict)
+    classes: list[SourceQualityClassDTO] = Field(default_factory=list)
+    issues: list[SourceQualityIssueDTO] = Field(default_factory=list)
+
+
 class BinFullnessDTO(BaseModel):
     bin_index: int
     label: str
@@ -126,6 +323,7 @@ class WasteClassCountDTO(BaseModel):
     count: int
     bin_index: int | None = None
     route_label: str | None = None
+    percent: float = 0.0
 
 
 class WellnessInsightDTO(BaseModel):
@@ -133,6 +331,45 @@ class WellnessInsightDTO(BaseModel):
     title: str
     message: str
     severity: Literal["info", "warning"] = "info"
+
+
+class DeviceStatusDTO(BaseModel):
+    device_id: str = ""
+    device_name: str = ""
+    location: str = ""
+    owner_username: str = ""
+    online: bool = False
+    status: Literal["online", "offline", "warning"] = "offline"
+    message: str = ""
+    last_active_at: str | None = None
+    bins: list[BinFullnessDTO] = Field(default_factory=list)
+
+
+class EcoScoreDTO(BaseModel):
+    score: int = Field(0, ge=0, le=100)
+    label: str = ""
+    recyclable_rate: float = 0.0
+    inorganic_rate: float = 0.0
+    organic_rate: float = 0.0
+    consistency_score: float = 0.0
+
+
+class UserHistoryItemDTO(BaseModel):
+    id: int
+    ts: str
+    cls_name: str
+    confidence: float
+    route_label: str | None = None
+    bin_index: int | None = None
+    category: Literal["organic", "inorganic", "recyclable"] = "inorganic"
+    ack_status: str | None = None
+    device_id: str | None = None
+    image_available: bool = False
+
+
+class UserHistoryResponse(BaseModel):
+    rows: list[UserHistoryItemDTO] = Field(default_factory=list)
+    total: int = 0
 
 
 class UserDashboardResponse(BaseModel):
@@ -143,6 +380,174 @@ class UserDashboardResponse(BaseModel):
     sample_size: int = 0
 
 
+class UserRouteTotalDTO(BaseModel):
+    command: Literal["O", "R", "I"]
+    route_label: str
+    bin_index: int
+    count: int = 0
+    percent: float = 0.0
+
+
+class UserDailyWasteDTO(BaseModel):
+    date: str
+    total: int = 0
+    organic: int = 0
+    inorganic: int = 0
+    recyclable: int = 0
+
+
+class UserMonthlyWasteDTO(BaseModel):
+    month: str
+    total: int = 0
+    organic: int = 0
+    inorganic: int = 0
+    recyclable: int = 0
+
+
+class UserPeriodComparisonDTO(BaseModel):
+    previous_total: int = 0
+    delta: int = 0
+    delta_percent: float = 0.0
+
+
+class UserYesterdaySummaryDTO(BaseModel):
+    date: str
+    total: int = 0
+    top_classes: list[WasteClassCountDTO] = Field(default_factory=list)
+    route_totals: list[UserRouteTotalDTO] = Field(default_factory=list)
+
+
+class UserAnalyticsResponse(BaseModel):
+    generated_at: str
+    range_days: Literal[7, 30, 90, 180]
+    total: int = 0
+    today_total: int = 0
+    seven_day_total: int = 0
+    thirty_day_total: int = 0
+    average_confidence: float = 0.0
+    eco_score: EcoScoreDTO = Field(default_factory=EcoScoreDTO)
+    device_status: DeviceStatusDTO = Field(default_factory=DeviceStatusDTO)
+    advice: list[WellnessInsightDTO] = Field(default_factory=list)
+    recent_classifications: list[UserHistoryItemDTO] = Field(default_factory=list)
+    comparison: UserPeriodComparisonDTO = Field(default_factory=UserPeriodComparisonDTO)
+    bins: list[BinFullnessDTO]
+    route_totals: list[UserRouteTotalDTO] = Field(default_factory=list)
+    top_classes: list[WasteClassCountDTO] = Field(default_factory=list)
+    daily: list[UserDailyWasteDTO] = Field(default_factory=list)
+    monthly: list[UserMonthlyWasteDTO] = Field(default_factory=list)
+    yesterday: UserYesterdaySummaryDTO
+    insights: list[WellnessInsightDTO] = Field(default_factory=list)
+    advisor_available: bool = False
+    advisor_model: str = ""
+
+
+class UserDeviceResponse(BaseModel):
+    generated_at: str
+    device_status: DeviceStatusDTO = Field(default_factory=DeviceStatusDTO)
+    bins: list[BinFullnessDTO] = Field(default_factory=list)
+    recent_activity: list[UserHistoryItemDTO] = Field(default_factory=list)
+    owner_username: str = ""
+
+
+class UserReportCardDTO(BaseModel):
+    title: str
+    value: str
+    detail: str = ""
+    tone: Literal["neutral", "success", "warning", "danger"] = "neutral"
+
+
+class UserReportResponse(BaseModel):
+    generated_at: str
+    range_days: Literal[7, 30, 90, 180]
+    analytics: UserAnalyticsResponse
+    summary_cards: list[UserReportCardDTO] = Field(default_factory=list)
+    export_url: str = ""
+    csv_safe_fields: list[str] = Field(default_factory=list)
+
+
+class UserNotificationDTO(BaseModel):
+    id: str
+    title: str
+    message: str
+    severity: Literal["info", "success", "warning", "danger"] = "info"
+    created_at: str
+    route: str = "/user/dashboard"
+    action_label: str = "Xem"
+
+
+class UserChallengeDTO(BaseModel):
+    id: str
+    title: str
+    description: str
+    progress: float = 0.0
+    target: float = 1.0
+    unit: str = "lượt"
+    completed: bool = False
+    reward_label: str = ""
+
+
+class UserLeaderboardRowDTO(BaseModel):
+    rank: int
+    label: str
+    score: int
+    detail: str = ""
+    current_user: bool = False
+
+
+class UserCommunityCardDTO(BaseModel):
+    id: str
+    title: str
+    message: str
+    metric: str = ""
+    share_text: str = ""
+    tone: Literal["neutral", "success", "warning"] = "neutral"
+
+
+class UserExperienceResponse(BaseModel):
+    generated_at: str
+    range_days: Literal[7, 30, 90, 180]
+    notifications: list[UserNotificationDTO] = Field(default_factory=list)
+    challenges: list[UserChallengeDTO] = Field(default_factory=list)
+    leaderboard: list[UserLeaderboardRowDTO] = Field(default_factory=list)
+    community_cards: list[UserCommunityCardDTO] = Field(default_factory=list)
+    quick_actions: list[dict[str, str]] = Field(default_factory=list)
+
+
+class UserAdvisorRequest(BaseModel):
+    range_days: Literal[7, 30, 90, 180] = 30
+    question: str = Field("", max_length=400)
+
+
+class UserAdvisorResponse(BaseModel):
+    generated_at: str
+    available: bool = False
+    provider: str = "local"
+    model: str = ""
+    profile: str = ""
+    range_days: Literal[7, 30, 90, 180] = 30
+    message: str
+    local_insights: list[WellnessInsightDTO] = Field(default_factory=list)
+    knowledge_used: list[str] = Field(default_factory=list)
+    safety_notice: str = ""
+
+
+class AiChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=800)
+
+
+class AiChatResponse(BaseModel):
+    generated_at: str
+    available: bool = False
+    provider: str = "deepseek"
+    model: str = ""
+    role: Literal["admin", "user"]
+    profile: str = ""
+    message: str
+    quick_prompts: list[str] = Field(default_factory=list)
+    knowledge_used: list[str] = Field(default_factory=list)
+    safety_notice: str = ""
+
+
 class HardwareTestRequest(BaseModel):
     command: Literal["O", "R", "I"]
 
@@ -151,6 +556,12 @@ class CameraSampleRequest(BaseModel):
     cls_name: str
     cls_id: int = 0
     use_latest_detection_box: bool = True
+
+
+class UnknownLearnRequest(BaseModel):
+    manual_hint: str = ""
+    approved_cls_name: str = ""
+    cls_id: int = -1
 
 
 class CaptureSessionStartRequest(BaseModel):
@@ -187,10 +598,20 @@ class ManualUrlImportRequest(BaseModel):
     source_page_url: str = ""
     source_license: str = ""
     source_author: str = ""
+    source_type: Literal["licensed_url", "open_images", "wikimedia", "roboflow", "generated", "other"] = (
+        "licensed_url"
+    )
+    generated: bool = False
+
+
+class WebSourceDiscoveryRequest(BaseModel):
+    cls_name: str
+    query: str = ""
+    limit: int = Field(10, ge=1, le=10)
 
 
 class HardwareAudioTestRequest(BaseModel):
-    track: int = Field(..., ge=1, le=7)
+    track: int = Field(..., ge=1, le=8)
 
 
 class HardwareMp3TestRequest(BaseModel):
@@ -277,7 +698,7 @@ class HardwareTestResponse(BaseModel):
 
 class HardwareAudioTestResponse(BaseModel):
     ok: bool
-    track: int = Field(..., ge=1, le=7)
+    track: int = Field(..., ge=1, le=8)
     payload: str
     port: str = ""
     ack_status: str = ""
@@ -357,6 +778,49 @@ class DatasetAnnotationResponse(BaseModel):
     boxes: list[DatasetBoxDTO]
 
 
+class VisionLabelSuggestionDTO(BaseModel):
+    label: str
+    canonical_class: str
+    class_id: int
+    confidence: float
+    command: str
+    bin_index: int
+    route_label: str
+    source: str
+    reason: str = ""
+
+
+class UnknownLearnResponse(BaseModel):
+    ok: bool = True
+    message: str = ""
+    provider: str = ""
+    provider_available: bool = False
+    hardware_blocked: bool = True
+    item: DatasetItemDTO | None = None
+    boxes: list[DatasetBoxDTO] = Field(default_factory=list)
+    suggestions: list[VisionLabelSuggestionDTO] = Field(default_factory=list)
+    learn_status: LearnNowClassStatusDTO | None = None
+
+
+class WebSourceCandidateDTO(BaseModel):
+    title: str
+    image_url: str
+    source_page_url: str
+    source_type: str
+    canonical_class: str
+    license: str = ""
+    author: str = ""
+    thumbnail_url: str = ""
+    import_ready: bool = False
+    reason: str = ""
+
+
+class WebSourceDiscoveryResponse(BaseModel):
+    available: bool = False
+    message: str = ""
+    candidates: list[WebSourceCandidateDTO] = Field(default_factory=list)
+
+
 class AnnotationRequest(BaseModel):
     boxes: list[DatasetBoxDTO]
 
@@ -390,6 +854,9 @@ class HistoryRowDTO(BaseModel):
     uart_command: str | None = None
     ack_status: str | None = None
     rtt_ms: int | None = None
+    owner_account_id: int | None = None
+    owner_username: str | None = None
+    device_id: str | None = None
 
 
 class HistoryResponse(BaseModel):
@@ -441,11 +908,22 @@ class HealthResponse(BaseModel):
 
 
 __all__ = [
+    "AccountCreateRequest",
+    "AccountDTO",
+    "AccountPasswordResetRequest",
+    "AccountPatchRequest",
+    "AccountsResponse",
     "ActionResult",
     "ActuationEvidenceDTO",
     "ActuationTestModeRequest",
     "ActuationTestModeResponse",
+    "AiChatRequest",
+    "AiChatResponse",
     "AnnotationRequest",
+    "AuthChangePasswordRequest",
+    "AuthLoginRequest",
+    "AuthLoginResponse",
+    "AuthLogoutResponse",
     "AuthMeResponse",
     "BinFullnessDTO",
     "BulkDatasetRequest",
@@ -462,6 +940,8 @@ __all__ = [
     "DatasetSummaryDTO",
     "DeleteRequest",
     "DetectionDTO",
+    "DeviceStatusDTO",
+    "EcoScoreDTO",
     "HardwareAudioTestRequest",
     "HardwareAudioTestResponse",
     "HardwareDiagnosticsResponse",
@@ -473,6 +953,9 @@ __all__ = [
     "HealthResponse",
     "HistoryResponse",
     "HistoryRowDTO",
+    "LearnNowClassStatusDTO",
+    "LearnNowStatusResponse",
+    "LearnNowTrainRequest",
     "ManualUrlImportRequest",
     "MappingsResponse",
     "ModelClassesResponse",
@@ -482,8 +965,27 @@ __all__ = [
     "ServoAngleTestResponse",
     "SettingsResponse",
     "SortAngleTestRequest",
+    "SourceQualityResponse",
     "TrainingStatusDTO",
+    "UserAdvisorRequest",
+    "UserAdvisorResponse",
+    "UserAnalyticsResponse",
+    "UserChallengeDTO",
+    "UserCommunityCardDTO",
+    "UserDailyWasteDTO",
     "UserDashboardResponse",
+    "UserDeviceResponse",
+    "UserExperienceResponse",
+    "UserHistoryItemDTO",
+    "UserHistoryResponse",
+    "UserLeaderboardRowDTO",
+    "UserMonthlyWasteDTO",
+    "UserNotificationDTO",
+    "UserPeriodComparisonDTO",
+    "UserReportCardDTO",
+    "UserReportResponse",
+    "UserRouteTotalDTO",
+    "UserYesterdaySummaryDTO",
     "WasteClassCountDTO",
     "WellnessInsightDTO",
 ]

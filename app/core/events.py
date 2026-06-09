@@ -15,6 +15,7 @@ class Detection:
     cls_name: str
     conf: float
     xyxy: tuple[int, int, int, int]
+    source: str = "YOLO"
 
 
 @dataclass(frozen=True)

@@ -9,6 +9,8 @@ from typing import Annotated, Literal
 
 from fastapi import Header, HTTPException, Query, status
 
+from app.agent.auth_service import AuthService, account_auth_is_configured
+
 TOKEN_ENV = "TRASH_SORTER_AGENT_TOKEN"
 ADMIN_TOKEN_ENV = "TRASH_SORTER_ADMIN_TOKEN"
 USER_TOKEN_ENV = "TRASH_SORTER_USER_TOKEN"
@@ -33,7 +35,11 @@ USER_CAPABILITIES = ["user_dashboard"]
 class AuthContext:
     role: AgentRole
     auth_required: bool
+    account_id: int | None = None
     token_source: str = "dev"
+    username: str | None = None
+    session_expires_at: str | None = None
+    password_default: bool = False
 
     @property
     def capabilities(self) -> list[str]:
@@ -55,7 +61,12 @@ def configured_user_token() -> str:
 
 
 def auth_is_configured() -> bool:
-    return bool(configured_admin_token() or configured_user_token() or configured_token())
+    return bool(
+        configured_admin_token()
+        or configured_user_token()
+        or configured_token()
+        or account_auth_is_configured()
+    )
 
 
 def authenticate_agent(
@@ -70,14 +81,25 @@ def authenticate_token_values(
     authorization: str | None = None,
     query_token: str | None = None,
 ) -> AuthContext:
-    if not auth_is_configured():
-        return AuthContext(role="admin", auth_required=False)
-
     token = _extract_token(authorization, query_token)
     if token:
+        session = AuthService().authenticate_session(token)
+        if session is not None:
+            return AuthContext(
+                role=session.role,
+                auth_required=True,
+                account_id=session.account_id,
+                token_source="session",
+                username=session.username,
+                session_expires_at=session.expires_at,
+                password_default=session.password_default,
+            )
         match = _match_configured_token(token)
         if match is not None:
             return match
+
+    if not auth_is_configured():
+        return AuthContext(role="admin", auth_required=False, token_source="dev")
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -103,6 +125,29 @@ def require_admin_token(
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
 
 
+def require_password_changed(context: AuthContext) -> AuthContext:
+    if context.password_default and context.token_source == "session":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Password change required")
+    return context
+
+
+def require_active_user_token(
+    authorization: Annotated[str | None, Header()] = None,
+    query_token: Annotated[str | None, Query(alias="token")] = None,
+) -> AuthContext:
+    return require_password_changed(
+        authenticate_token_values(authorization=authorization, query_token=query_token)
+    )
+
+
+def require_active_admin_token(
+    authorization: Annotated[str | None, Header()] = None,
+    query_token: Annotated[str | None, Query(alias="token")] = None,
+) -> AuthContext:
+    context = require_admin_token(authorization=authorization, query_token=query_token)
+    return require_password_changed(context)
+
+
 def require_agent_token(
     authorization: Annotated[str | None, Header()] = None,
     query_token: Annotated[str | None, Query(alias="token")] = None,
@@ -118,16 +163,20 @@ def _extract_token(authorization: str | None, query_token: str | None) -> str:
     return (query_token or "").strip()
 
 
+def extract_token(authorization: str | None = None, query_token: str | None = None) -> str:
+    return _extract_token(authorization, query_token)
+
+
 def _match_configured_token(token: str) -> AuthContext | None:
     admin_token = configured_admin_token()
     user_token = configured_user_token()
     legacy_token = configured_token()
     if admin_token and secrets.compare_digest(token, admin_token):
-        return AuthContext(role="admin", auth_required=True, token_source=ADMIN_TOKEN_ENV)
+        return AuthContext(role="admin", auth_required=True, token_source="env")
     if legacy_token and secrets.compare_digest(token, legacy_token):
-        return AuthContext(role="admin", auth_required=True, token_source=TOKEN_ENV)
+        return AuthContext(role="admin", auth_required=True, token_source="env")
     if user_token and secrets.compare_digest(token, user_token):
-        return AuthContext(role="user", auth_required=True, token_source=USER_TOKEN_ENV)
+        return AuthContext(role="user", auth_required=True, token_source="env")
     return None
 
 
@@ -143,6 +192,9 @@ __all__ = [
     "configured_admin_token",
     "configured_token",
     "configured_user_token",
+    "extract_token",
+    "require_active_admin_token",
+    "require_active_user_token",
     "require_admin_token",
     "require_agent_token",
     "require_user_token",

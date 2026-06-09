@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "taxonomy-three-bins",
+      "title": "Quy tắc 3 thùng EcoSort",
+      "roles": ["admin", "user"],
+      "keywords": ["thùng", "thung", "hữu cơ", "huu co", "vô cơ", "vo co", "tái chế", "tai che", "route", "mapping", "O", "R", "I"],
+      "text": "EcoSort điều khiển máy theo 3 tuyến phân loại: O/thùng 1 là hữu cơ, R/thùng 2 là vô cơ, I/thùng 3 là tái chế. Model có thể nhận diện nhiều class chi tiết nhưng hành động máy và biểu đồ người dùng luôn quy về 3 nhóm này.",
+      "enabled": true,
+      "updated_at": "2026-06-08T00:00:00",
+      "source": "seed"
+    },
+    {
+      "id": "common-class-guidance",
+      "title": "Gợi ý phân loại rác thường gặp",
+      "roles": ["admin", "user"],
+      "keywords": ["chai", "nhựa", "giấy", "lon", "carton", "hữu cơ", "thức ăn", "plastic", "paper", "can", "organic"],
+      "text": "Chai nhựa, lon nhôm, giấy sạch, carton khô và chai thủy tinh thường nên làm rỗng/làm khô rồi đưa vào nhóm tái chế. Rác thức ăn và phần hữu cơ nên tách khỏi bao bì. Đồ dùng một lần bẩn hoặc lẫn thức ăn thường làm giảm chất lượng tái chế.",
+      "enabled": true,
+      "updated_at": "2026-06-08T00:00:00",
+      "source": "seed"
+    },
+    {
+      "id": "class-to-bin-operating-contract",
+      "title": "Hợp đồng class-to-bin",
+      "roles": ["admin", "user"],
+      "keywords": ["class", "mapping", "route", "bin", "servo", "uart", "nhầm", "sai thùng", "phan loai", "phân loại"],
+      "text": "Class nhận diện chi tiết phải được map về route 3 thùng trước khi điều khiển servo/UART. Nếu một class đi sai thùng, Admin nên kiểm tra mapping trước, sau đó mới kiểm tra model, camera, ROI hoặc cơ khí.",
+      "enabled": true,
+      "updated_at": "2026-06-08T00:00:00",
+      "source": "seed"
+    },
+    {
+      "id": "user-eco-score-habits",
+      "title": "Eco Score và thói quen người dùng",
+      "roles": ["user"],
+      "keywords": ["eco", "score", "điểm", "diem", "thói quen", "thoi quen", "giảm", "giam", "tái chế", "tai che"],
+      "text": "Eco Score là tín hiệu thói quen dựa trên tỷ lệ tái chế, độ ổn định phân loại, tổng lượng rác gần đây và confidence trung bình. Có thể gợi ý giảm đồ dùng một lần, dùng bình cá nhân, tách rác ướt/khô, làm sạch rác tái chế, nhưng không chẩn đoán sức khỏe cá nhân.",
+      "enabled": true,
+      "updated_at": "2026-06-08T00:00:00",
+      "source": "seed"
+    },
+    {
+      "id": "user-data-boundary",
+      "title": "Ranh giới dữ liệu User",
+      "roles": ["user"],
+      "keywords": ["dữ liệu", "du lieu", "tài khoản", "tai khoan", "history", "owner", "người dùng", "nguoi dung"],
+      "text": "User chỉ xem dữ liệu thuộc tài khoản/chủ thiết bị của mình. Chatbot không nhận userId từ frontend và không được suy đoán dữ liệu người khác hoặc legacy rows chưa gán owner.",
+      "enabled": true,
+      "updated_at": "2026-06-08T00:00:00",
+      "source": "seed"
+    },
+    {
+      "id": "user-wellness-boundary",
+      "title": "Giới hạn tư vấn sức khỏe",
+      "roles": ["user"],
+      "keywords": ["sức khỏe", "suc khoe", "ăn uống", "an uong", "bệnh", "benh", "wellness", "y tế", "y te"],
+      "text": "Khi tư vấn sức khỏe, chỉ nói ở mức thói quen sống chung liên quan đến rác và tiêu dùng: giảm đồ uống đóng chai, giảm đồ ăn đóng gói quá nhiều, vệ sinh thùng, tách rác ướt/khô. Không chẩn đoán bệnh, không kê chế độ ăn cá nhân, không thay thế bác sĩ.",
+      "enabled": true,
+      "updated_at": "2026-06-08T00:00:00",
+      "source": "seed"
+    },
+    {
+      "id": "user-sugary-drink-bottle-habit",
+      "title": "Gợi ý thân thiện khi có nhiều chai/lon đồ uống",
+      "roles": ["user"],
+      "keywords": ["chai", "chai nhựa", "pet bottle", "bottle", "lon", "can", "nước ngọt", "nuoc ngot", "đồ uống", "do uong", "ly nhựa", "ly nhua", "sức khỏe", "suc khoe"],
+      "text": "Nếu lịch sử gần đây của User có nhiều chai nhựa, lon, ly nhựa hoặc bao bì đồ uống, EcoPet nên nói thân thiện: hôm nay bạn bỏ khá nhiều chai/lon đồ uống; nếu đó là nước ngọt, dùng thường xuyên có thể không tốt cho sức khỏe. Gợi ý nhẹ nhàng: giảm dần nước ngọt, uống thêm nước lọc, dùng bình cá nhân, rửa/làm rỗng chai trước khi tái chế. Nếu dữ liệu chỉ ghi chai/lon mà không xác nhận nước ngọt, luôn dùng cụm 'nếu đó là nước ngọt' để không bịa dữ liệu.",
+      "enabled": true,
+      "updated_at": "2026-06-09T00:00:00",
+      "source": "seed"
+    },
+    {
+      "id": "user-device-status",
+      "title": "Trạng thái thiết bị cho User",
+      "roles": ["user"],
+      "keywords": ["thiết bị", "thiet bi", "online", "offline", "bin", "thùng đầy", "thung day", "camera", "agent"],
+      "text": "Nếu thiết bị offline hoặc cảnh báo, dashboard vẫn có thể hiển thị lịch sử cũ; dữ liệu mới phụ thuộc camera, local agent, cảm biến thùng và cấu hình owner. User nên được hướng dẫn báo Admin khi thấy thiết bị không đồng bộ.",
+      "enabled": true,
+      "updated_at": "2026-06-08T00:00:00",
+      "source": "seed"
+    },
+    {
+      "id": "admin-operational-triage",
+      "title": "Checklist vận hành Admin",
+      "roles": ["admin"],
+      "keywords": ["admin", "camera", "uart", "model", "confidence", "dataset", "mapping", "hardware", "test", "logs", "settings"],
+      "text": "Admin có thể kiểm tra camera live, status, history, dataset, mapping, settings, logs, hardware test, accounts và reports. Khi confidence thấp, ưu tiên kiểm tra ánh sáng/camera/ROI, dữ liệu train của class đó, mapping 3 thùng, rồi mới kiểm tra servo/UART.",
+      "enabled": true,
+      "updated_at": "2026-06-08T00:00:00",
+      "source": "seed"
+    },
+    {
+      "id": "admin-status-icons-faq",
+      "title": "FAQ nút trạng thái Admin",
+      "roles": ["admin"],
+      "keywords": ["camera usb", "ai model", "local agent", "popover", "status", "icon", "nút", "nut"],
+      "text": "Ba icon topbar là trạng thái nhanh: Camera USB mở nguồn camera/FPS/USB devices, AI model mở training/fallback/confidence, Local agent mở URL agent/UART/session. Nếu có lỗi, hướng dẫn Admin mở đúng tab Giám sát, Dữ liệu, Nhật ký hoặc Cài đặt.",
+      "enabled": true,
+      "updated_at": "2026-06-08T00:00:00",
+      "source": "seed"
+    },
+    {
+      "id": "deepseek-backend-key-setup",
+      "title": "Cấu hình DeepSeek backend",
+      "roles": ["admin"],
+      "keywords": ["deepseek", "api key", "env", "rag", "huấn luyện", "huan luyen", "chatbot", "model"],
+      "text": "DEEPSEEK_API_KEY chỉ đặt ở backend local agent, không đặt trong NEXT_PUBLIC hoặc frontend. File local đúng là .env.local ở thư mục trash-sorter-v2 hoặc Windows user env trước khi mở desktop app. Model chuẩn của phase này là deepseek-v4-flash.",
+      "enabled": true,
+      "updated_at": "2026-06-08T00:00:00",
+      "source": "seed"
+    },
+    {
+      "id": "admin-data-safety",
+      "title": "An toàn dữ liệu vận hành",
+      "roles": ["admin", "user"],
+      "keywords": ["secret", "token", "password", "hash", "salt", "log", "path", "image", "privacy", "an toàn", "bao mật"],
+      "text": "Trợ lý chỉ được nhận thống kê, DTO đã scoped, trạng thái thiết bị và snippets đã chọn. Không gửi camera frames, dataset images, raw file paths, raw logs, token, password, hash, salt hoặc raw history rows ra ngoài local agent.",
+      "enabled": true,
+      "updated_at": "2026-06-08T00:00:00",
+      "source": "seed"
+    },
+    {
+      "id": "project-chat-answer-format",
+      "title": "Định dạng trả lời theo role",
+      "roles": ["admin", "user"],
+      "keywords": ["trả lời", "tra loi", "format", "admin", "user", "gợi ý", "goi y"],
+      "text": "Admin cần câu trả lời ngắn theo hướng: tình trạng, nguyên nhân có thể, bước kiểm tra, hành động an toàn. User cần câu trả lời thân thiện, giải thích biểu đồ/Eco Score/lịch sử rác bằng tiếng Việt và có lời khuyên thực tế. Không dùng Markdown thô như **bold**, ## heading hoặc code fence trong popup chat; nếu cần liệt kê thì dùng các dòng ngắn bắt đầu bằng dấu •. Với Admin, luôn ưu tiên tên tab thật trong web: Giám sát, Lịch sử, Dữ liệu, Mapping, Cài đặt, Nhật ký, Tài khoản, Báo cáo.",
+      "enabled": true,
+      "updated_at": "2026-06-08T00:00:00",
+      "source": "seed"
+    }
+  ]
+}

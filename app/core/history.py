@@ -16,6 +16,7 @@ from sqlalchemy import (
     Table,
     create_engine,
     func,
+    or_,
     select,
     text,
 )
@@ -52,6 +53,9 @@ detections = Table(
     Column("uart_command", String),
     Column("ack_status", String),
     Column("rtt_ms", Integer),
+    Column("owner_account_id", Integer),
+    Column("owner_username", String),
+    Column("device_id", String),
 )
 
 _OPTIONAL_DETECTION_COLUMNS = {
@@ -60,6 +64,12 @@ _OPTIONAL_DETECTION_COLUMNS = {
     "meta_path": "meta_path TEXT",
     "route_label": "route_label TEXT",
     "bin_index": "bin_index INTEGER",
+    "uart_command": "uart_command TEXT",
+    "ack_status": "ack_status TEXT",
+    "rtt_ms": "rtt_ms INTEGER",
+    "owner_account_id": "owner_account_id INTEGER",
+    "owner_username": "owner_username TEXT",
+    "device_id": "device_id TEXT",
 }
 
 
@@ -130,6 +140,9 @@ class HistoryService:
         uart_command=None,
         ack_status="pending",
         rtt_ms=None,
+        owner_account_id=None,
+        owner_username=None,
+        device_id=None,
     ) -> int:
         x1, y1, x2, y2 = bbox
         with self._engine.begin() as conn:
@@ -153,6 +166,9 @@ class HistoryService:
                     uart_command=uart_command,
                     ack_status=ack_status,
                     rtt_ms=rtt_ms,
+                    owner_account_id=owner_account_id,
+                    owner_username=owner_username,
+                    device_id=device_id,
                 )
             )
             pk = res.inserted_primary_key
@@ -160,8 +176,9 @@ class HistoryService:
                 raise RuntimeError("history insert did not return a primary key")
             return int(pk[0])
 
-    def get(self, row_id: int):
+    def get(self, row_id: int, owner_account_id: int | None = None, owner_username: str | None = None):
         stmt = select(detections).where(detections.c.id == row_id)
+        stmt = _owned_stmt(stmt, owner_account_id, owner_username)
         with self._engine.begin() as conn:
             row = conn.execute(stmt).mappings().first()
         return _with_route_defaults(HistoryRow(**dict(row))) if row is not None else None
@@ -177,15 +194,43 @@ class HistoryService:
                 )
             )
 
-    def query(self, limit=200, offset=0, cls_name=None, since: datetime | None = None):
+    def query(
+        self,
+        limit=200,
+        offset=0,
+        cls_name=None,
+        since: datetime | None = None,
+        owner_account_id: int | None = None,
+        owner_username: str | None = None,
+    ):
         stmt = select(detections).order_by(detections.c.id.desc()).limit(limit).offset(offset)
         if cls_name:
             stmt = stmt.where(detections.c.cls_name == cls_name)
         if since:
             stmt = stmt.where(detections.c.ts >= since.isoformat())
+        stmt = _owned_stmt(stmt, owner_account_id, owner_username)
         with self._engine.begin() as conn:
             rows = conn.execute(stmt).mappings().all()
         return [_with_route_defaults(HistoryRow(**dict(r))) for r in rows]
+
+    def backfill_owner(
+        self,
+        *,
+        owner_account_id: int | None,
+        owner_username: str,
+        device_id: str,
+    ) -> int:
+        with self._engine.begin() as conn:
+            result = conn.execute(
+                detections.update()
+                .where(or_(detections.c.owner_username.is_(None), detections.c.owner_username == ""))
+                .values(
+                    owner_account_id=owner_account_id,
+                    owner_username=owner_username,
+                    device_id=device_id,
+                )
+            )
+            return int(result.rowcount or 0)
 
     def count_by_class(self) -> dict[str, int]:
         stmt = select(detections.c.cls_name, func.count()).group_by(detections.c.cls_name)
@@ -226,6 +271,9 @@ class HistoryService:
             "uart_command",
             "ack_status",
             "rtt_ms",
+            "owner_account_id",
+            "owner_username",
+            "device_id",
         ]
         with out_path.open("w", encoding="utf-8", newline="") as f:
             w = csv.writer(f)
@@ -236,3 +284,20 @@ class HistoryService:
 
     def close(self) -> None:
         self._engine.dispose()
+
+
+def _owned_stmt(stmt, owner_account_id: int | None, owner_username: str | None):
+    clean_username = (owner_username or "").strip()
+    if owner_account_id is not None:
+        if clean_username:
+            stmt = stmt.where(
+                or_(
+                    detections.c.owner_account_id == owner_account_id,
+                    detections.c.owner_username == clean_username,
+                )
+            )
+        else:
+            stmt = stmt.where(detections.c.owner_account_id == owner_account_id)
+    elif clean_username:
+        stmt = stmt.where(detections.c.owner_username == clean_username)
+    return stmt
