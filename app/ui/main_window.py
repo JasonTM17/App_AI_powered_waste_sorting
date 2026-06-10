@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import AppConfig
+from app.ui.widgets.empty_state import EmptyState
 from app.ui.widgets.sidebar import Sidebar
 from app.ui.widgets.title_bar import TitleBar
 
@@ -33,28 +34,33 @@ class MainWindow(QMainWindow):
         self.resize(1280, 800)
 
         root = QWidget()
+        root.setObjectName("workspace")
         self.setCentralWidget(root)
 
-        outer = QVBoxLayout(root)
+        outer = QHBoxLayout(root)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
+
+        body = QWidget()
+        body.setObjectName("workspace")
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(0)
+
+        self.sidebar = Sidebar(NAV_ITEMS, icons=NAV_ICONS)
+        outer.addWidget(self.sidebar)
 
         self.title_bar = TitleBar("Trash Sorter Pro")
         self.title_bar.minimize_requested.connect(self.showMinimized)
         self.title_bar.maximize_toggled.connect(self._toggle_max)
         self.title_bar.close_requested.connect(self.close)
-        outer.addWidget(self.title_bar)
+        body_layout.addWidget(self.title_bar)
 
-        body = QWidget()
-        body_layout = QHBoxLayout(body)
-        body_layout.setContentsMargins(0, 0, 0, 0)
-        body_layout.setSpacing(0)
-
-        self.sidebar = Sidebar(NAV_ITEMS, icons=NAV_ICONS)
         from app.ui.pages.live import LivePage
         from app.ui.pages.system_log import SystemLogPage
 
         self.stack = QStackedWidget()
+        self.stack.setObjectName("workspace")
         self.live_page = LivePage()
         self.mapping_page = None
         self.history_page = None
@@ -78,8 +84,7 @@ class MainWindow(QMainWindow):
                 self.capture_page = CapturePage(cfg)
                 self.stack.addWidget(self.capture_page)
             else:
-                page = QLabel(f"{label} — placeholder")
-                page.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                page = EmptyState("○", label, "Runtime chưa nạp đủ dữ liệu cho màn này.")
                 self.stack.addWidget(page)
         # tab 4 = system log (always available, doesn't need cfg)
         self.stack.addWidget(self.system_log_page)
@@ -90,20 +95,18 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(self.settings_page)
         else:
             self.settings_page = None
-            page = QLabel(f"{NAV_ITEMS[5]} — placeholder")
-            page.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            page = EmptyState("⚙", NAV_ITEMS[5], "Runtime chưa nạp cấu hình, app vẫn chạy an toàn.")
             self.stack.addWidget(page)
         self.sidebar.page_changed.connect(self.stack.setCurrentIndex)
 
-        body_layout.addWidget(self.sidebar)
         body_layout.addWidget(self.stack, 1)
-        outer.addWidget(body, 1)
 
         self.status = QLabel("● Camera —  •  ● UART —  •  ● Model —  •  FPS 0  ")
         self.status.setObjectName("statusbar")
         self.status.setFixedHeight(32)
         self.status.setContentsMargins(16, 0, 16, 0)
-        outer.addWidget(self.status)
+        body_layout.addWidget(self.status)
+        outer.addWidget(body, 1)
         self._cam_ok = False
         self._uart_ok = False
         self._model_ok = False

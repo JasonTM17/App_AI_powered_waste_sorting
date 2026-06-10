@@ -24,3 +24,13 @@ def test_titlebar_signals_emit(qtbot):
         bar.btn_close.click()
     with qtbot.waitSignal(bar.web_requested, timeout=500):
         bar.btn_web.click()
+
+
+def test_titlebar_camera_button_emits_toggle(qtbot):
+    bar = TitleBar(title="X")
+    qtbot.addWidget(bar)
+
+    with qtbot.waitSignal(bar.camera_toggled, timeout=500) as blocker:
+        bar.btn_camera.click()
+
+    assert blocker.args == [True]

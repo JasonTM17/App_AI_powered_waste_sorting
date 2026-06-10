@@ -21,7 +21,7 @@ def _info_row(label: str, value: str) -> tuple[QLabel, QLabel]:
     lab = QLabel(label.upper())
     lab.setStyleSheet("color: #94A3B8; font-size: 11px; font-weight: 600; letter-spacing: 1px;")
     val = QLabel(value)
-    val.setStyleSheet("color: #F1F5F9; font-family: 'JetBrains Mono', monospace;")
+    val.setStyleSheet("color: #DAE2FD; font-family: 'Consolas';")
     return lab, val
 
 

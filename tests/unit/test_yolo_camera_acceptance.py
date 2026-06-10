@@ -1,7 +1,14 @@
 from scripts import run_yolo_camera_acceptance as runner
+from scripts.run_three_bin_camera_acceptance import _estimated_frame_increment
 from scripts.run_yolo_camera_acceptance import analyze_yolo_acceptance
 
 ROI = {"enabled": True, "x": 0, "y": 0, "width": 100, "height": 100}
+
+
+def test_live_sample_frame_estimate_caps_unrealistic_shared_camera_fps():
+    assert _estimated_frame_increment(32_000.0, 1.0) == 30
+    assert _estimated_frame_increment(18.4, 1.0) == 18
+    assert _estimated_frame_increment(0.0, 1.0) == 1
 
 
 def test_yolo_camera_health_requires_non_black_diagnostics():
@@ -127,6 +134,41 @@ def test_yolo_acceptance_expected_class_passes_when_label_matches():
     assert result["passed"] is True
     assert result["correct"] == 10
     assert result["classes"] == {"Pen": 10}
+
+
+def test_yolo_acceptance_expected_textile_blocks_unknown_route_only_pass():
+    samples = [
+        {
+            "estimated_frames": 10,
+            "status": {"camera": {"running": True}},
+            "detections": [
+                {
+                    "cls_name": "Unknown object",
+                    "confidence": 0.39,
+                    "bbox": [10, 10, 80, 80],
+                    "uart_command": "R",
+                    "source": "YOLO",
+                }
+            ],
+        }
+        for _ in range(10)
+    ]
+
+    result = analyze_yolo_acceptance(
+        samples,
+        scenario="R",
+        expected_command="R",
+        expected_class="Textile",
+        roi=ROI,
+        target_frames=10,
+        min_observations=10,
+        min_correct=9,
+    )
+
+    assert result["passed"] is False
+    assert result["route_correct"] == 10
+    assert result["correct"] == 0
+    assert result["classes"] == {"Unknown object": 10}
 
 
 def test_collect_live_samples_records_timeout_as_evidence(monkeypatch):

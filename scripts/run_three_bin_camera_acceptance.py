@@ -36,6 +36,7 @@ THREE_BIN_DEFAULT = {
     "min_crop_area_ratio": 0.003,
     "input_size": 224,
 }
+MAX_ESTIMATED_FPS = 30.0
 def main() -> int:
     _configure_console_utf8()
     parser = _parser()
@@ -320,10 +321,7 @@ def _collect_live_samples(
             fps = float(status.get("fps") or 0.0)
             elapsed = max(0.0, now - last_seen)
             last_seen = now
-            if fps > 0:
-                estimated_frames += max(1, round(fps * elapsed))
-            else:
-                estimated_frames += 1
+            estimated_frames += _estimated_frame_increment(fps, elapsed)
             samples.append(
                 {
                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -333,6 +331,13 @@ def _collect_live_samples(
                 }
             )
     return samples
+
+
+def _estimated_frame_increment(fps: float, elapsed: float) -> int:
+    if fps <= 0:
+        return 1
+    effective_fps = min(float(fps), MAX_ESTIMATED_FPS)
+    return max(1, round(effective_fps * max(0.0, elapsed)))
 
 
 def _annotate_sample(sample: dict[str, Any], roi: dict[str, Any]) -> dict[str, Any]:

@@ -17,3 +17,7 @@ QPushButton#titlebar-cta:hover { background: #059669; }
 QPushButton#titlebar-secondary { background: transparent; color: #047857; border: 1px solid #CBD5E1; border-radius: 6px; padding: 4px 12px; font-weight: 700; font-size: 12px; }
 QPushButton#titlebar-secondary:hover { background: #ECFDF5; border-color: #10B981; color: #065F46; }
 QPushButton#titlebar-cta[active="true"] { background: transparent; color: #0F172A; border: 1px solid #EF4444; }
+QPushButton:focus { border: 1px solid #0891B2; }
+QPushButton#segmented { background: white; color: #334155; border: 1px solid #CBD5E1; border-radius: 6px; padding: 8px 12px; font-weight: 700; }
+QPushButton#segmented:hover { background: #ECFDF5; border-color: #10B981; }
+QPushButton#segmented:checked { background: #D1FAE5; color: #065F46; border-color: #10B981; }

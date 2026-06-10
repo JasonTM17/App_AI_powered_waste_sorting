@@ -23,12 +23,12 @@ from PySide6.QtWidgets import (
 from app.utils.paths import logs_dir
 
 _LEVEL_COLORS = {
-    "DEBUG": "#64748B",
-    "INFO": "#94A3B8",
-    "SUCCESS": "#10B981",
+    "DEBUG": "#86948A",
+    "INFO": "#BBCABF",
+    "SUCCESS": "#4EDEA3",
     "WARNING": "#F59E0B",
-    "ERROR": "#EF4444",
-    "CRITICAL": "#DC2626",
+    "ERROR": "#F43F5E",
+    "CRITICAL": "#FFB4AB",
 }
 
 _LEVEL_ORDER = ["DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"]
@@ -49,15 +49,15 @@ class SystemLogPage(QWidget):
         self._search = ""
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 24, 24, 24)
+        outer.setContentsMargins(24, 20, 24, 24)
         outer.setSpacing(16)
 
         title = QLabel("Nhật ký hệ thống")
-        title.setStyleSheet("font-size: 24px; font-weight: 700;")
+        title.setObjectName("h1")
         outer.addWidget(title)
 
         toolbar = QFrame()
-        toolbar.setObjectName("card")
+        toolbar.setObjectName("toolbar")
         tb = QHBoxLayout(toolbar)
         tb.setContentsMargins(16, 12, 16, 12)
         tb.setSpacing(12)
@@ -92,22 +92,23 @@ class SystemLogPage(QWidget):
         outer.addWidget(toolbar)
 
         self.path_label = QLabel(f"📄 {self._path}")
-        self.path_label.setStyleSheet("color: #94A3B8; font-family: 'JetBrains Mono', monospace;")
+        self.path_label.setStyleSheet("color: #BBCABF; font-family: 'Consolas';")
         outer.addWidget(self.path_label)
 
         self.view = QPlainTextEdit()
         self.view.setReadOnly(True)
         self.view.setObjectName("card")
         self.view.setStyleSheet(
-            "QPlainTextEdit { background: #0B1220; border-radius: 8px; padding: 12px;"
-            " font-family: 'JetBrains Mono','Consolas',monospace; font-size: 12px; }"
+            "QPlainTextEdit { background: #060E20; border-radius: 10px; padding: 14px;"
+            " font-family: 'Consolas'; font-size: 12px;"
+            " border: 1px solid rgba(78,222,163,0.14); }"
         )
         self.view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         outer.addWidget(self.view, 1)
 
         footer = QHBoxLayout()
         self.count_label = QLabel("0 dòng")
-        self.count_label.setStyleSheet("color: #94A3B8;")
+        self.count_label.setObjectName("mono")
         footer.addWidget(self.count_label)
         footer.addStretch()
         outer.addLayout(footer)

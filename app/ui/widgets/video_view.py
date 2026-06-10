@@ -12,10 +12,10 @@ from app.core.events import Detection
 
 def _conf_color(conf: float) -> QColor:
     if conf >= 0.8:
-        return QColor("#10B981")
+        return QColor("#4EDEA3")
     if conf >= 0.5:
         return QColor("#F59E0B")
-    return QColor("#EF4444")
+    return QColor("#F43F5E")
 
 
 class VideoView(QWidget):
@@ -29,7 +29,10 @@ class VideoView(QWidget):
         self._frame_w = 0
         self._frame_h = 0
         self._detections: list[Detection] = []
-        self.setStyleSheet("background: #000;")
+        self.setStyleSheet(
+            "background: #060E20; border: 1px solid rgba(255,255,255,0.06);"
+            " border-radius: 12px;"
+        )
 
     def set_frame(self, frame_bgr: np.ndarray) -> None:
         h, w, _ = frame_bgr.shape
@@ -68,7 +71,7 @@ class VideoView(QWidget):
         p = QPainter(self)
         scaled = self._ensure_scaled()
         if scaled is None:
-            p.fillRect(self.rect(), QColor("#000"))
+            p.fillRect(self.rect(), QColor("#060E20"))
             return
         target = self.rect()
         x = (target.width() - scaled.width()) // 2
@@ -78,7 +81,7 @@ class VideoView(QWidget):
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
             sx = scaled.width() / self._frame_w
             sy = scaled.height() / self._frame_h
-            font = QFont("Inter", 10, QFont.Weight.Bold)
+            font = QFont("Consolas", 10, QFont.Weight.Bold)
             p.setFont(font)
             for d in self._detections:
                 x1, y1, x2, y2 = d.xyxy
@@ -96,5 +99,5 @@ class VideoView(QWidget):
                 tw = metrics.horizontalAdvance(label) + 12
                 th = metrics.height() + 4
                 p.fillRect(rx, ry - th, tw, th, color)
-                p.setPen(QColor("#0B1220"))
+                p.setPen(QColor("#002113"))
                 p.drawText(rx + 6, ry - 4, label)

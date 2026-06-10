@@ -50,8 +50,9 @@ class MappingRow(QWidget):
 
     def __init__(self, mapping: ClassMapping, parent=None):
         super().__init__(parent)
+        self.setObjectName("mapping-row")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setContentsMargins(12, 7, 12, 7)
         layout.setSpacing(12)
 
         handle = QLabel("●")
@@ -63,7 +64,7 @@ class MappingRow(QWidget):
 
         self.cls_label = QLabel(mapping.class_name)
         self.cls_label.setMinimumWidth(120)
-        self.cls_label.setStyleSheet("font-weight: 600;")
+        self.cls_label.setStyleSheet("font-weight: 700; color: #DAE2FD;")
         layout.addWidget(self.cls_label)
 
         layout.addWidget(QLabel("Cmd"))
@@ -118,12 +119,12 @@ class MappingPage(QWidget):
         super().__init__(parent)
         self._mappings = list(mappings)
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 24, 24, 24)
+        outer.setContentsMargins(24, 20, 24, 24)
         outer.setSpacing(16)
 
         header = QHBoxLayout()
         title = QLabel("Mapping 42 class → 3 thùng")
-        title.setStyleSheet("font-size: 24px; font-weight: 700;")
+        title.setObjectName("h1")
         header.addWidget(title)
         header.addStretch()
         btn_reset = QPushButton("Reset")
@@ -153,12 +154,13 @@ class MappingPage(QWidget):
         prev_layout = QVBoxLayout(preview_card)
         prev_layout.setContentsMargins(20, 16, 20, 16)
         prev_title = QLabel("Protocol preview: O=Hữu cơ, R=Vô cơ, I=Tái chế")
-        prev_title.setStyleSheet("font-size: 14px; font-weight: 700; color: #94A3B8;")
+        prev_title.setObjectName("mono")
         prev_layout.addWidget(prev_title)
         self.preview_label = QLabel("—")
         self.preview_label.setStyleSheet(
-            "font-family: 'JetBrains Mono', monospace; color: #10B981; padding: 8px; "
-            "background: #0B1220; border-radius: 6px;"
+            "font-family: 'Consolas'; color: #4EDEA3; padding: 10px; "
+            "background: #060E20; border: 1px solid rgba(78,222,163,0.20); "
+            "border-radius: 8px;"
         )
         prev_layout.addWidget(self.preview_label)
         outer.addWidget(preview_card)

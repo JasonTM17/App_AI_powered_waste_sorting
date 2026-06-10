@@ -56,11 +56,11 @@ class CapturePage(QWidget):
         self._label_cache: dict[str, tuple[int, str]] = {}
         self._icon_cache: dict[str, tuple[int, QIcon]] = {}
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 24, 24, 24)
+        outer.setContentsMargins(24, 20, 24, 24)
         outer.setSpacing(16)
 
         title = QLabel("Data & Gán nhãn")
-        title.setStyleSheet("font-size: 24px; font-weight: 700;")
+        title.setObjectName("h1")
         outer.addWidget(title)
 
         # mode + action rows
@@ -150,7 +150,7 @@ class CapturePage(QWidget):
         action_row.addStretch()
 
         self.counter = QLabel("0 ảnh")
-        self.counter.setStyleSheet("color: #94A3B8;")
+        self.counter.setObjectName("mono")
         mode_row.addWidget(self.counter)
 
         btn_refresh = QPushButton("Refresh")
@@ -194,6 +194,10 @@ class CapturePage(QWidget):
         self.grid.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.grid.setSpacing(12)
         self.grid.setUniformItemSizes(True)
+        self.grid.setStyleSheet(
+            "QListWidget { padding: 12px; }"
+            "QListWidget::item { margin: 6px; padding: 8px; }"
+        )
         outer.addWidget(self.grid, 1)
 
         self.reload()

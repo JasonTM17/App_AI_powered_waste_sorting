@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -30,7 +31,19 @@ from app.core.hardware_profile import (
     ROUTES,
     SERVO_WAIT_POSITIONS,
 )
+from app.ui.pages.settings_audio_section import AudioSettingsSection
 from app.utils.camera_source import normalize_camera_source
+from app.utils.paths import resource_path
+
+
+def _icon(name: str) -> QIcon:
+    path = resource_path(f"app/ui/resources/icons/{name}.svg")
+    return QIcon(str(path)) if path.exists() else QIcon()
+
+
+def _button_icon(button: QPushButton, name: str) -> None:
+    button.setIcon(_icon(name))
+    button.setIconSize(QSize(18, 18))
 
 
 class _CameraScan(QThread):
@@ -132,15 +145,15 @@ def _section(title: str) -> tuple[QFrame, QFormLayout]:
     box = QFrame()
     box.setObjectName("card")
     layout = QVBoxLayout(box)
-    layout.setContentsMargins(20, 16, 20, 16)
-    layout.setSpacing(12)
+    layout.setContentsMargins(22, 18, 22, 18)
+    layout.setSpacing(14)
     h = QLabel(title)
-    h.setStyleSheet("font-size: 16px; font-weight: 700;")
+    h.setObjectName("section-title")
     layout.addWidget(h)
     form = QFormLayout()
     form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
-    form.setHorizontalSpacing(16)
-    form.setVerticalSpacing(10)
+    form.setHorizontalSpacing(18)
+    form.setVerticalSpacing(12)
     layout.addLayout(form)
     return box, form
 
@@ -150,6 +163,7 @@ class SettingsPage(QWidget):
     test_camera_requested = Signal(str)
     test_uart_requested = Signal(str, int)
     test_hardware_requested = Signal(str, int, str)
+    test_voice_requested = Signal(str)
     actuation_test_mode_changed = Signal(bool)
     reload_model_requested = Signal(str)
 
@@ -168,11 +182,11 @@ class SettingsPage(QWidget):
 
         body = QWidget()
         outer = QVBoxLayout(body)
-        outer.setContentsMargins(24, 24, 24, 24)
+        outer.setContentsMargins(24, 20, 24, 28)
         outer.setSpacing(16)
 
         title = QLabel("Cài đặt")
-        title.setStyleSheet("font-size: 24px; font-weight: 700;")
+        title.setObjectName("h1")
         outer.addWidget(title)
 
         # camera
@@ -213,11 +227,13 @@ class SettingsPage(QWidget):
         cam_form.addRow("", self.cam_mirror)
         cam_form.addRow("Xoay", self.cam_rotation)
         cam_btns = QHBoxLayout()
-        btn_scan_cam = QPushButton("⟳ Scan")
+        btn_scan_cam = QPushButton("Quét camera")
         btn_scan_cam.setObjectName("secondary")
+        _button_icon(btn_scan_cam, "camera")
         btn_scan_cam.clicked.connect(self._scan_cameras)
-        self.btn_test_cam = QPushButton("▶ Test camera")
+        self.btn_test_cam = QPushButton("Test camera")
         self.btn_test_cam.setObjectName("secondary")
+        _button_icon(self.btn_test_cam, "play")
         self.btn_test_cam.setEnabled(False)
         self.btn_test_cam.clicked.connect(
             lambda: self.test_camera_requested.emit(self._current_camera_source())
@@ -279,6 +295,7 @@ class SettingsPage(QWidget):
         self.mdl_conf.setRange(0, 100)
         self.mdl_conf.setValue(int(self._cfg.model.conf_threshold * 100))
         self.mdl_conf_label = QLabel(f"{self._cfg.model.conf_threshold:.2f}")
+        self.mdl_conf_label.setObjectName("mono")
         self.mdl_conf.valueChanged.connect(lambda v: self.mdl_conf_label.setText(f"{v / 100:.2f}"))
         conf_row = QHBoxLayout()
         conf_row.addWidget(self.mdl_conf)
@@ -296,8 +313,9 @@ class SettingsPage(QWidget):
         mdl_form.addRow("Confidence", conf_w)
         mdl_form.addRow("IoU", self.mdl_iou)
         mdl_form.addRow("Input size", self.mdl_imgsz)
-        btn_reload = QPushButton("↻ Hot reload model")
+        btn_reload = QPushButton("Tải lại model")
         btn_reload.setObjectName("secondary")
+        _button_icon(btn_reload, "play")
         btn_reload.clicked.connect(lambda: self.reload_model_requested.emit(self.mdl_path.text()))
         mdl_form.addRow("", btn_reload)
         outer.addWidget(mdl_box)
@@ -335,11 +353,13 @@ class SettingsPage(QWidget):
         uart_form.addRow("Protocol", self.uart_protocol)
         uart_form.addRow("", self.uart_auto)
         uart_btns = QHBoxLayout()
-        btn_scan_uart = QPushButton("⟳ Scan cổng")
+        btn_scan_uart = QPushButton("Quét cổng")
         btn_scan_uart.setObjectName("secondary")
+        _button_icon(btn_scan_uart, "hardware")
         btn_scan_uart.clicked.connect(self._scan_ports)
-        self.btn_test_uart = QPushButton("▶ Test ping")
+        self.btn_test_uart = QPushButton("Test ping")
         self.btn_test_uart.setObjectName("secondary")
+        _button_icon(self.btn_test_uart, "play")
         self.btn_test_uart.clicked.connect(
             lambda: self.test_uart_requested.emit(
                 self._current_uart_port(),
@@ -408,6 +428,13 @@ class SettingsPage(QWidget):
         hw_form.addRow("", self.actuation_mode)
         hw_form.addRow("Camera E2E", self.actuation_mode_hint)
         outer.addWidget(hw_box)
+
+        audio_box, audio_form = _section("Am thanh")
+        self.audio_section = AudioSettingsSection(self._cfg)
+        self.audio_section.voice_test_requested.connect(self.test_voice_requested.emit)
+        self.speaker_cooldown = self.audio_section.speaker_cooldown
+        audio_form.addRow(self.audio_section)
+        outer.addWidget(audio_box)
 
         # app
         app_box, app_form = _section("Ứng dụng")
@@ -587,6 +614,12 @@ class SettingsPage(QWidget):
         cfg.uart.ack_timeout_ms = self.uart_timeout.value()
         cfg.uart.auto_reconnect = self.uart_auto.isChecked()
         cfg.uart.protocol = self.uart_protocol.currentData() or "plain_group"
+        audio_output_mode = self.audio_section.output_mode()
+        if audio_output_mode not in {"hardware", "computer_speaker"}:
+            audio_output_mode = "hardware"
+        cfg.speaker.output_mode = audio_output_mode
+        cfg.speaker.enabled = audio_output_mode == "computer_speaker"
+        cfg.speaker.cooldown_seconds = float(self.speaker_cooldown.value())
         cfg.theme = self.theme_select.currentText()
         cfg.language = self.lang_select.currentText()
         cfg.minimize_to_tray = self.tray_check.isChecked()

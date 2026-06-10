@@ -80,6 +80,10 @@ def auth_db_path() -> Path:
     return app_data_dir() / "auth.db"
 
 
+def operations_db_path() -> Path:
+    return app_data_dir() / "operations.db"
+
+
 def example_config_path() -> Path:
     """Path to the seed config bundled with the app."""
     return resource_path("config.example.json")

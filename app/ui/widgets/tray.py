@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Signal
-from PySide6.QtGui import QAction, QIcon, QPixmap
+from PySide6.QtGui import QAction, QColor, QIcon, QPixmap
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon
+
+from app.ui.brand_assets import brand_icon
 
 
 def _make_default_icon() -> QIcon:
+    icon = brand_icon()
+    if not icon.isNull():
+        return icon
     pix = QPixmap(32, 32)
-    pix.fill("#10B981")
+    pix.fill(QColor("#10B981"))
     return QIcon(pix)
 
 

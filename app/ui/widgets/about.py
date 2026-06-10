@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from app import __version__
-from app.utils.paths import resource_path
+from app.ui.brand_assets import brand_mark_path
 
 
 class AboutDialog(QDialog):
@@ -33,7 +33,7 @@ class AboutDialog(QDialog):
         hero = QHBoxLayout()
         hero.setSpacing(16)
         logo = QLabel()
-        logo_path = resource_path("app/ui/resources/icons/logo.svg")
+        logo_path = brand_mark_path()
         if logo_path.exists():
             logo.setPixmap(QIcon(str(logo_path)).pixmap(QSize(64, 64)))
         logo.setFixedSize(72, 72)
@@ -74,7 +74,7 @@ class AboutDialog(QDialog):
         info.setReadOnly(True)
         info.setStyleSheet(
             "background: #0B1220; border-radius: 8px; padding: 12px;"
-            " font-family: 'JetBrains Mono','Consolas',monospace; font-size: 12px;"
+            " font-family: 'Consolas'; font-size: 12px;"
         )
         names_str = (
             "\n".join(f"  {k:>2}: {v}" for k, v in sorted(names.items()))
