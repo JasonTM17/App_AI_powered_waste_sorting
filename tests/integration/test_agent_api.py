@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -1336,7 +1337,7 @@ def test_admin_knowledge_reports_invalid_local_file(tmp_path, monkeypatch):
         runtime.close()
 
 
-def test_user_advisor_uses_deepseek_with_aggregate_payload_only(tmp_path, monkeypatch):
+def test_user_advisor_uses_deepseek_v4_flash_with_aggregate_payload_only(tmp_path, monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "api-key")
     monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-test")
     capture: dict[str, object] = {}
@@ -1530,6 +1531,96 @@ def test_user_chat_without_deepseek_key_returns_friendly_user_message(tmp_path, 
         runtime.close()
 
 
+def test_admin_chat_timeout_returns_local_fallback(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRASH_SORTER_AUTH_DB", str(tmp_path / "auth.db"))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "api-key")
+    AuthService().create_account("admin", "admin-pass-123", "admin")
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def post(self, url, headers, json):
+            raise httpx.TimeoutException("provider timeout")
+
+    monkeypatch.setattr("app.agent.ai_chat_service.httpx.Client", FakeClient)
+    client, runtime = _client(tmp_path)
+    try:
+        token = client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "admin-pass-123"},
+        ).json()["token"]
+        response = client.post(
+            "/api/admin/chat",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"message": "Kiem tra he thong"},
+        )
+        body = response.json()
+
+        assert response.status_code == 200
+        assert body["available"] is False
+        assert body["provider"] == "deepseek"
+        assert body["role"] == "admin"
+        assert "DeepSeek" in body["message"]
+    finally:
+        runtime.close()
+
+
+def test_user_chat_malformed_provider_response_returns_local_fallback(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRASH_SORTER_AUTH_DB", str(tmp_path / "auth.db"))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "api-key")
+    AuthService().create_account("alice", "alice-pass-123", "user")
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": []}
+
+    class FakeClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def post(self, url, headers, json):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.agent.ai_chat_service.httpx.Client", FakeClient)
+    client, runtime = _client(tmp_path)
+    try:
+        token = client.post(
+            "/api/auth/login",
+            json={"username": "alice", "password": "alice-pass-123"},
+        ).json()["token"]
+        response = client.post(
+            "/api/user/chat",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"message": "EcoPet co san sang khong?"},
+        )
+        body = response.json()
+
+        assert response.status_code == 200
+        assert body["available"] is False
+        assert body["provider"] == "deepseek"
+        assert body["role"] == "user"
+        assert "EcoPet" in body["message"]
+        assert "DEEPSEEK_API_KEY" not in body["message"]
+    finally:
+        runtime.close()
+
+
 def test_user_chat_and_advisor_share_monthly_quota(tmp_path, monkeypatch):
     monkeypatch.setenv("TRASH_SORTER_AUTH_DB", str(tmp_path / "auth.db"))
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
@@ -1650,6 +1741,8 @@ def test_admin_chat_uses_sanitized_system_context_and_blocks_user(tmp_path, monk
         request_text = json.dumps(capture["body"], ensure_ascii=False)
         admin_payload = json.loads(capture["body"]["messages"][1]["content"])
         assert capture["url"] == "https://api.deepseek.com/chat/completions"
+        assert capture["body"]["model"] == "deepseek-v4-flash"
+        assert capture["body"]["thinking"] == {"type": "disabled"}
         assert admin_payload["profile"] == "trash_sorter_admin"
         assert admin_payload["knowledge"]
         assert "analytics" in request_text

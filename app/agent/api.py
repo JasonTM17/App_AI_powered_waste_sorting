@@ -61,6 +61,7 @@ from app.agent.chat_knowledge_service import (
     retrieve_knowledge_snippets,
     upsert_knowledge_entry,
 )
+from app.agent.operations_store import OperationsStore
 from app.agent.runtime import STREAM_FRAME_INTERVAL_S, AgentRuntime
 from app.agent.schemas import (
     AccountCreateRequest,
@@ -73,17 +74,26 @@ from app.agent.schemas import (
     ActuationTestModeResponse,
     AiChatRequest,
     AiChatResponse,
+    AlertPatchRequest,
+    AlertsResponse,
     AnnotationRequest,
     AuthChangePasswordRequest,
     AuthLoginRequest,
     AuthLoginResponse,
     AuthLogoutResponse,
     AuthMeResponse,
+    BinMapResponse,
+    BinStationCreateRequest,
+    BinStationDTO,
+    BinStationPatchRequest,
     BulkDatasetRequest,
     CameraSampleRequest,
     CaptureSessionFrameRequest,
     CaptureSessionResponse,
     CaptureSessionStartRequest,
+    CollectionCompleteRequest,
+    CollectionCompleteResponse,
+    CollectionSchedulesResponse,
     CommonWasteCatalogResponse,
     DatasetAnnotationResponse,
     DatasetBoxDTO,
@@ -91,6 +101,8 @@ from app.agent.schemas import (
     DatasetItemsResponse,
     DatasetSummaryDTO,
     DeleteRequest,
+    DeviceIssueCreateRequest,
+    DeviceIssueResponse,
     HardwareAudioTestRequest,
     HardwareAudioTestResponse,
     HardwareDiagnosticsResponse,
@@ -114,7 +126,12 @@ from app.agent.schemas import (
     ManualUrlImportRequest,
     MappingsResponse,
     ModelClassesResponse,
+    OperationDeviceDTO,
+    OperationDevicesResponse,
+    OperationDeviceUpsertRequest,
+    OperationsHealthResponse,
     RelabelRequest,
+    RoleCatalogResponse,
     RuntimeStatus,
     ServoAngleTestRequest,
     ServoAngleTestResponse,
@@ -200,7 +217,7 @@ def create_app(
         finally:
             rt.close()
 
-    app = FastAPI(title="Trash Sorter Pro Agent", version="2.0.0", lifespan=lifespan)
+    app = FastAPI(title="Trash Sorter Pro Agent", version="1.0.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_allowed_origins(),
@@ -396,6 +413,7 @@ def create_app(
             return _user_chat_quota_response(quota)
         analytics = build_user_analytics(rt, 30, **_owner_scope(context))
         chat_context = _analytics_chat_context(analytics)
+        chat_context["operations"] = _operations_summary_context(rt, owner_username=context.username)
         response = build_chat_response(
             role="user",
             message=payload.message,
@@ -409,6 +427,99 @@ def create_app(
             conversation_style="Ngắn gọn, thân thiện, giải thích bằng dữ liệu trong dashboard User.",
         )
         return _attach_quota(response, quota)
+
+    @user_router.get("/user/bin-map", response_model=BinMapResponse)
+    def user_bin_map(
+        context: Annotated[AuthContext, Depends(require_active_user_token)],
+    ) -> BinMapResponse:
+        store = _operations_store(rt)
+        try:
+            return BinMapResponse(**store.list_bin_map(owner_username=context.username))
+        finally:
+            store.close()
+
+    @user_router.get("/user/alerts", response_model=AlertsResponse)
+    def user_alerts(
+        context: Annotated[AuthContext, Depends(require_active_user_token)],
+        include_resolved: Annotated[bool, Query()] = True,
+    ) -> AlertsResponse:
+        store = _operations_store(rt)
+        try:
+            rows = store.list_alerts(
+                owner_username=context.username,
+                include_resolved=include_resolved,
+            )
+            return AlertsResponse(alerts=rows, total=len(rows))
+        finally:
+            store.close()
+
+    @user_router.get("/user/collection-schedule", response_model=CollectionSchedulesResponse)
+    def user_collection_schedule(
+        context: Annotated[AuthContext, Depends(require_active_user_token)],
+    ) -> CollectionSchedulesResponse:
+        store = _operations_store(rt)
+        try:
+            rows = store.list_schedules(owner_username=context.username)
+            return CollectionSchedulesResponse(schedules=rows, total=len(rows))
+        finally:
+            store.close()
+
+    @user_router.post(
+        "/user/collections/{schedule_id}/complete",
+        response_model=CollectionCompleteResponse,
+    )
+    def user_complete_collection(
+        schedule_id: str,
+        payload: CollectionCompleteRequest,
+        context: Annotated[AuthContext, Depends(require_active_user_token)],
+    ) -> CollectionCompleteResponse:
+        store = _operations_store(rt)
+        try:
+            scoped = {
+                token
+                for row in store.list_schedules(owner_username=context.username)
+                for token in (str(row["id"]), str(row["schedule_id"]))
+            }
+            if schedule_id not in scoped:
+                raise HTTPException(status_code=404, detail="Collection schedule not found")
+            schedule = store.complete_collection(
+                schedule_id,
+                actor_username=context.username or "user",
+                actor_account_id=context.account_id,
+                note=payload.note,
+            )
+            if schedule is None:
+                raise HTTPException(status_code=404, detail="Collection schedule not found")
+            already_completed = bool(schedule.pop("already_completed", False))
+            return CollectionCompleteResponse(
+                schedule=schedule,
+                already_completed=already_completed,
+            )
+        finally:
+            store.close()
+
+    @user_router.post("/user/device-issues", response_model=DeviceIssueResponse)
+    def user_device_issue(
+        payload: DeviceIssueCreateRequest,
+        context: Annotated[AuthContext, Depends(require_active_user_token)],
+    ) -> DeviceIssueResponse:
+        store = _operations_store(rt)
+        try:
+            if payload.station_id:
+                scoped_stations = {
+                    station["station_id"]
+                    for station in store.list_bin_map(owner_username=context.username)["stations"]
+                }
+                if payload.station_id not in scoped_stations:
+                    raise HTTPException(status_code=404, detail="Bin station not found")
+            issue = store.create_issue(
+                payload.model_dump(),
+                reporter_username=context.username or "user",
+                reporter_account_id=context.account_id,
+            )
+            return DeviceIssueResponse(issue=issue)
+        finally:
+            store.close()
 
     router = APIRouter(prefix="/api", dependencies=[Depends(require_active_admin_token)])
 
@@ -471,6 +582,120 @@ def create_app(
         finally:
             history.close()
         return ActionResult(ok=True, message="Legacy history backfilled", count=count)
+
+    @router.get("/admin/roles", response_model=RoleCatalogResponse)
+    def admin_roles() -> RoleCatalogResponse:
+        store = _operations_store(rt)
+        try:
+            return RoleCatalogResponse(roles=store.list_role_catalog())
+        finally:
+            store.close()
+
+    @router.get("/admin/devices", response_model=OperationDevicesResponse)
+    def admin_devices() -> OperationDevicesResponse:
+        store = _operations_store(rt)
+        try:
+            return OperationDevicesResponse(devices=store.list_devices())
+        finally:
+            store.close()
+
+    @router.post("/admin/devices", response_model=OperationDeviceDTO)
+    def admin_upsert_device(payload: OperationDeviceUpsertRequest) -> OperationDeviceDTO:
+        store = _operations_store(rt)
+        try:
+            return OperationDeviceDTO(**store.upsert_device(payload.model_dump()))
+        finally:
+            store.close()
+
+    @router.get("/admin/bin-map", response_model=BinMapResponse)
+    def admin_bin_map() -> BinMapResponse:
+        store = _operations_store(rt)
+        try:
+            return BinMapResponse(**store.list_bin_map(include_inactive=True))
+        finally:
+            store.close()
+
+    @router.post("/admin/bin-map", response_model=BinStationDTO)
+    def admin_create_bin_station(payload: BinStationCreateRequest) -> BinStationDTO:
+        store = _operations_store(rt)
+        try:
+            try:
+                station = store.create_station(payload.model_dump())
+            except ValueError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            return BinStationDTO(**station)
+        finally:
+            store.close()
+
+    @router.patch("/admin/bin-map/{station_id}", response_model=BinStationDTO)
+    def admin_patch_bin_station(
+        station_id: str,
+        payload: BinStationPatchRequest,
+    ) -> BinStationDTO:
+        store = _operations_store(rt)
+        try:
+            station = store.patch_station(station_id, payload.model_dump(exclude_unset=True))
+            if station is None:
+                raise HTTPException(status_code=404, detail="Bin station not found")
+            return BinStationDTO(**station)
+        finally:
+            store.close()
+
+    @router.delete("/admin/bin-map/{station_id}", response_model=ActionResult)
+    def admin_delete_bin_station(station_id: str) -> ActionResult:
+        store = _operations_store(rt)
+        try:
+            if not store.delete_station(station_id):
+                raise HTTPException(status_code=404, detail="Bin station not found")
+            return ActionResult(ok=True, message="Bin station deactivated", count=1)
+        finally:
+            store.close()
+
+    @router.get("/admin/alerts", response_model=AlertsResponse)
+    def admin_alerts(include_resolved: Annotated[bool, Query()] = True) -> AlertsResponse:
+        store = _operations_store(rt)
+        try:
+            rows = store.list_alerts(include_resolved=include_resolved)
+            return AlertsResponse(alerts=rows, total=len(rows))
+        finally:
+            store.close()
+
+    @router.patch("/admin/alerts/{alert_id}", response_model=AlertsResponse)
+    def admin_patch_alert(
+        alert_id: str,
+        payload: AlertPatchRequest,
+        context: Annotated[AuthContext, Depends(require_active_admin_token)],
+    ) -> AlertsResponse:
+        store = _operations_store(rt)
+        try:
+            alert = store.patch_alert(
+                alert_id,
+                status=payload.status,
+                actor_username=context.username or "admin",
+            )
+            if alert is None:
+                raise HTTPException(status_code=404, detail="Alert not found")
+            rows = store.list_alerts(include_resolved=True)
+            return AlertsResponse(alerts=rows, total=len(rows))
+        finally:
+            store.close()
+
+    @router.get("/admin/collection-schedules", response_model=CollectionSchedulesResponse)
+    def admin_collection_schedules() -> CollectionSchedulesResponse:
+        store = _operations_store(rt)
+        try:
+            rows = store.list_schedules()
+            return CollectionSchedulesResponse(schedules=rows, total=len(rows))
+        finally:
+            store.close()
+
+    @router.get("/admin/operations/health", response_model=OperationsHealthResponse)
+    def admin_operations_health() -> OperationsHealthResponse:
+        store = _operations_store(rt)
+        try:
+            return OperationsHealthResponse(**store.health())
+        finally:
+            store.close()
 
     @router.get("/admin/knowledge", response_model=KnowledgeCatalogResponse)
     def admin_knowledge() -> KnowledgeCatalogResponse:
@@ -1177,6 +1402,18 @@ def _auth_me_response(context: AuthContext) -> AuthMeResponse:
     )
 
 
+def _operations_store(runtime: AgentRuntime) -> OperationsStore:
+    return OperationsStore(
+        runtime.operations_file,
+        device_defaults={
+            "device_id": runtime.cfg.device.device_id,
+            "device_name": runtime.cfg.device.device_name,
+            "location": runtime.cfg.device.location,
+            "owner_username": runtime.cfg.device.owner_username,
+        },
+    )
+
+
 def _owner_scope(context: AuthContext) -> dict[str, object]:
     if context.role == "admin":
         return {"owner_account_id": None, "owner_username": None}
@@ -1335,6 +1572,7 @@ def _admin_chat_context(runtime: AgentRuntime) -> dict[str, object]:
     return {
         "scope": "admin_all_history",
         "analytics": _analytics_chat_context(analytics),
+        "operations": _operations_summary_context(runtime, owner_username=None),
         "runtime": {
             "camera": _device_state_context(status.camera),
             "uart": _device_state_context(status.uart),
@@ -1345,6 +1583,20 @@ def _admin_chat_context(runtime: AgentRuntime) -> dict[str, object]:
         },
         "logs": _log_summary(),
     }
+
+
+def _operations_summary_context(
+    runtime: AgentRuntime,
+    *,
+    owner_username: str | None,
+) -> dict[str, object]:
+    store = _operations_store(runtime)
+    try:
+        return store.summary(owner_username=owner_username)
+    except Exception as exc:
+        return {"available": False, "error": str(exc)[:180]}
+    finally:
+        store.close()
 
 
 def _device_state_context(state) -> dict[str, object]:

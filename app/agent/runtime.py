@@ -14,7 +14,14 @@ import numpy as np
 
 from app.agent.schemas import BinFullnessDTO, DetectionDTO, DeviceState, RuntimeStatus
 from app.core.capture_session import CaptureSessionManager
-from app.core.config import AppConfig, ClassMapping, load_config, save_config
+from app.core.config import (
+    AppConfig,
+    ClassMapping,
+    computer_speaker_enabled,
+    load_config,
+    normalize_speaker_output_config,
+    save_config,
+)
 from app.core.dataset_queue import import_manual_camera_frame
 from app.core.frame_transform import apply_camera_transform
 from app.core.hardware_profile import hardware_profile_payload, route_for_command
@@ -694,10 +701,17 @@ class ThreadUartSender:
 class AgentRuntime:
     """Owns hardware handles for the web agent."""
 
-    def __init__(self, config_file: Path, history_file: Path, dataset_file: Path):
+    def __init__(
+        self,
+        config_file: Path,
+        history_file: Path,
+        dataset_file: Path,
+        operations_file: Path | None = None,
+    ):
         self.config_file = config_file
         self.history_file = history_file
         self.dataset_file = dataset_file
+        self.operations_file = operations_file or history_file.with_name("operations.db")
         self.cfg = load_config(config_file)
         self._state_lock = RLock()
         self._camera_stop = Event()
@@ -730,7 +744,7 @@ class AgentRuntime:
         self._pipeline: Pipeline | None = None
         self._uart: ThreadUartSender | None = None
         self._speaker = WasteSpeaker(
-            enabled=self.cfg.speaker.enabled,
+            enabled=computer_speaker_enabled(self.cfg),
             cooldown_seconds=self.cfg.speaker.cooldown_seconds,
         )
         self._model_class_cache: dict[int, str] | None = None
@@ -1077,7 +1091,7 @@ class AgentRuntime:
             self.cfg = cfg
             self._model_class_cache = None
             self._speaker.configure(
-                enabled=cfg.speaker.enabled,
+                enabled=computer_speaker_enabled(cfg),
                 cooldown_seconds=cfg.speaker.cooldown_seconds,
             )
             if self._pipeline is not None:
@@ -1797,7 +1811,7 @@ class AgentRuntime:
             self._pipeline.on_ack(track_id, command, status, rtt_ms)
 
     def _sanitize_config(self, cfg: AppConfig) -> AppConfig:
-        clean = cfg.model_copy(deep=True)
+        clean = normalize_speaker_output_config(cfg)
         clean.camera.source = ""
         port = clean.uart.port.strip()
         _present, eligible = self._uart_port_presence(port)

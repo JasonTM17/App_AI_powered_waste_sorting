@@ -95,15 +95,33 @@ User data ownership:
 - This phase does not identify the person at the bin. For per-person accuracy later,
   add RFID, login-at-bin, or identity hardware before writing owner rows.
 
+Local operations map:
+
+- The local agent creates `%APPDATA%/TrashSorter/operations.db` for role-safe
+  operations data: devices, bin stations, child bins, schedules, collection
+  events, alerts, and device issues.
+- Startup seeds 10 editable Thu Duc candidate stations. Each station creates
+  three child bins: `O/bin1`, `R/bin2`, and `I/bin3`. Seed coordinates are
+  starter data; `coordinate_verified=false` until Admin verifies them on the map.
+- Admin APIs manage roles, devices, bin map, alerts, collection schedules, model,
+  audio, and reports. User APIs are scoped to map, alerts, schedule, mark-collected,
+  device issue reporting, own history, and own account.
+- Supabase schema/RLS/realtime is intentionally not implemented in this phase.
+  Keep local core stable first, then connect Supabase after the app and tests pass.
+  The handoff contract for later cloud work is in
+  `docs/operations-map-local-first.md`.
+
 Full Stitch User screens:
 
 - Stitch source: `projects/11781034156481807416`, design system
   `assets/4bc3c1426eeb4c778d3a4334c3ece067`.
-- Admin keeps the current operational tabs and now also has
-  `/admin?tab=reports` for history export plus dataset/source-quality reporting.
+- Admin keeps the existing operational tabs and now also has `/admin?tab=roles`,
+  `/admin?tab=devices`, `/admin?tab=bin-map`, `/admin?tab=alerts`,
+  `/admin?tab=model`, `/admin?tab=audio`, and `/admin?tab=reports`.
 - User routes are available at `/user/dashboard`, `/user/ecopet`,
-  `/user/advice`, `/user/history`, `/user/device`, `/user/analytics`,
-  `/user/reports`, `/user/notifications`, `/user/community`,
+  `/user/advice`, `/user/map`, `/user/alerts`, `/user/schedule`,
+  `/user/collect`, `/user/report-issue`, `/user/history`, `/user/device`,
+  `/user/analytics`, `/user/reports`, `/user/notifications`, `/user/community`,
   `/user/leaderboard`, and `/user/account`.
 - User reports use `/api/user/report` and `/api/user/history/export.csv`.
   The User CSV intentionally excludes image paths, raw file paths, logs, tokens,
@@ -126,7 +144,9 @@ DeepSeek AI chatbot/advisor:
 - Nếu mở bằng desktop app, đặt Windows user env trước rồi mở lại app:
   `setx DEEPSEEK_API_KEY "sk-..."`
 - Optional: set `DEEPSEEK_BASE_URL`; default is `https://api.deepseek.com`.
-- Optional: set `DEEPSEEK_MODEL`; default is `deepseek-v4-flash`.
+- Model is fixed to `deepseek-v4-flash` in this phase. Do not use
+  `DEEPSEEK_MODEL` to switch runtime models; keeping one model avoids V4
+  thinking-mode/empty-content drift.
 - Optional: set `DEEPSEEK_TIMEOUT_SECONDS`; default is `30`.
 - This is domain-trained through backend prompt profiles plus local EcoSort
   Knowledge/RAG (`trash_sorter_user`, `trash_sorter_admin`), not hosted
@@ -172,6 +192,13 @@ Audit dataset:
 
 ```powershell
 python -m uv run python scripts/audit_dataset.py
+```
+
+The audit also reports the YOLO `data.yaml` contract. Use strict mode before
+model promotion to block class-count, name-order, or catalog drift:
+
+```powershell
+python -m uv run python scripts/audit_dataset.py --strict-trainset
 ```
 
 Import the three downloaded pen/hardware datasets:
@@ -248,6 +275,7 @@ Các class hiếm nên bổ sung thêm data: `Aluminum caps`, `Metal shavings`, 
 python -m uv run ruff check app scripts tests
 python -m uv run mypy app/core
 python -m uv run pytest -q
+python -m uv run python scripts/preflight_runtime.py
 cd web
 npm run build
 npm run test:e2e

@@ -523,6 +523,7 @@
   },
   "speaker": {
     "enabled": false,
+    "output_mode": "hardware",
     "cooldown_seconds": 2.5
   },
   "unknown_fallback": {

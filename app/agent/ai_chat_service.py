@@ -106,7 +106,7 @@ def build_chat_response(
     except httpx.HTTPStatusError as exc:
         answer = _status_message(exc.response.status_code, role)
         available = False
-    except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError):
+    except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError, IndexError):
         answer = (
             "Không thể kết nối DeepSeek lúc này. Hệ thống vẫn giữ dữ liệu local an toàn."
             if role == "admin"

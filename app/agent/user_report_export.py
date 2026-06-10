@@ -8,7 +8,11 @@ from datetime import datetime, time, timedelta
 from typing import TYPE_CHECKING
 
 from app.agent.schemas import UserHistoryItemDTO, UserReportCardDTO, UserReportResponse
-from app.agent.user_dashboard import ALLOWED_ANALYTICS_RANGES, build_user_analytics
+from app.agent.user_dashboard import (
+    ALLOWED_ANALYTICS_RANGES,
+    _analytics_today,
+    build_user_analytics,
+)
 from app.core.history import HistoryService
 from app.core.waste_categories import (
     ORGANIC,
@@ -116,9 +120,15 @@ def _history_since_range(
     owner_account_id: int | None,
     owner_username: str | None,
 ):
-    start = datetime.combine(datetime.now().date() - timedelta(days=range_days - 1), time.min)
     service = HistoryService(runtime.history_file)
     try:
+        latest = service.query(
+            limit=1,
+            owner_account_id=owner_account_id,
+            owner_username=owner_username,
+        )
+        today = _analytics_today(latest) if latest else datetime.now().date()
+        start = datetime.combine(today - timedelta(days=range_days - 1), time.min)
         return service.query(
             limit=1_000_000,
             since=start,

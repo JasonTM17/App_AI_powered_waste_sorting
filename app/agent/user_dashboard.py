@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterable
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from app.agent.ai_chat_service import (
@@ -95,15 +95,15 @@ def build_user_analytics(
     owner_username: str | None = None,
 ) -> UserAnalyticsResponse:
     range_days = _clean_range_days(range_days)
-    today = datetime.now().date()
-    start_date = today - timedelta(days=range_days - 1)
-    previous_start = start_date - timedelta(days=range_days)
     rows = _history_since(
         runtime,
-        datetime.combine(previous_start, time.min),
+        datetime.combine(_analytics_reference_start(range_days), time.min),
         owner_account_id=owner_account_id,
         owner_username=owner_username,
     )
+    today = _analytics_today(rows)
+    start_date = today - timedelta(days=range_days - 1)
+    previous_start = start_date - timedelta(days=range_days)
     thirty_day_rows = _history_since(
         runtime,
         datetime.combine(today - timedelta(days=29), time.min),
@@ -340,6 +340,24 @@ def _clean_range_days(range_days: int) -> int:
     if range_days in ALLOWED_ANALYTICS_RANGES:
         return range_days
     return 30
+
+
+def _analytics_reference_start(range_days: int) -> date:
+    return datetime.now().date() - timedelta(days=range_days * 2 + 1)
+
+
+def _analytics_today(rows) -> date:
+    for row in rows:
+        raw = str(getattr(row, "ts", "") or "")
+        if len(raw) < 10:
+            continue
+        try:
+            parsed = datetime.fromisoformat(raw)
+        except ValueError:
+            continue
+        if parsed.tzinfo is not None:
+            return datetime.now(timezone.utc).astimezone(parsed.tzinfo).date()
+    return datetime.now().date()
 
 
 def _rows_between(rows, start: date, end: date):

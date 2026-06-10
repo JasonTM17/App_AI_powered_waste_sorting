@@ -79,6 +79,228 @@ class AccountsResponse(BaseModel):
     accounts: list[AccountDTO] = Field(default_factory=list)
 
 
+class RoleCapabilityDTO(BaseModel):
+    role: Literal["admin", "user"]
+    label: str
+    capabilities: list[str] = Field(default_factory=list)
+    description: str = ""
+
+
+class RoleCatalogResponse(BaseModel):
+    roles: list[RoleCapabilityDTO] = Field(default_factory=list)
+
+
+class OperationDeviceDTO(BaseModel):
+    id: int
+    device_id: str
+    device_name: str
+    location: str = ""
+    owner_username: str = ""
+    status: Literal["online", "offline", "warning", "maintenance"] = "offline"
+    message: str = ""
+    active: bool = True
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class OperationDeviceUpsertRequest(BaseModel):
+    device_id: str = Field(..., min_length=1, max_length=120)
+    device_name: str = Field(..., min_length=1, max_length=160)
+    location: str = Field("", max_length=240)
+    owner_username: str = Field("", max_length=80)
+    status: Literal["online", "offline", "warning", "maintenance"] = "offline"
+    message: str = Field("", max_length=400)
+    active: bool = True
+
+
+class OperationDevicesResponse(BaseModel):
+    devices: list[OperationDeviceDTO] = Field(default_factory=list)
+
+
+class BinChildDTO(BaseModel):
+    id: int
+    bin_id: str
+    station_id: str
+    command: Literal["O", "R", "I"]
+    bin_index: int
+    label: str
+    fullness_percent: float | None = None
+    status: str = "unknown"
+    active: bool = True
+    updated_at: str = ""
+
+
+class BinStationDTO(BaseModel):
+    id: int
+    station_id: str
+    name: str
+    area: str = ""
+    address: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
+    status: str = "candidate"
+    coordinate_verified: bool = False
+    source: str = ""
+    assigned_owner_username: str = ""
+    active: bool = True
+    created_at: str = ""
+    updated_at: str = ""
+    bins: list[BinChildDTO] = Field(default_factory=list)
+    alert_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class BinMapCenterDTO(BaseModel):
+    latitude: float
+    longitude: float
+    zoom: int = 12
+
+
+class BinMapResponse(BaseModel):
+    generated_at: str
+    center: BinMapCenterDTO
+    stations: list[BinStationDTO] = Field(default_factory=list)
+    total: int = 0
+    seed_source: str = ""
+
+
+class BinStationCreateRequest(BaseModel):
+    station_id: str = Field("", max_length=120)
+    name: str = Field(..., min_length=1, max_length=180)
+    area: str = Field("", max_length=160)
+    address: str = Field("", max_length=240)
+    latitude: float = Field(..., ge=-90, le=90)
+    longitude: float = Field(..., ge=-180, le=180)
+    status: str = Field("candidate", max_length=40)
+    coordinate_verified: bool = False
+    source: str = Field("admin", max_length=80)
+    assigned_owner_username: str = Field("", max_length=80)
+    active: bool = True
+
+
+class BinStationPatchRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=180)
+    area: str | None = Field(default=None, max_length=160)
+    address: str | None = Field(default=None, max_length=240)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    status: str | None = Field(default=None, max_length=40)
+    coordinate_verified: bool | None = None
+    source: str | None = Field(default=None, max_length=80)
+    assigned_owner_username: str | None = Field(default=None, max_length=80)
+    active: bool | None = None
+
+
+class AlertDTO(BaseModel):
+    id: int = 0
+    alert_id: str
+    station_id: str = ""
+    bin_id: str = ""
+    device_id: str = ""
+    severity: Literal["info", "warning", "danger", "success"] = "info"
+    title: str
+    message: str = ""
+    status: Literal["open", "acknowledged", "resolved"] = "open"
+    source: str = "manual"
+    created_at: str = ""
+    updated_at: str = ""
+    resolved_at: str = ""
+    actor_username: str = ""
+    derived: bool = False
+
+
+class AlertsResponse(BaseModel):
+    alerts: list[AlertDTO] = Field(default_factory=list)
+    total: int = 0
+
+
+class AlertPatchRequest(BaseModel):
+    status: Literal["open", "acknowledged", "resolved"]
+
+
+class CollectionScheduleDTO(BaseModel):
+    id: int
+    schedule_id: str
+    station_id: str
+    station_name: str
+    assigned_owner_username: str = ""
+    scheduled_date: str
+    window_start: str = ""
+    window_end: str = ""
+    status: str = "scheduled"
+    state: Literal["scheduled", "due_today", "overdue", "upcoming", "completed"] = "scheduled"
+    completed_at: str | None = None
+    completed_by: str = ""
+    note: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class CollectionSchedulesResponse(BaseModel):
+    schedules: list[CollectionScheduleDTO] = Field(default_factory=list)
+    total: int = 0
+
+
+class CollectionCompleteRequest(BaseModel):
+    note: str = Field("", max_length=400)
+
+
+class CollectionCompleteResponse(BaseModel):
+    ok: bool = True
+    schedule: CollectionScheduleDTO
+    already_completed: bool = False
+    message: str = "Collection marked complete"
+
+
+class DeviceIssueCreateRequest(BaseModel):
+    station_id: str = Field("", max_length=120)
+    bin_id: str = Field("", max_length=120)
+    device_id: str = Field("", max_length=120)
+    issue_type: Literal[
+        "full_bin",
+        "sensor_problem",
+        "camera_problem",
+        "servo_problem",
+        "audio_problem",
+        "dirty_bin",
+        "other",
+    ] = "other"
+    severity: Literal["info", "warning", "danger"] = "warning"
+    description: str = Field(..., min_length=1, max_length=800)
+
+
+class DeviceIssueDTO(BaseModel):
+    id: int
+    issue_id: str
+    station_id: str = ""
+    bin_id: str = ""
+    device_id: str = ""
+    issue_type: str
+    severity: Literal["info", "warning", "danger"] = "warning"
+    description: str = ""
+    status: Literal["open", "acknowledged", "resolved"] = "open"
+    reporter_username: str = ""
+    reporter_account_id: int | None = None
+    alert_id: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    resolved_at: str = ""
+
+
+class DeviceIssueResponse(BaseModel):
+    ok: bool = True
+    issue: DeviceIssueDTO
+    message: str = "Device issue reported"
+
+
+class OperationsHealthResponse(BaseModel):
+    ok: bool = False
+    path: str = ""
+    station_total: int = 0
+    bin_total: int = 0
+    schedule_total: int = 0
+    seed_source: str = ""
+
+
 class AccountCreateRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=80)
     password: str = Field(..., min_length=8, max_length=200)
@@ -914,7 +1136,7 @@ class DeleteRequest(BaseModel):
 class HealthResponse(BaseModel):
     ok: bool = True
     app: str = "Trash Sorter Pro Agent"
-    version: str = "2.0.0"
+    version: str = "1.0.0"
 
 
 __all__ = [
@@ -929,18 +1151,31 @@ __all__ = [
     "ActuationTestModeResponse",
     "AiChatRequest",
     "AiChatResponse",
+    "AlertDTO",
+    "AlertPatchRequest",
+    "AlertsResponse",
     "AnnotationRequest",
     "AuthChangePasswordRequest",
     "AuthLoginRequest",
     "AuthLoginResponse",
     "AuthLogoutResponse",
     "AuthMeResponse",
+    "BinChildDTO",
     "BinFullnessDTO",
+    "BinMapCenterDTO",
+    "BinMapResponse",
+    "BinStationCreateRequest",
+    "BinStationDTO",
+    "BinStationPatchRequest",
     "BulkDatasetRequest",
     "CameraSampleRequest",
     "CaptureSessionFrameRequest",
     "CaptureSessionResponse",
     "CaptureSessionStartRequest",
+    "CollectionCompleteRequest",
+    "CollectionCompleteResponse",
+    "CollectionScheduleDTO",
+    "CollectionSchedulesResponse",
     "CommonWasteCatalogResponse",
     "CommonWasteItemDTO",
     "DatasetAnnotationResponse",
@@ -950,6 +1185,9 @@ __all__ = [
     "DatasetSummaryDTO",
     "DeleteRequest",
     "DetectionDTO",
+    "DeviceIssueCreateRequest",
+    "DeviceIssueDTO",
+    "DeviceIssueResponse",
     "DeviceStatusDTO",
     "EcoScoreDTO",
     "HardwareAudioTestRequest",
@@ -969,7 +1207,13 @@ __all__ = [
     "ManualUrlImportRequest",
     "MappingsResponse",
     "ModelClassesResponse",
+    "OperationDeviceDTO",
+    "OperationDeviceUpsertRequest",
+    "OperationDevicesResponse",
+    "OperationsHealthResponse",
     "RelabelRequest",
+    "RoleCapabilityDTO",
+    "RoleCatalogResponse",
     "RuntimeStatus",
     "ServoAngleTestRequest",
     "ServoAngleTestResponse",

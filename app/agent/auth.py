@@ -27,8 +27,28 @@ ADMIN_CAPABILITIES = [
     "logs",
     "training",
     "user_dashboard",
+    "admin.users.manage",
+    "admin.roles.manage",
+    "admin.devices.manage",
+    "admin.bin_map.manage",
+    "admin.history.read_all",
+    "admin.alerts.read_all",
+    "admin.model.configure",
+    "admin.audio.configure",
+    "admin.reports.read_all",
+    "admin.collection_schedules.manage",
+    "admin.device_issues.manage",
 ]
-USER_CAPABILITIES = ["user_dashboard"]
+USER_CAPABILITIES = [
+    "user_dashboard",
+    "user.bin_map.read",
+    "user.alerts.read",
+    "user.collection_schedule.read",
+    "user.collection.mark_collected",
+    "user.device_issues.create",
+    "user.history.read_own",
+    "user.account.manage_own",
+]
 
 
 @dataclass(frozen=True)

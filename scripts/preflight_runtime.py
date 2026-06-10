@@ -30,8 +30,16 @@ def main() -> int:
         "agent": _get_json(f"{args.agent_url.rstrip('/')}/api/health"),
         "status": _get_json(f"{args.agent_url.rstrip('/')}/api/status"),
         "dataset": _get_json(f"{args.agent_url.rstrip('/')}/api/dataset/summary"),
+        "operations": _operations_summary(),
         "web": _http_ok(args.web_url),
         "model_exists": args.model.exists(),
+        "hardware": {
+            "real_hardware_required": False,
+            "camera_required": False,
+            "uart_required": False,
+            "audio_required": False,
+            "mode": "software_safety_only",
+        },
         "gpu": _gpu_summary(),
         "locks": locks,
     }
@@ -40,6 +48,7 @@ def main() -> int:
         and report["web"].get("ok")
         and report["model_exists"]
         and report["dataset"].get("images", 0) >= 0
+        and report["operations"].get("ok", False)
     )
     report["ok"] = ok
     if args.json:
@@ -49,6 +58,7 @@ def main() -> int:
         print(f"Agent: {report['agent'].get('app', report['agent'].get('error', 'unknown'))}")
         print(f"Web: {report['web'].get('status', report['web'].get('error', 'unknown'))}")
         print(f"Model: {'found' if report['model_exists'] else 'missing'} ({args.model})")
+        print("Hardware: software safety only; real camera/UART/audio are not required")
         status = report["status"]
         camera = status.get("camera", {})
         uart = status.get("uart", {})
@@ -64,6 +74,13 @@ def main() -> int:
             f"{dataset.get('images', 0)} images, "
             f"{dataset.get('boxes', 0)} boxes, "
             f"sync={not dataset.get('needs_sync', True)}"
+        )
+        operations = report["operations"]
+        print(
+            "Operations: "
+            f"{operations.get('station_total', 0)} stations, "
+            f"{operations.get('bin_total', 0)} bins, "
+            f"seed={operations.get('seed_source', '')}"
         )
         print(f"GPU: {report['gpu'].get('name', report['gpu'].get('error', 'unknown'))}")
     return 0 if ok else 1
@@ -109,6 +126,20 @@ def _gpu_summary() -> dict[str, str]:
         return {"name": first}
     name, memory = [part.strip() for part in first.split(",", 1)]
     return {"name": name, "memory": memory}
+
+
+def _operations_summary() -> dict[str, Any]:
+    try:
+        from app.agent.operations_store import OperationsStore
+        from app.utils.paths import operations_db_path
+
+        store = OperationsStore(operations_db_path())
+        try:
+            return store.health()
+        finally:
+            store.close()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def _lock_summary(*, fix_stale: bool) -> dict[str, Any]:
