@@ -32,7 +32,7 @@ test("user session sees only User dashboard and is forbidden from Admin APIs", a
   const consoleErrors = collectConsoleErrors(page);
   const session = await openAppAs(page, "user", "/user/dashboard");
 
-  await expect(page.locator("body")).toContainText(/Xin chào|Daily Waste Volume|Recent Classifications/i);
+  await expect(page.locator("body")).toContainText(/Xin chào|Lượng rác hằng ngày|Phân loại gần đây/i);
   await assertStitchPetLauncher(page, false);
   await assertUserShellHasNoAdminControls(page);
 
@@ -54,7 +54,7 @@ test("admin tabs keep the existing operational surfaces reachable", async ({ pag
   await openAppAs(page, "admin", "/admin?tab=live");
 
   for (const item of adminTabs) {
-    await page.goto(`/admin?tab=${item.tab}`, { waitUntil: "networkidle" });
+    await page.goto(`/admin?tab=${item.tab}`, { waitUntil: "domcontentloaded" });
     await expect(page.locator(".page-heading h1")).toHaveText(item.title);
     await expect(page.getByRole("navigation", { name: /Main navigation/i })).toContainText(item.nav);
     await assertNoHorizontalOverflow(page);

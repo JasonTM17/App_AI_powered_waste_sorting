@@ -1,6 +1,12 @@
 "use client";
 
 import { AiAdvisorPanel } from "./ai-advisor-panel";
+import {
+  UserAlertsScreen,
+  UserDeviceIssueScreen,
+  UserMapScreen,
+  UserScheduleScreen
+} from "@/components/operations-panels";
 import { UserAccountScreen } from "./user-account-screen";
 import { UserAnalyticsContent } from "./user-analytics-content";
 import { UserBinSummary } from "./user-bin-summary";
@@ -24,6 +30,40 @@ export function UserRouteContent(props: UserDashboardPanelProps) {
   }
   if (view === "device") {
     return <UserDeviceScreen analytics={analytics} device={device} history={history} imageToken={imageToken} />;
+  }
+  if (view === "map") {
+    return <UserMapScreen busy={props.busy} map={props.binMap} onRefresh={props.onRefreshOperations} />;
+  }
+  if (view === "alerts") {
+    return <UserAlertsScreen alerts={props.operationAlerts} />;
+  }
+  if (view === "schedule") {
+    return (
+      <UserScheduleScreen
+        busy={props.busy}
+        schedules={props.operationSchedules}
+        onCompleteCollection={props.onCompleteCollection}
+      />
+    );
+  }
+  if (view === "collect") {
+    return (
+      <UserScheduleScreen
+        collectOnly
+        busy={props.busy}
+        schedules={props.operationSchedules}
+        onCompleteCollection={props.onCompleteCollection}
+      />
+    );
+  }
+  if (view === "report-issue") {
+    return (
+      <UserDeviceIssueScreen
+        busy={props.busy}
+        map={props.binMap}
+        onReportIssue={props.onReportDeviceIssue}
+      />
+    );
   }
   if (view === "analytics") {
     return (

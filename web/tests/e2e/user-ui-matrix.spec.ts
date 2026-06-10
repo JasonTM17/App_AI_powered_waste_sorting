@@ -21,7 +21,7 @@ for (const route of userRoutes) {
     await assertUserShellHasNoAdminControls(page);
     await assertStitchPetLauncher(page, route.path === "/user/ecopet");
     if (route.path === "/user/dashboard" || route.path === "/user/ecopet") {
-      await expect(page.locator("body")).toContainText(/Daily Waste Volume|Recent Classifications/i);
+      await expect(page.locator("body")).toContainText(/Lượng rác hằng ngày|Phân loại gần đây/i);
     }
     await assertNoHorizontalOverflow(page);
     expectNoConsoleErrors(consoleErrors);

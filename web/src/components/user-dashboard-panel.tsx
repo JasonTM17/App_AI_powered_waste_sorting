@@ -1,13 +1,17 @@
 "use client";
 
 import {
+  AlertTriangle,
   BarChart3,
   Bell,
   Bot,
+  CalendarCheck,
+  CheckCircle2,
   FileDown,
   HeartPulse,
   History,
   Home,
+  MapPin,
   Server,
   Trophy,
   UserRound,
@@ -26,6 +30,11 @@ import { UserRouteContent } from "@/components/user-dashboard/user-route-content
 const userNav: Array<{ id: UserView; href: string; label: string; icon: LucideIcon }> = [
   { id: "dashboard", href: "/user/dashboard", label: "Tổng quan", icon: Home },
   { id: "analytics", href: "/user/analytics", label: "Phân tích", icon: BarChart3 },
+  { id: "map", href: "/user/map", label: "Bản đồ thùng", icon: MapPin },
+  { id: "alerts", href: "/user/alerts", label: "Cảnh báo", icon: AlertTriangle },
+  { id: "schedule", href: "/user/schedule", label: "Lịch thu gom", icon: CalendarCheck },
+  { id: "collect", href: "/user/collect", label: "Đã thu gom", icon: CheckCircle2 },
+  { id: "report-issue", href: "/user/report-issue", label: "Báo lỗi", icon: Bell },
   { id: "history", href: "/user/history", label: "Lịch sử", icon: History },
   { id: "device", href: "/user/device", label: "Thiết bị", icon: Server },
   { id: "ecopet", href: "/user/ecopet", label: "EcoPet AI", icon: Bot },
@@ -38,7 +47,7 @@ const userNav: Array<{ id: UserView; href: string; label: string; icon: LucideIc
 ];
 
 export function UserDashboardPanel(props: UserDashboardPanelProps) {
-  const { agentError, analytics, auth, busy, chatAnswer, chatQuestion, rangeDays, view } = props;
+  const { agentError, analytics, auth, busy, chatAnswer, chatQuestion, notice, rangeDays, view } = props;
   const primaryNav = userNav.slice(0, 5);
   const secondaryNav = userNav.slice(5);
   return (
@@ -90,6 +99,7 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
         ) : null}
 
         {agentError ? <div className="alert">Dữ liệu chưa sẵn sàng: {agentError}</div> : null}
+        {notice && !agentError ? <div className="success">{notice}</div> : null}
 
         <section className="content-grid user-dashboard-grid">
           <UserRouteContent {...props} />

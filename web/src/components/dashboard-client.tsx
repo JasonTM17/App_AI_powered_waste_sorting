@@ -3,7 +3,9 @@
 import {
   Activity,
   AlertTriangle,
+  Bell,
   BrainCircuit,
+  CalendarCheck,
   Camera,
   CheckCircle2,
   ChevronLeft,
@@ -12,12 +14,14 @@ import {
   Download,
   History,
   ListTree,
+  MapPin,
   MousePointer2,
   Pencil,
   Play,
   RefreshCcw,
   Save,
   Search,
+  Server,
   Settings,
   ShieldCheck,
   Square,
@@ -45,15 +49,24 @@ import {
   AuthLoginResponse,
   AuthMe,
   AuthRole,
+  AlertsResponse,
+  BinMapResponse,
+  BinStation,
+  BinStationCreatePayload,
+  BinStationPatchPayload,
   ClassMapping,
   CommonWasteItem,
   CaptureSession,
+  CollectionCompleteResponse,
+  CollectionSchedulesResponse,
   DatasetAnnotationResponse,
   DatasetBox,
   DatasetItem,
   DatasetItemsResponse,
   DatasetSummary,
   Detection,
+  DeviceIssueCreatePayload,
+  DeviceIssueResponse,
   HardwareDiagnostics,
   HardwareProfile,
   HardwareTestResponse,
@@ -63,6 +76,11 @@ import {
   KnowledgeEvaluateResponse,
   LearnNowStatus,
   ModelClass,
+  OperationDevice,
+  OperationDevicesResponse,
+  OperationDeviceUpsertPayload,
+  OperationsHealthResponse,
+  RoleCatalogResponse,
   RuntimeStatus,
   SourceQuality,
   TrainingStatus,
@@ -85,12 +103,32 @@ import { AccountControl } from "@/components/account-control";
 import { AdminAccountsPanel } from "@/components/admin-accounts-panel";
 import { AuthLoginPanel } from "@/components/auth-login-panel";
 import { RoleChatbotLauncher } from "@/components/chat/role-chatbot-launcher";
+import {
+  AdminAlertsPanel,
+  AdminBinMapPanel,
+  AdminDevicesPanel,
+  AdminRolesPanel
+} from "@/components/operations-panels";
 import { PasswordChangePanel } from "@/components/password-change-panel";
 import { TopbarStatusControls } from "@/components/topbar-status-controls";
 import { UserDashboardPanel } from "@/components/user-dashboard-panel";
 import type { UserView } from "@/components/user-dashboard/user-dashboard-types";
 
-type TabId = "live" | "history" | "data" | "mapping" | "settings" | "logs" | "accounts" | "reports";
+type TabId =
+  | "live"
+  | "history"
+  | "data"
+  | "mapping"
+  | "settings"
+  | "logs"
+  | "accounts"
+  | "roles"
+  | "devices"
+  | "bin-map"
+  | "alerts"
+  | "model"
+  | "audio"
+  | "reports";
 type TrustedFilter = "all" | "trusted" | "untrusted";
 type BulkAction = "delete" | "relabel" | "quarantine" | "mark_trusted" | "mark_untrusted";
 type Mp3TestCommand =
@@ -150,8 +188,14 @@ const USER_CHATBOT_ENABLED_KEY = "trash-sorter-user-chatbot-enabled";
 const tabs = [
   { id: "live" as const, label: "Giám sát", icon: Activity },
   { id: "history" as const, label: "Lịch sử", icon: History },
+  { id: "bin-map" as const, label: "Bản đồ", icon: MapPin },
+  { id: "alerts" as const, label: "Cảnh báo", icon: Bell },
+  { id: "devices" as const, label: "Thiết bị", icon: Server },
+  { id: "roles" as const, label: "Role", icon: ShieldCheck },
   { id: "data" as const, label: "Dữ liệu", icon: Database },
   { id: "mapping" as const, label: "Mapping", icon: ListTree },
+  { id: "model" as const, label: "Model AI", icon: BrainCircuit },
+  { id: "audio" as const, label: "Audio", icon: CalendarCheck },
   { id: "settings" as const, label: "Cài đặt", icon: Settings },
   { id: "logs" as const, label: "Nhật ký", icon: TerminalSquare },
   { id: "accounts" as const, label: "Tài khoản", icon: ShieldCheck },
@@ -180,10 +224,19 @@ export function DashboardClient() {
   const [userDevice, setUserDevice] = useState<UserDevice | null>(null);
   const [userReport, setUserReport] = useState<UserReport | null>(null);
   const [userExperience, setUserExperience] = useState<UserExperience | null>(null);
+  const [userBinMap, setUserBinMap] = useState<BinMapResponse | null>(null);
+  const [userAlerts, setUserAlerts] = useState<AlertsResponse | null>(null);
+  const [userSchedules, setUserSchedules] = useState<CollectionSchedulesResponse | null>(null);
   const [userChat, setUserChat] = useState<AiChatResponse | null>(null);
   const [userChatQuestion, setUserChatQuestion] = useState("");
   const [userChatbotEnabled, setUserChatbotEnabled] = useState(true);
   const [accounts, setAccounts] = useState<AccountDTO[]>([]);
+  const [roleCatalog, setRoleCatalog] = useState<RoleCatalogResponse | null>(null);
+  const [operationDevices, setOperationDevices] = useState<OperationDevicesResponse | null>(null);
+  const [adminBinMap, setAdminBinMap] = useState<BinMapResponse | null>(null);
+  const [adminAlerts, setAdminAlerts] = useState<AlertsResponse | null>(null);
+  const [adminSchedules, setAdminSchedules] = useState<CollectionSchedulesResponse | null>(null);
+  const [operationsHealth, setOperationsHealth] = useState<OperationsHealthResponse | null>(null);
   const [createUsername, setCreateUsername] = useState("");
   const [createPassword, setCreatePassword] = useState("");
   const [createRole, setCreateRole] = useState<AuthRole>("user");
@@ -415,18 +468,33 @@ export function DashboardClient() {
   async function refreshUserDashboard() {
     setBusy(true);
     try {
-      const [analyticsData, historyData, deviceData, reportData, experienceData] = await Promise.all([
+      const [
+        analyticsData,
+        historyData,
+        deviceData,
+        reportData,
+        experienceData,
+        binMapData,
+        alertsData,
+        schedulesData
+      ] = await Promise.all([
         fetchAgent<UserAnalytics>(`/api/user/analytics?range_days=${userRangeDays}`),
         fetchAgent<UserHistoryResponse>("/api/user/history?limit=24"),
         fetchAgent<UserDevice>("/api/user/device"),
         fetchAgent<UserReport>(`/api/user/report?range_days=${userRangeDays}`),
-        fetchAgent<UserExperience>(`/api/user/experience?range_days=${userRangeDays}`)
+        fetchAgent<UserExperience>(`/api/user/experience?range_days=${userRangeDays}`),
+        fetchAgent<BinMapResponse>("/api/user/bin-map"),
+        fetchAgent<AlertsResponse>("/api/user/alerts?include_resolved=false"),
+        fetchAgent<CollectionSchedulesResponse>("/api/user/collection-schedule")
       ]);
       setUserAnalytics(analyticsData);
       setUserHistoryRows(historyData.rows);
       setUserDevice(deviceData);
       setUserReport(reportData);
       setUserExperience(experienceData);
+      setUserBinMap(binMapData);
+      setUserAlerts(alertsData);
+      setUserSchedules(schedulesData);
       setAgentError("");
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : "Không tải được dashboard User");
@@ -468,7 +536,9 @@ export function DashboardClient() {
       setUserChatQuestion("");
       setAgentError("");
     } catch (error) {
-      setAgentError(error instanceof Error ? error.message : "Không gọi được chatbot User");
+      const fallback = localChatFailure("user", error);
+      setUserChat(fallback);
+      setAgentError(fallback.message);
     } finally {
       setBusy(false);
     }
@@ -515,6 +585,152 @@ export function DashboardClient() {
   async function refreshKnowledge() {
     const data = await fetchAgent<KnowledgeCatalogResponse>("/api/admin/knowledge");
     setKnowledgeCatalog(data);
+  }
+
+  async function refreshAdminOperations() {
+    const [rolesData, devicesData, binMapData, alertsData, schedulesData, healthData] = await Promise.all([
+      fetchAgent<RoleCatalogResponse>("/api/admin/roles"),
+      fetchAgent<OperationDevicesResponse>("/api/admin/devices"),
+      fetchAgent<BinMapResponse>("/api/admin/bin-map"),
+      fetchAgent<AlertsResponse>("/api/admin/alerts?include_resolved=false"),
+      fetchAgent<CollectionSchedulesResponse>("/api/admin/collection-schedules"),
+      fetchAgent<OperationsHealthResponse>("/api/admin/operations/health")
+    ]);
+    setRoleCatalog(rolesData);
+    setOperationDevices(devicesData);
+    setAdminBinMap(binMapData);
+    setAdminAlerts(alertsData);
+    setAdminSchedules(schedulesData);
+    setOperationsHealth(healthData);
+  }
+
+  async function refreshUserOperations() {
+    const [binMapData, alertsData, schedulesData] = await Promise.all([
+      fetchAgent<BinMapResponse>("/api/user/bin-map"),
+      fetchAgent<AlertsResponse>("/api/user/alerts?include_resolved=false"),
+      fetchAgent<CollectionSchedulesResponse>("/api/user/collection-schedule")
+    ]);
+    setUserBinMap(binMapData);
+    setUserAlerts(alertsData);
+    setUserSchedules(schedulesData);
+  }
+
+  async function saveOperationDevice(payload: OperationDeviceUpsertPayload) {
+    setBusy(true);
+    try {
+      await fetchAgent<OperationDevice>("/api/admin/devices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      setNotice("Đã lưu thiết bị.");
+      await refreshAdminOperations();
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không lưu được thiết bị");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createBinStation(payload: BinStationCreatePayload) {
+    setBusy(true);
+    try {
+      await fetchAgent<BinStation>("/api/admin/bin-map", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      setNotice("Đã tạo trạm thùng rác.");
+      await refreshAdminOperations();
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không tạo được trạm thùng rác");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function patchBinStation(stationId: string, payload: BinStationPatchPayload) {
+    setBusy(true);
+    try {
+      await fetchAgent<BinStation>(`/api/admin/bin-map/${encodeURIComponent(stationId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      setNotice("Đã cập nhật tọa độ trạm.");
+      await refreshAdminOperations();
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không cập nhật được trạm");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteBinStation(stationId: string) {
+    setBusy(true);
+    try {
+      await fetchAgent(`/api/admin/bin-map/${encodeURIComponent(stationId)}`, { method: "DELETE" });
+      setNotice("Đã ngưng hoạt động trạm.");
+      await refreshAdminOperations();
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không ngưng hoạt động được trạm");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function patchOperationAlert(alertId: string, statusValue: "open" | "acknowledged" | "resolved") {
+    setBusy(true);
+    try {
+      await fetchAgent<AlertsResponse>(`/api/admin/alerts/${encodeURIComponent(alertId)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: statusValue })
+      });
+      setNotice(statusValue === "resolved" ? "Đã xử lý cảnh báo." : "Đã cập nhật cảnh báo.");
+      await refreshAdminOperations();
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không cập nhật được cảnh báo");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function completeCollection(scheduleId: string, note: string) {
+    setBusy(true);
+    try {
+      const result = await fetchAgent<CollectionCompleteResponse>(
+        `/api/user/collections/${encodeURIComponent(scheduleId)}/complete`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ note })
+        }
+      );
+      setNotice(result.already_completed ? "Lịch này đã được đánh dấu trước đó." : "Đã đánh dấu đã thu gom.");
+      await refreshUserOperations();
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không đánh dấu thu gom được");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reportDeviceIssue(payload: DeviceIssueCreatePayload) {
+    setBusy(true);
+    try {
+      await fetchAgent<DeviceIssueResponse>("/api/user/device-issues", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      setNotice("Đã gửi báo lỗi thiết bị và tạo cảnh báo.");
+      await refreshUserOperations();
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không gửi được báo lỗi thiết bị");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function upsertKnowledge(payload: {
@@ -677,7 +893,9 @@ export function DashboardClient() {
       setAdminChatQuestion("");
       setAgentError("");
     } catch (error) {
-      setAgentError(error instanceof Error ? error.message : "Không gọi được chatbot Admin");
+      const fallback = localChatFailure("admin", error);
+      setAdminChat(fallback);
+      setAgentError(fallback.message);
     } finally {
       setBusy(false);
     }
@@ -708,11 +926,20 @@ export function DashboardClient() {
     setUserDevice(null);
     setUserReport(null);
     setUserExperience(null);
+    setUserBinMap(null);
+    setUserAlerts(null);
+    setUserSchedules(null);
     setUserChat(null);
     setAdminChat(null);
     setKnowledgeCatalog(null);
     setKnowledgeEvaluation(null);
     setAccounts([]);
+    setRoleCatalog(null);
+    setOperationDevices(null);
+    setAdminBinMap(null);
+    setAdminAlerts(null);
+    setAdminSchedules(null);
+    setOperationsHealth(null);
     setPasswordCurrent("");
     setPasswordNew("");
     setPasswordConfirm("");
@@ -785,7 +1012,9 @@ export function DashboardClient() {
 
   async function refreshActive(scope: TabId = active) {
     try {
-      const statusPath = scope === "settings" ? "/api/status" : "/api/status?include_devices=false";
+      const settingsLike = scope === "settings" || scope === "model" || scope === "audio";
+      const operationsLike = scope === "roles" || scope === "devices" || scope === "bin-map" || scope === "alerts";
+      const statusPath = settingsLike ? "/api/status" : "/api/status?include_devices=false";
       const [statusRes, trainingRes] = await Promise.all([
         fetchAgent<RuntimeStatus>(statusPath),
         fetchAgent<TrainingStatus>("/api/training/status")
@@ -846,7 +1075,7 @@ export function DashboardClient() {
         setLogs(logsRes.lines);
       }
 
-      if (scope === "settings") {
+      if (settingsLike) {
         const [settingsRes, classesRes, commonWasteRes, hardwareRes, hardwareDiagnosticsRes, actuationRes] = await Promise.all([
           fetchAgent<SettingsResponse>("/api/settings"),
           fetchAgent<ModelClassesResponse>("/api/model/classes"),
@@ -872,6 +1101,10 @@ export function DashboardClient() {
 
       if (scope === "accounts") {
         await Promise.all([refreshAccounts(), refreshKnowledge()]);
+      }
+
+      if (operationsLike) {
+        await refreshAdminOperations();
       }
       setAgentError("");
     } catch (error) {
@@ -1633,13 +1866,17 @@ export function DashboardClient() {
         advisorQuestion={userAdvisorQuestion}
         analytics={userAnalytics}
         auth={auth}
+        binMap={userBinMap}
         busy={busy}
         chatAnswer={userChat}
         chatQuestion={userChatQuestion}
         device={userDevice}
         experience={userExperience}
         history={userHistoryRows}
+        operationAlerts={userAlerts}
+        operationSchedules={userSchedules}
         imageToken={agentToken}
+        notice={notice}
         passwordConfirm={passwordConfirm}
         passwordCurrent={passwordCurrent}
         passwordError={passwordError}
@@ -1654,6 +1891,7 @@ export function DashboardClient() {
         onChatQuestionChange={setUserChatQuestion}
         onChatRequest={(value) => void requestUserChat(value)}
         onChatbotEnabledChange={updateUserChatbotEnabled}
+        onCompleteCollection={(scheduleId, note) => void completeCollection(scheduleId, note)}
         onLogout={() => void logoutFromAgent()}
         onPasswordConfirmChange={setPasswordConfirm}
         onPasswordCurrentChange={setPasswordCurrent}
@@ -1664,6 +1902,8 @@ export function DashboardClient() {
           setUserChat(null);
         }}
         onRefresh={() => void refreshUserDashboard()}
+        onRefreshOperations={() => void refreshUserOperations()}
+        onReportDeviceIssue={(payload) => void reportDeviceIssue(payload)}
         onViewChange={setUserView}
       />
     );
@@ -1777,6 +2017,33 @@ export function DashboardClient() {
           />
         ) : null}
         {active === "history" ? <HistoryPanel imageToken={agentToken} rows={filteredHistory} /> : null}
+        {active === "roles" ? <AdminRolesPanel catalog={roleCatalog} /> : null}
+        {active === "devices" ? (
+          <AdminDevicesPanel
+            busy={busy}
+            devices={operationDevices}
+            onSaveDevice={(payload) => void saveOperationDevice(payload)}
+          />
+        ) : null}
+        {active === "bin-map" ? (
+          <AdminBinMapPanel
+            busy={busy}
+            map={adminBinMap}
+            schedules={adminSchedules}
+            onCreateStation={(payload) => void createBinStation(payload)}
+            onDeleteStation={(stationId) => void deleteBinStation(stationId)}
+            onPatchStation={(stationId, payload) => void patchBinStation(stationId, payload)}
+            onRefresh={() => void refreshAdminOperations()}
+          />
+        ) : null}
+        {active === "alerts" ? (
+          <AdminAlertsPanel
+            alerts={adminAlerts}
+            busy={busy}
+            schedules={adminSchedules}
+            onPatchAlert={(alertId, statusValue) => void patchOperationAlert(alertId, statusValue)}
+          />
+        ) : null}
         {active === "data" ? (
           <DataPanel
             annotation={annotation}
@@ -1860,7 +2127,7 @@ export function DashboardClient() {
             onSave={() => void saveMappings()}
           />
         ) : null}
-        {active === "settings" ? (
+        {active === "settings" || active === "model" || active === "audio" ? (
           <SettingsPanel
             actuationMode={actuationMode}
             busy={busy}
@@ -3954,18 +4221,25 @@ function SettingsPanel({
           </div>
         </div>
         <div className="form-grid two-col">
-          <label className="check-field">
-            <input
-              checked={config.speaker.enabled}
-              onChange={(event) =>
+          <label>
+            Phát bằng
+            <select
+              value={config.speaker.output_mode ?? (config.speaker.enabled ? "computer_speaker" : "hardware")}
+              onChange={(event) => {
+                const outputMode = event.target.value as "hardware" | "computer_speaker";
                 onChange((cfg) => ({
                   ...cfg,
-                  speaker: { ...cfg.speaker, enabled: event.target.checked }
-                }))
-              }
-              type="checkbox"
-            />
-            Bật phát loa
+                  speaker: {
+                    ...cfg.speaker,
+                    output_mode: outputMode,
+                    enabled: outputMode === "computer_speaker"
+                  }
+                }));
+              }}
+            >
+              <option value="hardware">Phần cứng</option>
+              <option value="computer_speaker">Loa máy tính</option>
+            </select>
           </label>
           <NumberField
             label="Cooldown loa (giây)"
@@ -4643,6 +4917,11 @@ function userViewFromLocation(): UserView {
     "advice",
     "history",
     "device",
+    "map",
+    "alerts",
+    "schedule",
+    "collect",
+    "report-issue",
     "analytics",
     "reports",
     "notifications",
@@ -4654,6 +4933,24 @@ function userViewFromLocation(): UserView {
 }
 
 function subtitleFor(tab: TabId) {
+  if (tab === "bin-map") {
+    return "Bản đồ Thủ Đức với 10 trạm seed, 30 ngăn và fallback list khi tile lỗi";
+  }
+  if (tab === "alerts") {
+    return "Xem cảnh báo mở, cảnh báo thiết bị và lịch cần chú ý";
+  }
+  if (tab === "devices") {
+    return "Quản lý thiết bị local, trạng thái và phụ trách";
+  }
+  if (tab === "roles") {
+    return "Xem matrix quyền admin/user và scope vận hành local";
+  }
+  if (tab === "model") {
+    return "Cấu hình model AI, ngưỡng và luồng đánh giá local";
+  }
+  if (tab === "audio") {
+    return "Cấu hình audio, test MP3 và hành vi phát thanh";
+  }
   if (tab === "reports") {
     return "Tổng hợp history, export CSV và chất lượng dataset cho Admin";
   }
@@ -4684,6 +4981,29 @@ function adminHistoryExportUrl(token: string) {
     url.searchParams.set("token", token);
   }
   return url.toString();
+}
+
+function localChatFailure(role: AuthRole, error: unknown): AiChatResponse {
+  const detail = error instanceof Error ? error.message : "";
+  const base =
+    role === "admin"
+      ? "Trợ lý vận hành chưa trả lời được lúc này. Kiểm tra local agent, DEEPSEEK_API_KEY hoặc thử lại sau vài giây."
+      : "EcoPet chưa trả lời được lúc này. Bạn vẫn có thể xem biểu đồ, lịch sử rác và thử hỏi lại sau vài giây.";
+  return {
+    generated_at: new Date().toISOString(),
+    available: false,
+    provider: "local",
+    model: "",
+    role,
+    profile: role === "admin" ? "trash_sorter_admin" : "trash_sorter_user",
+    message: detail ? `${base}\n• Chi tiết: ${detail}` : base,
+    quick_prompts:
+      role === "admin"
+        ? ["Tóm tắt trạng thái local", "Kiểm tra camera", "Kiểm tra cấu hình DeepSeek"]
+        : ["Xem Eco Score", "Xem lịch sử rác", "Thử hỏi lại EcoPet"],
+    knowledge_used: [],
+    safety_notice: "Phản hồi local fallback, không gửi dữ liệu mới ra ngoài."
+  };
 }
 
 function labelSource(source: string) {

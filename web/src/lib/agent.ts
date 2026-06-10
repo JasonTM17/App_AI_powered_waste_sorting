@@ -156,6 +156,7 @@ export type AppConfig = {
   };
   speaker: {
     enabled: boolean;
+    output_mode: "hardware" | "computer_speaker";
     cooldown_seconds: number;
   };
   theme: "dark" | "light";
@@ -481,6 +482,208 @@ export type AccountsResponse = {
   accounts: AccountDTO[];
 };
 
+export type RoleCapability = {
+  id: string;
+  label: string;
+  description: string;
+};
+
+export type RoleDefinition = {
+  role: AuthRole;
+  label: string;
+  capabilities: RoleCapability[];
+};
+
+export type RoleCatalogResponse = {
+  roles: RoleDefinition[];
+};
+
+export type OperationDevice = {
+  id: number;
+  device_id: string;
+  device_name: string;
+  location: string;
+  owner_username: string;
+  status: "online" | "offline" | "warning" | string;
+  message: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OperationDevicesResponse = {
+  devices: OperationDevice[];
+  total: number;
+};
+
+export type OperationDeviceUpsertPayload = {
+  device_id: string;
+  device_name?: string;
+  location?: string;
+  owner_username?: string;
+  status?: string;
+  message?: string;
+  active?: boolean;
+};
+
+export type OperationBin = {
+  id: number;
+  bin_id: string;
+  station_id: string;
+  command: "O" | "R" | "I" | string;
+  bin_index: number;
+  label: string;
+  fill_percent: number;
+  status: "normal" | "warning" | "full" | "offline" | string;
+  active: boolean;
+  updated_at: string;
+};
+
+export type BinStation = {
+  id: number;
+  station_id: string;
+  name: string;
+  area: string;
+  address: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  coordinate_verified: boolean;
+  status: "candidate" | "active" | "inactive" | "maintenance" | string;
+  active: boolean;
+  owner_username: string;
+  device_id: string;
+  note: string;
+  seed_source: string;
+  alert_total: number;
+  open_alert_total: number;
+  bins: OperationBin[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type BinMapResponse = {
+  generated_at: string;
+  center: {
+    latitude: number;
+    longitude: number;
+    zoom: number;
+  };
+  stations: BinStation[];
+  total: number;
+};
+
+export type BinStationCreatePayload = {
+  station_id?: string;
+  name: string;
+  area?: string;
+  address?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  coordinate_verified?: boolean;
+  status?: string;
+  active?: boolean;
+  owner_username?: string;
+  device_id?: string;
+  note?: string;
+};
+
+export type BinStationPatchPayload = Partial<Omit<BinStationCreatePayload, "station_id">>;
+
+export type OperationAlert = {
+  id: number;
+  alert_id: string;
+  station_id: string;
+  bin_id: string;
+  device_id: string;
+  severity: "info" | "success" | "warning" | "danger" | string;
+  title: string;
+  message: string;
+  status: "open" | "acknowledged" | "resolved" | string;
+  source: string;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string;
+  actor_username: string;
+  derived: boolean;
+};
+
+export type AlertsResponse = {
+  alerts: OperationAlert[];
+  total: number;
+};
+
+export type CollectionSchedule = {
+  id: number;
+  schedule_id: string;
+  station_id: string;
+  station_name: string;
+  assigned_owner_username: string;
+  scheduled_date: string;
+  window_start: string;
+  window_end: string;
+  status: string;
+  state: "scheduled" | "due_today" | "overdue" | "upcoming" | "completed";
+  completed_at?: string | null;
+  completed_by: string;
+  note: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CollectionSchedulesResponse = {
+  schedules: CollectionSchedule[];
+  total: number;
+};
+
+export type CollectionCompleteResponse = {
+  ok: boolean;
+  schedule: CollectionSchedule;
+  already_completed: boolean;
+  message: string;
+};
+
+export type DeviceIssue = {
+  id: number;
+  issue_id: string;
+  station_id: string;
+  bin_id: string;
+  device_id: string;
+  issue_type: string;
+  severity: "info" | "warning" | "danger" | string;
+  description: string;
+  status: "open" | "acknowledged" | "resolved" | string;
+  reporter_username: string;
+  reporter_account_id?: number | null;
+  alert_id: string;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string;
+};
+
+export type DeviceIssueResponse = {
+  issue: DeviceIssue;
+  alert: OperationAlert;
+  message: string;
+};
+
+export type DeviceIssueCreatePayload = {
+  station_id?: string;
+  bin_id?: string;
+  device_id?: string;
+  issue_type: string;
+  severity: "info" | "warning" | "danger";
+  description: string;
+};
+
+export type OperationsHealthResponse = {
+  ok: boolean;
+  path: string;
+  station_total: number;
+  bin_total: number;
+  schedule_total: number;
+  seed_source: string;
+};
+
 export type BinFullness = {
   bin_index: number;
   label: string;
@@ -760,6 +963,7 @@ export const AGENT_URL =
   process.env.NEXT_PUBLIC_AGENT_URL?.replace(/\/$/, "") || "http://localhost:8765";
 
 export const DEFAULT_AGENT_TOKEN = process.env.NEXT_PUBLIC_AGENT_TOKEN || "";
+const AGENT_FETCH_TIMEOUT_MS = 20000;
 
 export class AgentApiError extends Error {
   status: number;
@@ -840,14 +1044,58 @@ export async function agentFetch<T>(
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
-  const res = await fetch(`${AGENT_URL}${path}`, {
-    ...init,
-    headers,
-    cache: "no-store"
-  });
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), AGENT_FETCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${AGENT_URL}${path}`, {
+      ...init,
+      headers,
+      cache: "no-store",
+      signal: init?.signal ?? controller.signal
+    });
+  } catch (error) {
+    const aborted = error instanceof DOMException && error.name === "AbortError";
+    throw new AgentApiError(
+      aborted
+        ? "Local agent phản hồi quá lâu. Kiểm tra agent hoặc thử lại sau vài giây."
+        : "Không kết nối được local agent. Hãy bật agent bằng scripts/start_local.ps1 rồi tải lại web.",
+      0
+    );
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
   if (!res.ok) {
-    const detail = await res.text();
+    const detail = await agentErrorDetail(res);
     throw new AgentApiError(detail || `${res.status} ${res.statusText}`, res.status);
   }
   return (await res.json()) as T;
+}
+
+async function agentErrorDetail(res: Response) {
+  const text = await res.text();
+  if (!text) {
+    return "";
+  }
+  try {
+    const parsed = JSON.parse(text) as { detail?: unknown; message?: unknown };
+    const detail = parsed.detail ?? parsed.message;
+    if (typeof detail === "string") {
+      return detail;
+    }
+    if (Array.isArray(detail)) {
+      return detail
+        .map((item) => {
+          if (item && typeof item === "object" && "msg" in item) {
+            return String((item as { msg?: unknown }).msg ?? "");
+          }
+          return String(item);
+        })
+        .filter(Boolean)
+        .join("; ");
+    }
+  } catch {
+    // Fall through to raw text for non-JSON errors.
+  }
+  return text;
 }

@@ -22,9 +22,14 @@ type QaState = {
 };
 
 export const userRoutes = [
-  { path: "/user/dashboard", expected: /Xin chào|Daily Waste Volume|Recent Classifications/i },
-  { path: "/user/ecopet", expected: /EcoPet|Daily Waste Volume|Trợ lý AI/i },
+  { path: "/user/dashboard", expected: /Xin chào|Lượng rác hằng ngày|Phân loại gần đây/i },
+  { path: "/user/ecopet", expected: /EcoPet|Lượng rác hằng ngày|Trợ lý AI/i },
   { path: "/user/advice", expected: /AI Advisor|Gợi ý sức khỏe|Lời khuyên/i },
+  { path: "/user/map", expected: /Bản đồ thùng rác|Trạm gần bạn|OpenStreetMap/i },
+  { path: "/user/alerts", expected: /Cảnh báo|vấn đề/i },
+  { path: "/user/schedule", expected: /Lịch thu gom|Lịch trạm/i },
+  { path: "/user/collect", expected: /Đã thu gom|Lịch thu gom/i },
+  { path: "/user/report-issue", expected: /Báo lỗi|thiết bị/i },
   { path: "/user/history", expected: /Lịch sử của bạn|Phân loại gần đây/i },
   { path: "/user/device", expected: /Thiết bị|Trạng thái thùng|EcoSort QA Station/i },
   { path: "/user/analytics", expected: /Xu hướng|Cơ cấu 3 thùng|Biểu đồ cột/i },
@@ -38,8 +43,14 @@ export const userRoutes = [
 export const adminTabs = [
   { tab: "live", nav: /Giám sát/i, title: "Giám sát" },
   { tab: "history", nav: /Lịch sử/i, title: "Lịch sử" },
+  { tab: "bin-map", nav: /Bản đồ/i, title: "Bản đồ" },
+  { tab: "alerts", nav: /Cảnh báo/i, title: "Cảnh báo" },
+  { tab: "devices", nav: /Thiết bị/i, title: "Thiết bị" },
+  { tab: "roles", nav: /Role/i, title: "Role" },
   { tab: "data", nav: /Dữ liệu/i, title: "Dữ liệu" },
   { tab: "mapping", nav: /Mapping/i, title: "Mapping" },
+  { tab: "model", nav: /Model AI/i, title: "Model AI" },
+  { tab: "audio", nav: /Audio/i, title: "Audio" },
   { tab: "settings", nav: /Cài đặt/i, title: "Cài đặt" },
   { tab: "logs", nav: /Nhật ký/i, title: "Nhật ký" },
   { tab: "accounts", nav: /Tài khoản/i, title: "Tài khoản" },
@@ -72,7 +83,7 @@ export async function openAppAs(page: Page, role: "admin" | "user", targetPath: 
     },
     [SESSION_TOKEN_KEY, session.token]
   );
-  await page.goto(targetPath, { waitUntil: "networkidle" });
+  await page.goto(targetPath, { waitUntil: "domcontentloaded" });
   await expect(page.locator("body")).toBeVisible();
   return session;
 }
