@@ -26,6 +26,16 @@ BOOTSTRAP_ADMIN_USERNAME_ENV = "TRASH_SORTER_BOOTSTRAP_ADMIN_USERNAME"
 BOOTSTRAP_ADMIN_PASSWORD_ENV = "TRASH_SORTER_BOOTSTRAP_ADMIN_PASSWORD"
 NEXT_PUBLIC_AGENT_URL_ENV = "NEXT_PUBLIC_AGENT_URL"
 LOCAL_ENV_FILES = (".env", ".env.local")
+AUTH_ENV_KEYS = (
+    AUTH_DEV_DEFAULTS_ENV,
+    AUTH_DB_ENV,
+    AUTH_DATABASE_URL_ENV,
+    DATABASE_URL_ENV,
+    BOOTSTRAP_ADMIN_USERNAME_ENV,
+    BOOTSTRAP_ADMIN_PASSWORD_ENV,
+)
+AUTH_STORE_URL_KEYS = (AUTH_DATABASE_URL_ENV, DATABASE_URL_ENV)
+AUTH_STORE_KEYS = (*AUTH_STORE_URL_KEYS, AUTH_DB_ENV)
 
 
 @dataclass(frozen=True)
@@ -70,23 +80,66 @@ def ensure_local_web_stack() -> LocalWebResult:
     return LocalWebResult(ok=True, message="Web dashboard đã sẵn sàng. Vui lòng đăng nhập.", url=WEB_URL)
 
 
+def apply_local_auth_environment(*, allow_dev_defaults: bool = False) -> dict[str, str]:
+    """Apply the same local auth env source used by the web agent."""
+    root = _project_root()
+    file_env = _local_env(root) if root is not None else {}
+    applied: dict[str, str] = {}
+
+    explicit_store = _selected_auth_store(dict(os.environ))
+    file_store = _selected_auth_store(file_env)
+    if explicit_store is None and file_store is not None:
+        key, value = file_store
+        os.environ[key] = value
+        applied[key] = value
+
+    for key in (
+        AUTH_DEV_DEFAULTS_ENV,
+        BOOTSTRAP_ADMIN_USERNAME_ENV,
+        BOOTSTRAP_ADMIN_PASSWORD_ENV,
+    ):
+        if os.getenv(key, "").strip():
+            continue
+        value = file_env.get(key, "").strip()
+        if not value:
+            continue
+        os.environ[key] = value
+        applied[key] = value
+
+    if allow_dev_defaults and not _auth_explicitly_configured(file_env):
+        os.environ[AUTH_DEV_DEFAULTS_ENV] = "1"
+        applied[AUTH_DEV_DEFAULTS_ENV] = "1"
+    return applied
+
+
 def _agent_env(root: Path) -> dict[str, str]:
     env = _local_env(root)
+    explicit_store = _selected_auth_store(dict(os.environ))
+    file_store = _selected_auth_store(env)
+    for key in AUTH_STORE_KEYS:
+        env.pop(key, None)
+    if explicit_store is None and file_store is not None:
+        key, value = file_store
+        env[key] = value
     if not _auth_explicitly_configured(env):
         env[AUTH_DEV_DEFAULTS_ENV] = "1"
     return env
 
 
+def _selected_auth_store(env: dict[str, str]) -> tuple[str, str] | None:
+    for key in AUTH_STORE_URL_KEYS:
+        value = str(env.get(key, "") or "").strip()
+        if value:
+            return key, value
+    db_path = str(env.get(AUTH_DB_ENV, "") or "").strip()
+    if db_path:
+        return AUTH_DB_ENV, db_path
+    return None
+
+
 def _auth_explicitly_configured(extra_env: dict[str, str] | None = None) -> bool:
     extra_env = extra_env or {}
-    for key in (
-        AUTH_DEV_DEFAULTS_ENV,
-        AUTH_DB_ENV,
-        AUTH_DATABASE_URL_ENV,
-        DATABASE_URL_ENV,
-        BOOTSTRAP_ADMIN_USERNAME_ENV,
-        BOOTSTRAP_ADMIN_PASSWORD_ENV,
-    ):
+    for key in AUTH_ENV_KEYS:
         if extra_env.get(key, "").strip() or os.getenv(key, "").strip():
             return True
     try:

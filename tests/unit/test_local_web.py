@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from app.utils import local_web
@@ -143,3 +144,76 @@ def test_desktop_launcher_loads_local_agent_env_file(tmp_path, monkeypatch):
         "DEEPSEEK_MODEL": "deepseek-v4-flash",
         local_web.AUTH_DATABASE_URL_ENV: "postgresql://user:pass@localhost/trash",
     }
+
+
+def test_desktop_login_applies_same_local_auth_env_file_as_web(tmp_path, monkeypatch):
+    _clear_auth_env(monkeypatch)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    root = _project_root(tmp_path)
+    auth_db = tmp_path / "shared-auth.db"
+    (root / ".env.local").write_text(
+        f"{local_web.AUTH_DB_ENV}={auth_db}\n"
+        f"{local_web.BOOTSTRAP_ADMIN_USERNAME_ENV}=owner\n"
+        f"{local_web.BOOTSTRAP_ADMIN_PASSWORD_ENV}=owner-pass-123\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(local_web, "_project_root", lambda: root)
+
+    try:
+        applied = local_web.apply_local_auth_environment(allow_dev_defaults=True)
+
+        assert applied[local_web.AUTH_DB_ENV] == str(auth_db)
+        assert applied[local_web.BOOTSTRAP_ADMIN_USERNAME_ENV] == "owner"
+        assert applied[local_web.BOOTSTRAP_ADMIN_PASSWORD_ENV] == "owner-pass-123"
+        assert local_web.AUTH_DEV_DEFAULTS_ENV not in applied
+    finally:
+        for key in local_web.AUTH_ENV_KEYS:
+            os.environ.pop(key, None)
+
+
+def test_explicit_sqlite_auth_db_blocks_database_url_from_local_env(tmp_path, monkeypatch):
+    _clear_auth_env(monkeypatch)
+    root = _project_root(tmp_path)
+    explicit_db = tmp_path / "playwright-auth.db"
+    monkeypatch.setenv(local_web.AUTH_DB_ENV, str(explicit_db))
+    (root / ".env.local").write_text(
+        "\n".join(
+            [
+                "TRASH_SORTER_AUTH_DATABASE_URL=postgresql://prod.example/trash",
+                "DEEPSEEK_API_KEY=local-ai-key",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(local_web, "_project_root", lambda: root)
+
+    applied = local_web.apply_local_auth_environment(allow_dev_defaults=True)
+
+    assert applied == {}
+    assert os.environ[local_web.AUTH_DB_ENV] == str(explicit_db)
+    assert local_web.AUTH_DATABASE_URL_ENV not in os.environ
+
+
+def test_agent_env_keeps_explicit_sqlite_store_and_non_auth_file_values(
+    tmp_path, monkeypatch
+):
+    _clear_auth_env(monkeypatch)
+    root = _project_root(tmp_path)
+    explicit_db = tmp_path / "playwright-auth.db"
+    monkeypatch.setenv(local_web.AUTH_DB_ENV, str(explicit_db))
+    (root / ".env.local").write_text(
+        "\n".join(
+            [
+                "TRASH_SORTER_AUTH_DATABASE_URL=postgresql://prod.example/trash",
+                "DEEPSEEK_API_KEY=local-ai-key",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    env = local_web._agent_env(root)
+
+    assert local_web.AUTH_DATABASE_URL_ENV not in env
+    assert local_web.AUTH_DB_ENV not in env
+    assert env["DEEPSEEK_API_KEY"] == "local-ai-key"

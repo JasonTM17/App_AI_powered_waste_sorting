@@ -33,6 +33,10 @@ def _env_port(name: str, default: int) -> int:
 
 
 def main() -> None:
+    from app.utils.local_web import apply_local_auth_environment
+
+    apply_local_auth_environment(allow_dev_defaults=True)
+
     from app.agent.api import create_app
 
     host, port = _agent_host_port()
