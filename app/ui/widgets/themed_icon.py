@@ -31,10 +31,10 @@ def _sidebar_palette(theme: str) -> dict[str, str]:
             "disabled": "#94A3B8",
         }
     return {
-        "normal": "#BBCABF",
-        "active": "#DAE2FD",
+        "normal": "#DCE7E0",
+        "active": "#F2F6FF",
         "checked": "#6FFBBE",
-        "disabled": "#5F6B72",
+        "disabled": "#87929B",
     }
 
 

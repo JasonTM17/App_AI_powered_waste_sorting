@@ -123,7 +123,7 @@ def test_sidebar_icons_are_visible_on_dark_theme(qtbot):
         for x in range(image.width()):
             for y in range(image.height()):
                 color = image.pixelColor(x, y)
-                if color.alpha() > 0 and color.lightness() > 32:
+                if color.alpha() > 0 and color.lightness() > 120:
                     visible_pixels += 1
 
         assert visible_pixels > 8, button.text()
