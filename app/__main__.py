@@ -192,45 +192,23 @@ def main() -> int:
         t.show_at(window.mapFromGlobal(tr))
 
     controller.camera_error.connect(_on_camera_error)
-    if window.settings_page is not None:
-        def _on_config_saved(new_cfg):
-            apply_theme(app, new_cfg.theme)
-            window.sidebar.set_theme(new_cfg.theme)
-            controller.update_config(new_cfg)
-            _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
-            from PySide6.QtCore import QPoint
-
-            from app.ui.widgets.toast import Toast
-            t = Toast(window, "Đã lưu cài đặt", level="ok")
-            tr = window.mapToGlobal(QPoint(window.width(), 0))
-            t.show_at(window.mapFromGlobal(tr))
-
-        window.settings_page.config_saved.connect(_on_config_saved)
-    if window.settings_page is not None:
-        window.settings_page.test_camera_requested.connect(controller.test_camera)
-        window.settings_page.test_uart_requested.connect(controller.test_uart_ping)
-        window.settings_page.test_hardware_requested.connect(controller.test_hardware_command)
-        window.settings_page.test_voice_requested.connect(controller.test_laptop_voice)
-        window.settings_page.actuation_test_mode_changed.connect(_on_actuation_test_mode_request)
-        window.settings_page.reload_model_requested.connect(controller.reload_model)
-        controller.test_uart_result.connect(window.settings_page.set_uart_test_result)
-        _sync_actuation_test_mode(controller.is_actuation_test_mode_enabled())
+    def _on_config_saved(new_cfg):
+        apply_theme(app, new_cfg.theme)
+        window.sidebar.set_theme(new_cfg.theme)
+        controller.update_config(new_cfg)
         _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
-    if window.mapping_page is not None:
+        from PySide6.QtCore import QPoint
 
-        def _on_mappings(lst):
-            new_cfg = controller.cfg.model_copy(deep=True)
-            new_cfg.mappings = lst
-            controller.update_config(new_cfg)
+        from app.ui.widgets.toast import Toast
 
-        window.mapping_page.mappings_saved.connect(_on_mappings)
-        window.mapping_page.test_command_requested.connect(
-            lambda cmd: controller.test_hardware_command(
-                controller.cfg.uart.port,
-                controller.cfg.uart.baud,
-                cmd,
-            )
-        )
+        t = Toast(window, "Đã lưu cài đặt", level="ok")
+        tr = window.mapToGlobal(QPoint(window.width(), 0))
+        t.show_at(window.mapFromGlobal(tr))
+
+    def _on_mappings(lst):
+        new_cfg = controller.cfg.model_copy(deep=True)
+        new_cfg.mappings = lst
+        controller.update_config(new_cfg)
 
     def _on_test_result(ok: bool, message: str) -> None:
         from PySide6.QtCore import QPoint
@@ -350,36 +328,69 @@ def main() -> int:
         new_cfg.capture.mode = mode
         controller.update_config(new_cfg)
 
-    if window.capture_page is not None:
-        window.capture_page.open_web_requested.connect(lambda: _open_web_dashboard("data"))
-        window.capture_page.capture_camera_sample_requested.connect(controller.capture_camera_sample)
-        window.capture_page.capture_hard_negative_requested.connect(controller.capture_hard_negative_sample)
-        controller.capture_saved.connect(lambda _p: window.capture_page.reload())
+    def _wire_settings_page(page) -> None:
+        page.config_saved.connect(_on_config_saved)
+        page.test_camera_requested.connect(controller.test_camera)
+        page.test_uart_requested.connect(controller.test_uart_ping)
+        page.test_hardware_requested.connect(controller.test_hardware_command)
+        page.test_voice_requested.connect(controller.test_laptop_voice)
+        page.actuation_test_mode_changed.connect(_on_actuation_test_mode_request)
+        page.reload_model_requested.connect(controller.reload_model)
+        controller.test_uart_result.connect(page.set_uart_test_result)
+        _sync_actuation_test_mode(controller.is_actuation_test_mode_enabled())
+        _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
 
-        window.capture_page.mode_changed.connect(_on_capture_mode_changed)
-
-    if window.training_page is not None:
-        window.training_page.open_web_requested.connect(lambda: _open_web_dashboard("training"))
-        window.training_page.manual_phone_import_requested.connect(controller.import_manual_phone_samples)
-        window.training_page.capture_camera_sample_requested.connect(controller.capture_camera_sample)
-        window.training_page.capture_reviewed_camera_sample_requested.connect(
-            controller.capture_reviewed_camera_sample
-        )
-        window.training_page.learn_now_status_requested.connect(controller.refresh_learn_now_status)
-        window.training_page.learn_now_refresh_requested.connect(controller.refresh_learn_now_references)
-        window.training_page.learn_now_train_requested.connect(controller.start_learn_now_candidate_training)
-        window.training_page.training_stop_requested.connect(controller.stop_learn_now_training)
-        window.training_page.training_status_requested.connect(controller.refresh_training_status)
-        window.training_page.candidate_model_test_requested.connect(controller.load_candidate_model_for_test)
-        controller.learn_now_status_changed.connect(window.training_page.set_learn_now_status)
-        controller.learn_now_action_result.connect(window.training_page.set_learn_now_action_result)
-        controller.training_status_changed.connect(window.training_page.set_training_status)
-        controller.capture_saved.connect(lambda _p: window.training_page.reload())
-        window.training_page.camera_annotation_requested.connect(
-            lambda cls_name, cls_id, page=window.training_page: _open_camera_annotation_dialog(
-                page, cls_name, cls_id
+    def _wire_mapping_page(page) -> None:
+        page.mappings_saved.connect(_on_mappings)
+        page.test_command_requested.connect(
+            lambda cmd: controller.test_hardware_command(
+                controller.cfg.uart.port,
+                controller.cfg.uart.baud,
+                cmd,
             )
         )
+
+    def _wire_capture_page(page) -> None:
+        page.open_web_requested.connect(lambda: _open_web_dashboard("data"))
+        page.capture_camera_sample_requested.connect(controller.capture_camera_sample)
+        page.capture_hard_negative_requested.connect(controller.capture_hard_negative_sample)
+        controller.capture_saved.connect(lambda _p, target=page: target.reload())
+        page.mode_changed.connect(_on_capture_mode_changed)
+
+    def _wire_training_page(page) -> None:
+        page.open_web_requested.connect(lambda: _open_web_dashboard("training"))
+        page.manual_phone_import_requested.connect(controller.import_manual_phone_samples)
+        page.capture_camera_sample_requested.connect(controller.capture_camera_sample)
+        page.capture_reviewed_camera_sample_requested.connect(
+            controller.capture_reviewed_camera_sample
+        )
+        page.learn_now_status_requested.connect(controller.refresh_learn_now_status)
+        page.learn_now_refresh_requested.connect(controller.refresh_learn_now_references)
+        page.learn_now_train_requested.connect(controller.start_learn_now_candidate_training)
+        page.training_stop_requested.connect(controller.stop_learn_now_training)
+        page.training_status_requested.connect(controller.refresh_training_status)
+        page.candidate_model_test_requested.connect(controller.load_candidate_model_for_test)
+        controller.learn_now_status_changed.connect(page.set_learn_now_status)
+        controller.learn_now_action_result.connect(page.set_learn_now_action_result)
+        controller.training_status_changed.connect(page.set_training_status)
+        controller.capture_saved.connect(lambda _p, target=page: target.reload())
+        page.camera_annotation_requested.connect(
+            lambda cls_name, cls_id, target=page: _open_camera_annotation_dialog(
+                target, cls_name, cls_id
+            )
+        )
+
+    def _wire_lazy_page(index: int, page) -> None:
+        if index == 2:
+            _wire_mapping_page(page)
+        elif index == 3:
+            _wire_capture_page(page)
+        elif index == 4:
+            _wire_training_page(page)
+        elif index == 6:
+            _wire_settings_page(page)
+
+    window.page_created.connect(_wire_lazy_page)
 
     def _place_startup_window() -> None:
         if not getattr(window, "_user_minimized", False):

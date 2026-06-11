@@ -79,8 +79,12 @@ def test_main_window_exposes_manual_training_sidebar_when_config_ready(qtbot):
 
     assert "Huấn luyện" in NAV_ITEMS
     assert window.stack.count() == len(NAV_ITEMS)
-    assert window.capture_page is not None
-    assert window.training_page is not None
+    assert window.capture_page is None
+    assert window.training_page is None
+
+    window.show_page(3)
+    window.show_page(4)
+
     assert isinstance(window.capture_page, CapturePage)
     assert isinstance(window.training_page, TrainingPage)
     assert type(window.capture_page) is not type(window.training_page)
@@ -104,12 +108,34 @@ def test_main_window_lazily_loads_data_and_training_pages(monkeypatch, qtbot):
     qtbot.addWidget(window)
 
     assert calls == []
+    assert window.capture_page is None
+    assert window.training_page is None
 
     window.stack.setCurrentIndex(3)
     assert calls == ["data"]
+    assert isinstance(window.capture_page, CapturePage)
 
     window.stack.setCurrentIndex(4)
     assert calls == ["data", "training"]
+    assert isinstance(window.training_page, TrainingPage)
+
+
+def test_main_window_emits_page_created_for_lazy_operational_pages(qtbot):
+    window = MainWindow(cfg=AppConfig())
+    qtbot.addWidget(window)
+    created: list[tuple[int, object]] = []
+    window.page_created.connect(lambda index, page: created.append((index, page)))
+
+    window.show_page(2)
+    window.show_page(3)
+    window.show_page(4)
+    window.show_page(6)
+
+    assert [index for index, _page in created] == [2, 3, 4, 6]
+    assert window.mapping_page is created[0][1]
+    assert window.capture_page is created[1][1]
+    assert window.training_page is created[2][1]
+    assert window.settings_page is created[3][1]
 
 
 def test_sidebar_icons_are_visible_on_dark_theme(qtbot):

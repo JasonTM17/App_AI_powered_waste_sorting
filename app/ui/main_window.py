@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
@@ -30,8 +30,13 @@ NAV_ICONS = ["recycle", "history", "mapping", "capture", "camera", "log", "setti
 
 
 class MainWindow(QMainWindow):
+    page_created = Signal(int, object)
+
     def __init__(self, cfg: AppConfig | None = None, history=None) -> None:
         super().__init__()
+        self._cfg = cfg
+        self._lazy_page_factories: dict[int, tuple[str, object]] = {}
+        self._lazy_page_hosts: dict[int, tuple[QVBoxLayout, QWidget]] = {}
         self.setWindowIcon(brand_icon())
         self._force_quit = False
         self._minimize_to_tray = False
@@ -83,6 +88,7 @@ class MainWindow(QMainWindow):
         self.history_page = None
         self.capture_page = None
         self.training_page = None
+        self.settings_page = None
         self.system_log_page = SystemLogPage()
         self.stack.addWidget(self._stack_page(self.live_page))
         for idx, label in enumerate(NAV_ITEMS[1:5], start=1):
@@ -92,35 +98,22 @@ class MainWindow(QMainWindow):
                 self.history_page = HistoryPage(history)
                 self.stack.addWidget(self._stack_page(self.history_page))
             elif idx == 2 and cfg is not None:
-                from app.ui.pages.mapping import MappingPage
-
-                self.mapping_page = MappingPage(cfg.mappings)
-                self.stack.addWidget(self._stack_page(self.mapping_page))
+                self._add_lazy_page(idx, label, "mapping_page", self._create_mapping_page)
             elif idx == 3 and cfg is not None:
-                from app.ui.pages.capture import CapturePage
-
-                self.capture_page = CapturePage(cfg)
-                self.stack.addWidget(self._stack_page(self.capture_page))
+                self._add_lazy_page(idx, label, "capture_page", self._create_capture_page)
             elif idx == 4 and cfg is not None:
-                from app.ui.pages.training import TrainingPage
-
-                self.training_page = TrainingPage(cfg)
-                self.stack.addWidget(self._stack_page(self.training_page))
+                self._add_lazy_page(idx, label, "training_page", self._create_training_page)
             else:
                 page = EmptyState("○", label, "Runtime chưa nạp đủ dữ liệu cho màn này.")
                 self.stack.addWidget(self._stack_page(page))
         # tab 4 = system log (always available, doesn't need cfg)
         self.stack.addWidget(self._stack_page(self.system_log_page))
         if cfg is not None:
-            from app.ui.pages.settings import SettingsPage
-
-            self.settings_page = SettingsPage(cfg)
-            self.stack.addWidget(self._stack_page(self.settings_page))
+            self._add_lazy_page(6, NAV_ITEMS[6], "settings_page", self._create_settings_page)
         else:
-            self.settings_page = None
             page = EmptyState("⚙", NAV_ITEMS[6], "Runtime chưa nạp cấu hình, app vẫn chạy an toàn.")
             self.stack.addWidget(self._stack_page(page))
-        self.sidebar.page_changed.connect(self.stack.setCurrentIndex)
+        self.sidebar.page_changed.connect(self.show_page)
         self.stack.currentChanged.connect(self._on_stack_changed)
 
         body_layout.addWidget(self.stack, 1)
@@ -142,7 +135,7 @@ class MainWindow(QMainWindow):
                 self,
                 activated=lambda i=i: (
                     self.sidebar.set_active(i),
-                    self.stack.setCurrentIndex(i),
+                    self.show_page(i),
                 ),
             )
         QShortcut(QKeySequence("Ctrl+Q"), self, activated=self.close)
@@ -222,13 +215,89 @@ class MainWindow(QMainWindow):
         scroll.setWidget(page)
         return scroll
 
+    def _add_lazy_page(
+        self,
+        index: int,
+        label: str,
+        attribute_name: str,
+        factory,
+    ) -> None:
+        host = QWidget()
+        host.setObjectName("workspace")
+        layout = QVBoxLayout(host)
+        layout.setContentsMargins(0, 0, 0, 0)
+        placeholder = EmptyState("○", label, "Mở mục này để tải dữ liệu.")
+        layout.addWidget(placeholder)
+        self._lazy_page_factories[index] = (attribute_name, factory)
+        self._lazy_page_hosts[index] = (layout, placeholder)
+        self.stack.addWidget(host)
+
+    def ensure_page(self, index: int):
+        page_info = self._lazy_page_factories.pop(index, None)
+        if page_info is None:
+            return self._page_for_index(index)
+        attribute_name, factory = page_info
+        page = factory()
+        layout, placeholder = self._lazy_page_hosts.pop(index)
+        scroll = self._stack_page(page)
+        layout.replaceWidget(placeholder, scroll)
+        placeholder.deleteLater()
+        setattr(self, attribute_name, page)
+        self.page_created.emit(index, page)
+        return page
+
+    def show_page(self, index: int) -> None:
+        self.ensure_page(index)
+        if self.stack.currentIndex() == index:
+            self._load_page(index)
+            return
+        self.stack.setCurrentIndex(index)
+
+    def _page_for_index(self, index: int):
+        return {
+            0: self.live_page,
+            1: self.history_page,
+            2: self.mapping_page,
+            3: self.capture_page,
+            4: self.training_page,
+            5: self.system_log_page,
+            6: self.settings_page,
+        }.get(index)
+
+    def _create_mapping_page(self):
+        from app.ui.pages.mapping import MappingPage
+
+        assert self._cfg is not None
+        return MappingPage(self._cfg.mappings)
+
+    def _create_capture_page(self):
+        from app.ui.pages.capture import CapturePage
+
+        assert self._cfg is not None
+        return CapturePage(self._cfg)
+
+    def _create_training_page(self):
+        from app.ui.pages.training import TrainingPage
+
+        assert self._cfg is not None
+        return TrainingPage(self._cfg)
+
+    def _create_settings_page(self):
+        from app.ui.pages.settings import SettingsPage
+
+        assert self._cfg is not None
+        return SettingsPage(self._cfg)
+
     def _on_stack_changed(self, index: int) -> None:
-        if index == 1 and self.history_page is not None:
-            self.history_page.request_reload()
-        elif index == 3 and self.capture_page is not None:
-            self.capture_page.load_once()
-        elif index == 4 and self.training_page is not None:
-            self.training_page.load_once()
+        self.ensure_page(index)
+        self._load_page(index)
+
+    def _load_page(self, index: int) -> None:
+        page = self._page_for_index(index)
+        if index == 1 and page is not None:
+            page.request_reload()
+        elif index in {3, 4} and page is not None:
+            page.load_once()
 
     def _minimize_window(self) -> None:
         self._user_minimized = True
