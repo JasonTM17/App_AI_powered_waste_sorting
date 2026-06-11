@@ -353,17 +353,8 @@ def main() -> int:
     if window.capture_page is not None:
         window.capture_page.open_web_requested.connect(lambda: _open_web_dashboard("data"))
         window.capture_page.capture_camera_sample_requested.connect(controller.capture_camera_sample)
-        window.capture_page.capture_reviewed_camera_sample_requested.connect(
-            controller.capture_reviewed_camera_sample
-        )
         window.capture_page.capture_hard_negative_requested.connect(controller.capture_hard_negative_sample)
         controller.capture_saved.connect(lambda _p: window.capture_page.reload())
-
-        window.capture_page.camera_annotation_requested.connect(
-            lambda cls_name, cls_id, page=window.capture_page: _open_camera_annotation_dialog(
-                page, cls_name, cls_id
-            )
-        )
 
         window.capture_page.mode_changed.connect(_on_capture_mode_changed)
 

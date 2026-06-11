@@ -9,7 +9,7 @@ from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -55,27 +55,16 @@ class CapturePage(QWidget):
     mode_changed = Signal(str)
     open_web_requested = Signal()
     capture_camera_sample_requested = Signal(str)
-    camera_annotation_requested = Signal(str, int)
-    capture_reviewed_camera_sample_requested = Signal(str, int, object, bool)
     capture_hard_negative_requested = Signal(str)
-    learn_now_status_requested = Signal(str)
-    learn_now_refresh_requested = Signal(str)
-    learn_now_train_requested = Signal(str, str)
-    training_stop_requested = Signal()
-    training_status_requested = Signal()
-    candidate_model_test_requested = Signal(str)
 
     def __init__(
         self,
         cfg: AppConfig,
         parent=None,
         title_text: str = "Data & Gán nhãn",
-        *,
-        show_training_panel: bool = False,
     ):
         super().__init__(parent)
         self._cfg = cfg
-        self._show_training_panel = show_training_panel
         self._catalog_path = dataset_db_path()
         self._sync_thread: CatalogSyncThread | None = None
         self._queue_files_cache: tuple[Path, int, list[Path]] | None = None
@@ -85,11 +74,6 @@ class CapturePage(QWidget):
         self._label_cache: dict[str, tuple[int, str]] = {}
         self._icon_cache: dict[str, tuple[int, QIcon]] = {}
         self._loaded = False
-        self._learn_now_status: dict[str, object] = {}
-        self._training_status: dict[str, object] = {}
-        self._training_timer = QTimer(self)
-        self._training_timer.setInterval(2500)
-        self._training_timer.timeout.connect(self.training_status_requested.emit)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 20, 24, 24)
         outer.setSpacing(16)
@@ -145,16 +129,7 @@ class CapturePage(QWidget):
         pen_idx = self.class_select.findText("Pen")
         if pen_idx >= 0:
             self.class_select.setCurrentIndex(pen_idx)
-        if self._show_training_panel:
-            self.class_select.currentTextChanged.connect(lambda _value: self._request_learn_status())
         action_row.addWidget(self.class_select)
-
-        btn_add_manual = QPushButton("Thêm ảnh thủ công")
-        btn_add_manual.setObjectName("secondary")
-        _fit_button_to_text(btn_add_manual, 150)
-        btn_add_manual.clicked.connect(self._add_manual_images)
-        btn_add_manual.setVisible(self._show_training_panel)
-        manage_row.addWidget(btn_add_manual)
 
         btn_capture_camera = QPushButton("Ghi frame camera")
         btn_capture_camera.setObjectName("secondary")
@@ -164,16 +139,6 @@ class CapturePage(QWidget):
         _fit_button_to_text(btn_capture_camera, 145)
         btn_capture_camera.clicked.connect(self._capture_camera_sample)
         action_row.addWidget(btn_capture_camera)
-
-        btn_annotate_camera = QPushButton("Chụp & gắn nhãn")
-        btn_annotate_camera.setObjectName("secondary")
-        btn_annotate_camera.setToolTip(
-            "Chụp frame hiện tại, vẽ bbox ngay trong app và lưu mẫu đã duyệt để train."
-        )
-        _fit_button_to_text(btn_annotate_camera, 145)
-        btn_annotate_camera.clicked.connect(self._request_camera_annotation)
-        btn_annotate_camera.setVisible(self._show_training_panel)
-        action_row.addWidget(btn_annotate_camera)
 
         self.hard_negative_reason_select = QComboBox()
         self.hard_negative_reason_select.setMinimumWidth(170)
@@ -247,78 +212,6 @@ class CapturePage(QWidget):
 
         outer.addWidget(mode_card)
 
-        train_card = QFrame()
-        train_card.setObjectName("card")
-        train_layout = QVBoxLayout(train_card)
-        train_layout.setContentsMargins(20, 16, 20, 16)
-        train_layout.setSpacing(10)
-        train_header = QHBoxLayout()
-        train_header.setSpacing(10)
-        train_title = QLabel("Huấn luyện thủ công")
-        train_title.setObjectName("sectionTitle")
-        train_header.addWidget(train_title)
-        train_header.addStretch()
-        self.learn_route = QLabel("Route: -")
-        self.learn_route.setObjectName("mono")
-        train_header.addWidget(self.learn_route)
-        train_layout.addLayout(train_header)
-
-        self.learn_status = QLabel("Chọn class rồi bấm Làm mới reference để xem readiness.")
-        self.learn_status.setObjectName("muted")
-        self.learn_status.setWordWrap(True)
-        train_layout.addWidget(self.learn_status)
-
-        self.learn_counts = QLabel("Reviewed: -  |  Reference: -  |  Holdout: -")
-        self.learn_counts.setObjectName("mono")
-        self.learn_counts.setWordWrap(True)
-        train_layout.addWidget(self.learn_counts)
-
-        self.training_status = QLabel("Training: chưa có trạng thái.")
-        self.training_status.setObjectName("muted")
-        self.training_status.setWordWrap(True)
-        train_layout.addWidget(self.training_status)
-
-        self.candidate_path = QLabel("Candidate: -")
-        self.candidate_path.setObjectName("muted")
-        self.candidate_path.setWordWrap(True)
-        train_layout.addWidget(self.candidate_path)
-
-        train_actions = QHBoxLayout()
-        train_actions.setSpacing(10)
-        self.btn_learn_refresh = QPushButton("Làm mới reference")
-        self.btn_learn_refresh.setObjectName("secondary")
-        _fit_button_to_text(self.btn_learn_refresh, 145)
-        self.btn_learn_refresh.clicked.connect(self._request_learn_refresh)
-        train_actions.addWidget(self.btn_learn_refresh)
-
-        self.btn_train_micro = QPushButton("Train nhanh candidate")
-        self.btn_train_micro.setObjectName("primary")
-        _fit_button_to_text(self.btn_train_micro, 165)
-        self.btn_train_micro.clicked.connect(lambda: self._request_train_profile("micro"))
-        train_actions.addWidget(self.btn_train_micro)
-
-        self.btn_train_strong = QPushButton("Train mạnh candidate")
-        self.btn_train_strong.setObjectName("secondary")
-        _fit_button_to_text(self.btn_train_strong, 165)
-        self.btn_train_strong.clicked.connect(lambda: self._request_train_profile("strong"))
-        train_actions.addWidget(self.btn_train_strong)
-
-        self.btn_stop_training = QPushButton("Dừng train")
-        self.btn_stop_training.setObjectName("secondary")
-        _fit_button_to_text(self.btn_stop_training, 105)
-        self.btn_stop_training.clicked.connect(lambda: self.training_stop_requested.emit())
-        train_actions.addWidget(self.btn_stop_training)
-
-        self.btn_load_candidate = QPushButton("Load candidate để test")
-        self.btn_load_candidate.setObjectName("secondary")
-        _fit_button_to_text(self.btn_load_candidate, 170)
-        self.btn_load_candidate.clicked.connect(self._request_candidate_load)
-        train_actions.addWidget(self.btn_load_candidate)
-        train_actions.addStretch()
-        train_layout.addLayout(train_actions)
-        train_card.setVisible(self._show_training_panel)
-        outer.addWidget(train_card)
-
         self.stats = QLabel("")
         self.stats.setObjectName("muted")
         self.stats.setWordWrap(True)
@@ -338,9 +231,6 @@ class CapturePage(QWidget):
             "QListWidget::item { margin: 6px; padding: 8px; }"
         )
         outer.addWidget(self.grid, 1)
-
-        if self._show_training_panel:
-            self._update_train_panel()
 
     def _queue_dir(self) -> Path:
         return _resolve_queue_dir(self._cfg.capture.output_dir, self._catalog_path)
@@ -367,35 +257,6 @@ class CapturePage(QWidget):
     def selected_class_name(self) -> str:
         return self.class_select.currentText().strip()
 
-    def request_learn_now_refresh(self) -> None:
-        if not self._show_training_panel:
-            return
-        self._request_learn_status()
-        self.training_status_requested.emit()
-
-    def set_learn_now_status(self, status: object) -> None:
-        if not self._show_training_panel:
-            return
-        self._learn_now_status = status if isinstance(status, dict) else {}
-        self._update_train_panel()
-
-    def set_training_status(self, status: object) -> None:
-        if not self._show_training_panel:
-            return
-        self._training_status = status if isinstance(status, dict) else {}
-        running = bool(self._training_status.get("running"))
-        if running and not self._training_timer.isActive():
-            self._training_timer.start()
-        elif not running and self._training_timer.isActive():
-            self._training_timer.stop()
-        self._update_train_panel()
-
-    def set_learn_now_action_result(self, ok: bool, message: str) -> None:
-        if not self._show_training_panel:
-            return
-        prefix = "OK" if ok else "Lỗi"
-        self.learn_status.setText(f"{prefix}: {message}")
-
     def load_once(self) -> None:
         if not self._loaded:
             self.reload()
@@ -406,8 +267,6 @@ class CapturePage(QWidget):
         qdir = self._queue_dir()
         if not qdir.exists():
             self._update_stats()
-            if self._show_training_panel:
-                self._request_learn_status()
             return
         files = self._display_files(qdir)
         visible_files = files[:DISPLAY_LIMIT]
@@ -417,8 +276,6 @@ class CapturePage(QWidget):
             self.grid.addItem(item)
         self._prune_image_caches(visible_files)
         self._update_stats(displayed=min(len(files), DISPLAY_LIMIT))
-        if self._show_training_panel:
-            self._request_learn_status()
 
     def _update_stats(self, displayed: int | None = None) -> None:
         summary, catalog_total = self._summary_for_stats()
@@ -457,139 +314,12 @@ class CapturePage(QWidget):
     def _open_web_annotate(self) -> None:
         self.open_web_requested.emit()
 
-    def _add_manual_images(self) -> None:
-        cls_name = self.class_select.currentText().strip()
-        if not cls_name:
-            QMessageBox.warning(self, "Thiếu nhãn", "Vui lòng chọn nhãn trước khi thêm ảnh.")
-            return
-        files, _ = QFileDialog.getOpenFileNames(
-            self,
-            "Chọn ảnh data",
-            "",
-            "Images (*.jpg *.jpeg *.png *.bmp *.webp)",
-        )
-        if not files:
-            return
-        class_ids = self._class_ids()
-        cls_id = class_ids.get(cls_name, self.class_select.currentIndex())
-        added = import_manual_images(
-            files,
-            self._queue_dir(),
-            cls_name,
-            cls_id,
-            catalog_path=self._catalog_path,
-        )
-        self._invalidate_queue_cache()
-        self.reload()
-        self.counter.setText(f"Đã thêm {added} ảnh")
-
     def _capture_camera_sample(self) -> None:
         cls_name = self.class_select.currentText().strip()
         if not cls_name:
             QMessageBox.warning(self, "Thiếu nhãn", "Chọn nhãn trước khi ghi frame camera.")
             return
         self.capture_camera_sample_requested.emit(cls_name)
-
-    def _request_camera_annotation(self) -> None:
-        cls_name = self.class_select.currentText().strip()
-        if not cls_name:
-            QMessageBox.warning(self, "Thiếu nhãn", "Chọn nhãn trước khi chụp & gắn nhãn.")
-            return
-        self.camera_annotation_requested.emit(cls_name, self.class_id_for_name(cls_name))
-
-    def _request_learn_status(self) -> None:
-        if not self._show_training_panel:
-            return
-        self.learn_now_status_requested.emit(self.selected_class_name())
-
-    def _request_learn_refresh(self) -> None:
-        if not self._show_training_panel:
-            return
-        cls_name = self.selected_class_name()
-        if not cls_name:
-            QMessageBox.warning(self, "Thiếu nhãn", "Chọn nhãn trước khi làm mới reference.")
-            return
-        self.learn_now_refresh_requested.emit(cls_name)
-
-    def _request_train_profile(self, profile: str) -> None:
-        if not self._show_training_panel:
-            return
-        cls_name = self.selected_class_name()
-        if not cls_name:
-            QMessageBox.warning(self, "Thiếu nhãn", "Chọn nhãn trước khi train.")
-            return
-        self.learn_now_train_requested.emit(cls_name, profile)
-
-    def _request_candidate_load(self) -> None:
-        if not self._show_training_panel:
-            return
-        path = str(self._training_status.get("best_model_path") or "").strip()
-        if not path:
-            QMessageBox.warning(self, "Chưa có candidate", "Chưa có file best.pt để load test.")
-            return
-        self.candidate_model_test_requested.emit(path)
-
-    def _selected_learn_now_row(self) -> dict[str, object]:
-        selected = self._learn_now_status.get("selected")
-        return selected if isinstance(selected, dict) else {}
-
-    def _update_train_panel(self) -> None:
-        if not self._show_training_panel:
-            return
-        row = self._selected_learn_now_row()
-        cls_name = str(row.get("class_name") or self.selected_class_name() or "-")
-        command = str(row.get("command") or "-")
-        bin_index = row.get("bin_index")
-        route = str(row.get("route_label") or "")
-        self.learn_route.setText(f"{cls_name}: {command}/bin {bin_index or '-'} {route}".strip())
-
-        eligible = int(row.get("eligible_reviewed_count") or 0)
-        reviewed = int(row.get("reviewed_count") or 0)
-        reference = int(row.get("reference_count") or 0)
-        holdout = int(row.get("holdout_count") or 0)
-        missing_reference = int(row.get("missing_for_reference") or 0)
-        missing_micro = int(row.get("missing_for_micro_train") or 0)
-        missing_strong = int(row.get("missing_for_strong_train") or 0)
-        missing_holdout = int(row.get("missing_holdout_for_strong") or 0)
-        issues = int(row.get("source_issue_count") or 0)
-        self.learn_counts.setText(
-            "Reviewed: "
-            f"{reviewed} ({eligible} trainable)  |  Reference: {reference}/6"
-            f"  |  Holdout: {holdout}/6  |  Source issues: {issues}"
-        )
-
-        message = str(row.get("message") or "Chưa có trạng thái Learn Now.")
-        if missing_reference:
-            message += f" Còn thiếu {missing_reference} mẫu để reference nhanh."
-        if missing_micro:
-            message += f" Còn thiếu {missing_micro} mẫu đã duyệt để train nhanh."
-        elif missing_strong or missing_holdout:
-            message += f" Train mạnh còn thiếu {missing_strong} mẫu train và {missing_holdout} holdout."
-        self.learn_status.setText(message)
-
-        running = bool(self._training_status.get("running"))
-        training_message = str(self._training_status.get("message") or "Training đang tắt.")
-        progress = float(self._training_status.get("progress_percent") or 0.0)
-        run_name = str(self._training_status.get("run_name") or "")
-        detail = training_message
-        if run_name:
-            detail += f" | run: {run_name}"
-        if progress:
-            detail += f" | {progress:.1f}%"
-        self.training_status.setText(f"Training: {detail}")
-
-        best_model = str(self._training_status.get("best_model_path") or "").strip()
-        self.candidate_path.setText(f"Candidate: {best_model or '-'}")
-
-        has_status = bool(row)
-        self.btn_train_micro.setEnabled(
-            has_status and bool(row.get("ready_for_micro_train")) and not running
-        )
-        self.btn_train_strong.setEnabled(
-            has_status and bool(row.get("ready_for_strong_train")) and not running
-        )
-        self.btn_stop_training.setEnabled(running)
-        self.btn_load_candidate.setEnabled(bool(best_model) and not running)
 
     def _capture_hard_negative(self) -> None:
         reason = str(self.hard_negative_reason_select.currentData() or "").strip()
