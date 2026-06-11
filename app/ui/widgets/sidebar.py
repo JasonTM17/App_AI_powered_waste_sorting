@@ -7,19 +7,22 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QButtonGroup, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from app.ui.brand_assets import brand_mark_path
+from app.ui.widgets.themed_icon import sidebar_icon
 from app.utils.paths import resource_path
 
 
-def _icon(name: str) -> QIcon:
+def _icon(name: str, theme: str) -> QIcon:
     p = resource_path(f"app/ui/resources/icons/{name}.svg")
-    return QIcon(str(p)) if p.exists() else QIcon()
+    return sidebar_icon(p, theme=theme, size=22) if p.exists() else QIcon()
 
 
 class Sidebar(QWidget):
     page_changed = Signal(int)
 
-    def __init__(self, items, icons=None, parent=None):
+    def __init__(self, items, icons=None, parent=None, theme: str = "dark"):
         super().__init__(parent)
+        self._theme = theme
+        self._icon_names: list[str | None] = list(icons or [None] * len(items))
         self.setObjectName("sidebar")
         self.setFixedWidth(240)
         layout = QVBoxLayout(self)
@@ -55,14 +58,13 @@ class Sidebar(QWidget):
         self._group.setExclusive(True)
         self._buttons: list[QPushButton] = []
 
-        icons = icons or [None] * len(items)
-        for idx, (label, icon_name) in enumerate(zip(items, icons, strict=False)):
+        for idx, (label, icon_name) in enumerate(zip(items, self._icon_names, strict=False)):
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             if icon_name:
-                btn.setIcon(_icon(icon_name))
-                btn.setIconSize(QSize(19, 19))
+                btn.setIcon(_icon(icon_name, self._theme))
+                btn.setIconSize(QSize(20, 20))
             self._group.addButton(btn, idx)
             self._buttons.append(btn)
             layout.addWidget(btn)
@@ -75,3 +77,9 @@ class Sidebar(QWidget):
     def set_active(self, index: int) -> None:
         if 0 <= index < len(self._buttons):
             self._buttons[index].setChecked(True)
+
+    def set_theme(self, theme: str) -> None:
+        self._theme = theme
+        for button, icon_name in zip(self._buttons, self._icon_names, strict=False):
+            if icon_name:
+                button.setIcon(_icon(icon_name, self._theme))
