@@ -19,10 +19,18 @@ from app.core.config import (
 from app.core.hardware_profile import route_for_command
 from app.core.inference import InferenceEngine
 from app.core.inference_worker import InferenceWorker
+from app.core.learn_now import build_learn_now_status
+from app.core.learn_now_training import (
+    build_training_status,
+    start_learn_now_training,
+    stop_training_processes,
+    training_processes,
+)
 from app.core.pipeline import Pipeline
 from app.core.speaker import WasteSpeaker
 from app.core.uart import UartWorker
 from app.core.uart_protocol import UartProtocol, encode_sort
+from app.core.waste_categories import canonical_class_name
 from app.utils import serial_enum
 from app.utils.camera_frame_quality import evaluate_frame_quality
 from app.utils.camera_source import backend_hint, normalize_camera_source
@@ -148,6 +156,43 @@ class _UartProbe(QThread):
                 s.close()
 
 
+class _ModelLoadWorker(QThread):
+    done = Signal(object, str, float)
+
+    def __init__(
+        self,
+        model_path: str,
+        device: str,
+        conf: float,
+        iou: float,
+        imgsz: int,
+        half: bool,
+    ):
+        super().__init__()
+        self._model_path = model_path
+        self._device = device
+        self._conf = conf
+        self._iou = iou
+        self._imgsz = imgsz
+        self._half = half
+
+    def run(self):
+        started = time.perf_counter()
+        try:
+            engine = InferenceEngine(
+                self._model_path,
+                device=self._device,
+                conf=self._conf,
+                iou=self._iou,
+                imgsz=self._imgsz,
+                half=self._half,
+            )
+        except Exception as exc:
+            self.done.emit(None, str(exc), time.perf_counter() - started)
+            return
+        self.done.emit(engine, "", time.perf_counter() - started)
+
+
 class AppController(QObject):
     camera_status = Signal(bool)
     uart_status = Signal(bool)
@@ -159,6 +204,9 @@ class AppController(QObject):
     snapshot_saved = Signal(bool, str)
     capture_saved = Signal(str)
     camera_error = Signal(str)
+    learn_now_status_changed = Signal(object)
+    learn_now_action_result = Signal(bool, str)
+    training_status_changed = Signal(object)
 
     def __init__(self, cfg: AppConfig, config_path: Path, db_path: Path):
         super().__init__()
@@ -176,49 +224,99 @@ class AppController(QObject):
         self._speaker = WasteSpeaker(
             enabled=computer_speaker_enabled(self.cfg),
             cooldown_seconds=self.cfg.speaker.cooldown_seconds,
+            voice_gender=self.cfg.speaker.voice_gender,
         )
         self._inference_worker: InferenceWorker | None = None
         self._last_frame_t = 0.0
         self._fps = 0.0
         self._latency = 0.0
         self._last_frame = None
+        self._last_detections = []
+        self._annotation_frame = None
         self._probes: list[QThread] = []
         self._pending_uart_tests: dict[int, tuple[str, str, str, float]] = {}
         self._next_uart_test_id = -1
         self._actuation_test_enabled = False
         self._uart_retry_scheduled = False
+        self._model_loader: _ModelLoadWorker | None = None
+        self._model_loading = False
+        self._pending_camera_start = False
+        self._last_uart_retry_log_key = ""
+        self._uart_retry_log_count = 0
+
+    def _track_probe(self, worker: QThread) -> None:
+        worker.finished.connect(lambda worker=worker: self._forget_probe(worker))
+        worker.finished.connect(worker.deleteLater)
+        self._probes.append(worker)
+        worker.start()
+
+    def _forget_probe(self, worker: QThread) -> None:
+        with suppress(ValueError):
+            self._probes.remove(worker)
+
+    def _clear_runtime_buffers(self) -> None:
+        self._last_frame = None
+        self._last_detections = []
+        self._annotation_frame = None
+        self._last_frame_t = 0.0
+        self._fps = 0.0
+        self._latency = 0.0
 
     def start(self) -> None:
-        self._engine = InferenceEngine(
-            self.cfg.model.path,
-            device=self.cfg.model.device,
-            conf=self.cfg.model.conf_threshold,
-            iou=self.cfg.model.iou_threshold,
-            imgsz=self.cfg.model.input_size,
-            half=self.cfg.model.half_precision,
-        )
-        self.model_status.emit(True)
-
-        self._pipeline = Pipeline(
-            self.cfg,
-            self._engine,
-            None,
-            self.db_path,
-            speaker=self._speaker,
-        )
-        self._configure_camera_dispatch()
-        self._pipeline.on_capture_saved = self.capture_saved.emit
         self._start_uart_if_configured()
-
-        self._inference_worker = InferenceWorker(self._pipeline)
-        self._inference_worker.processed.connect(self._on_inferred)
-        self._inference_worker.start()
+        self._start_model_loader()
 
         # Camera is no longer auto-started. User opts in from Live page.
         # This avoids holding the camera handle while idle and lets the
         # user tweak Settings before the device is opened.
         self.camera_status.emit(False)
-        logger.info("controller started (camera idle)")
+        self.model_status.emit(False)
+        logger.info("controller started (model loading in background; camera idle)")
+
+    def _start_model_loader(self) -> None:
+        if self._model_loading or self._engine is not None:
+            return
+        self._model_loading = True
+        worker = _ModelLoadWorker(
+            self.cfg.model.path,
+            self.cfg.model.device,
+            self.cfg.model.conf_threshold,
+            self.cfg.model.iou_threshold,
+            self.cfg.model.input_size,
+            self.cfg.model.half_precision,
+        )
+        worker.done.connect(self._on_model_loaded)
+        worker.finished.connect(worker.deleteLater)
+        self._model_loader = worker
+        worker.start()
+        logger.info("model load scheduled in background path={}", self.cfg.model.path)
+
+    def _on_model_loaded(self, engine: object, error: str, elapsed_s: float) -> None:
+        self._model_loading = False
+        self._model_loader = None
+        if error or engine is None:
+            logger.warning("model background load failed after {:.0f} ms: {}", elapsed_s * 1000, error)
+            self.model_status.emit(False)
+            self.reload_model_result.emit(False, f"Không tải được model: {error}")
+            return
+        self._engine = engine
+        self._pipeline = Pipeline(
+            self.cfg,
+            self._engine,
+            self._uart,
+            self.db_path,
+            speaker=self._speaker,
+        )
+        self._configure_camera_dispatch()
+        self._pipeline.on_capture_saved = self.capture_saved.emit
+        self._inference_worker = InferenceWorker(self._pipeline)
+        self._inference_worker.processed.connect(self._on_inferred)
+        self._inference_worker.start()
+        self.model_status.emit(True)
+        logger.info("model ready in background elapsed_ms={:.0f}", elapsed_s * 1000)
+        if self._pending_camera_start:
+            self._pending_camera_start = False
+            QTimer.singleShot(0, self.start_camera)
 
     def _is_usb_uart_port(self, port: str) -> bool:
         if not port:
@@ -271,8 +369,14 @@ class AppController(QObject):
                     self.cfg.uart.port = ""
                     save_config(self.cfg, self.config_path)
                 else:
-                    logger.info("uart port {} not visible yet; keeping config and retrying", port)
+                    self._log_uart_retry(
+                        f"waiting:{port}",
+                        f"uart port {port} not visible yet; keeping config and retrying",
+                    )
                     self._schedule_uart_retry()
+            else:
+                self._log_uart_retry("blank", "uart port blank; waiting for USB/Arduino and retrying")
+                self._schedule_uart_retry()
             if self._pipeline is not None:
                 self._pipeline.set_uart(None)
             self.uart_status.emit(False)
@@ -300,8 +404,21 @@ class AppController(QObject):
             self._pipeline.set_uart(worker)
         self._uart = worker
         self._uart_retry_scheduled = False
+        self._last_uart_retry_log_key = ""
+        self._uart_retry_log_count = 0
         self._uart.start()
         logger.info("uart start requested port={}", port)
+
+    def _log_uart_retry(self, key: str, message: str) -> None:
+        if key != self._last_uart_retry_log_key:
+            self._last_uart_retry_log_key = key
+            self._uart_retry_log_count = 0
+        self._uart_retry_log_count += 1
+        if self._uart_retry_log_count == 1:
+            logger.info(message)
+            return
+        if self._uart_retry_log_count % 15 == 0:
+            logger.info("{} (retry {})", message, self._uart_retry_log_count)
 
     def _schedule_uart_retry(self) -> None:
         if self._uart_retry_scheduled or not self.cfg.uart.auto_reconnect:
@@ -369,6 +486,12 @@ class AppController(QObject):
     def start_camera(self) -> None:
         if self._camera is not None and self._camera.isRunning():
             return
+        if self._pipeline is None or self._inference_worker is None:
+            self._pending_camera_start = True
+            msg = "Model đang tải, camera sẽ tự bật khi model sẵn sàng."
+            self.camera_error.emit(msg)
+            logger.info("camera start deferred: model still loading")
+            return
         from app.utils.camera_enum import find_readable_usb_camera
 
         usb_source = find_readable_usb_camera()
@@ -409,11 +532,16 @@ class AppController(QObject):
         self._camera.connected.connect(self.camera_status.emit)
         self._camera.frame_ready.connect(self._on_frame)
         self._camera.start()
-        self.camera_error.emit("Camera dang chay qua shared stream tu runtime khac.")
+        self.camera_error.emit("Camera đang chạy qua shared stream từ runtime khác.")
         logger.info("shared camera start requested")
 
     def stop_camera(self) -> None:
         if self._camera is None:
+            if self._camera_lock is not None:
+                self._camera_lock.release()
+                self._camera_lock = None
+            self._camera_shared_mode = False
+            self.camera_status.emit(False)
             return
         cam = self._camera
         self._camera = None
@@ -443,6 +571,7 @@ class AppController(QObject):
     def _on_inferred(self, frame, detections, latency_ms: float) -> None:
         import time
         now = time.time()
+        self._last_detections = list(detections)
         # Cap UI emit rate to ~30 fps regardless of how fast inference runs.
         # The pipeline still ran (history + UART), we just skip pushing the
         # frame to the renderer when the previous emit was very recent.
@@ -485,6 +614,7 @@ class AppController(QObject):
         self._speaker.configure(
             enabled=computer_speaker_enabled(new_cfg),
             cooldown_seconds=new_cfg.speaker.cooldown_seconds,
+            voice_gender=new_cfg.speaker.voice_gender,
         )
         save_config(new_cfg, self.config_path)
         if model_changed:
@@ -537,9 +667,7 @@ class AppController(QObject):
             return
         worker = _CamProbe(source)
         worker.done.connect(self.test_camera_result.emit)
-        worker.finished.connect(worker.deleteLater)
-        self._probes.append(worker)
-        worker.start()
+        self._track_probe(worker)
 
     def test_uart_ping(self, port: str, baud: int) -> None:
         if not self._is_usb_uart_port(port):
@@ -547,17 +675,15 @@ class AppController(QObject):
             return
         worker = _UartProbe(port, baud, self.cfg.uart.protocol)
         worker.done.connect(self.test_uart_result.emit)
-        worker.finished.connect(worker.deleteLater)
-        self._probes.append(worker)
-        worker.start()
+        self._track_probe(worker)
 
     def test_hardware_command(self, port: str, baud: int, command: str) -> None:
         route = route_for_command(command)
         if route is None:
-            self.test_uart_result.emit(False, f"Lenh phan cung khong hop le: {command}")
+            self.test_uart_result.emit(False, f"Lệnh phần cứng không hợp lệ: {command}")
             return
         if not self._is_usb_uart_port(port):
-            self.test_uart_result.emit(False, "UART OFF, khong gui xuong phan cung.")
+            self.test_uart_result.emit(False, "UART OFF, không gửi xuống phần cứng.")
             return
         payload = encode_sort(route.command, 0.99, protocol=self.cfg.uart.protocol).decode("utf-8")
         if self._uart is not None and self._uart.isRunning() and self._uart.is_connected:
@@ -568,32 +694,35 @@ class AppController(QObject):
             return
         worker = _UartProbe(port, baud, self.cfg.uart.protocol, route.command)
         worker.done.connect(self.test_uart_result.emit)
-        worker.finished.connect(worker.deleteLater)
-        self._probes.append(worker)
-        worker.start()
+        self._track_probe(worker)
 
     def test_laptop_voice(self, command: str) -> None:
+        from app.core.voice_pack import AUDIO_EVENT_LABELS
+
         command_key = str(command or "").strip()
-        ok = (
-            self._speaker.preview_warning()
-            if command_key == "warning"
-            else self._speaker.preview_command(command_key)
-        )
-        if ok:
-            self.test_uart_result.emit(True, "Da phat thu giong nu tren loa may tinh.")
+        if command_key == "warning":
+            command_key = "multi_object_warning"
+        if command_key in AUDIO_EVENT_LABELS:
+            ok = self._speaker.preview_event(command_key)
         else:
-            self.test_uart_result.emit(False, f"Khong co file giong cho lenh: {command_key}")
+            ok = self._speaker.preview_command(command_key)
+        if ok:
+            label = "giọng nam" if self.cfg.speaker.voice_gender == "male" else "giọng nữ"
+            self.test_uart_result.emit(True, f"Đã phát thử {label} trên loa máy tính.")
+        else:
+            self.test_uart_result.emit(False, f"Không có file giọng cho lệnh: {command_key}")
 
     def set_actuation_test_mode(self, enabled: bool) -> None:
         self._actuation_test_enabled = bool(enabled)
         if self._pipeline is not None:
             self._pipeline.set_hardware_dispatch_enabled(self._actuation_test_enabled)
             self._pipeline.reset_dispatch_state()
-        state = "bat" if enabled else "tat"
+        state = "bật" if enabled else "tắt"
         logger.info("desktop actuation test mode {}", state)
         msg = (
-            f"Actuation Test Mode da {state}. "
-            "Bat camera khi khay trong, roi dua tung mau rac vao vung khay de xem class -> bin -> payload -> ACK."
+            f"Chế độ gửi Arduino đã {state}. "
+            "Bật camera khi khay trống, rồi đưa từng mẫu rác vào vùng khay "
+            "để xem class -> thùng -> payload -> ACK."
         )
         self.test_uart_result.emit(
             True,
@@ -610,6 +739,99 @@ class AppController(QObject):
 
     def is_uart_connected(self) -> bool:
         return bool(self._uart is not None and self._uart.isRunning() and self._uart.is_connected)
+
+    def refresh_learn_now_status(self, cls_name: str = "") -> None:
+        try:
+            status = build_learn_now_status(self._capture_queue_dir(), cls_name)
+        except Exception as e:
+            self.learn_now_action_result.emit(False, f"Không đọc được trạng thái train: {e}")
+            return
+        self.learn_now_status_changed.emit(status)
+
+    def refresh_learn_now_references(self, cls_name: str = "") -> None:
+        if self._pipeline is not None:
+            self._pipeline.refresh_manual_references()
+        self.refresh_learn_now_status(cls_name)
+        clean = canonical_class_name(cls_name) or str(cls_name or "").strip()
+        self.learn_now_action_result.emit(True, f"Đã làm mới reference cho {clean or 'class đang chọn'}.")
+
+    def refresh_training_status(self) -> None:
+        self.training_status_changed.emit(build_training_status(self._project_root()))
+
+    def start_learn_now_candidate_training(self, cls_name: str, profile: str) -> None:
+        class_name = canonical_class_name(cls_name)
+        if not class_name:
+            self.learn_now_action_result.emit(False, "Chọn class hợp lệ trước khi train.")
+            return
+        profile = "strong" if str(profile).strip().lower() == "strong" else "micro"
+        if self.is_actuation_test_mode_enabled():
+            self.learn_now_action_result.emit(
+                False,
+                "Tắt Bật gửi Arduino trước khi huấn luyện phần mềm.",
+            )
+            return
+        if training_processes():
+            self.learn_now_action_result.emit(False, "Đang có training khác chạy.")
+            self.refresh_training_status()
+            return
+        status = build_learn_now_status(self._capture_queue_dir(), class_name)
+        selected = status.get("selected") if isinstance(status, dict) else None
+        if not isinstance(selected, dict) or not selected.get("ready_for_micro_train"):
+            message = str(selected.get("message") if isinstance(selected, dict) else "")
+            self.learn_now_action_result.emit(
+                False,
+                message or "Cần ít nhất 6 ảnh đã duyệt trước khi train nhanh.",
+            )
+            self.learn_now_status_changed.emit(status)
+            return
+        if profile == "strong" and not selected.get("ready_for_strong_train"):
+            self.learn_now_action_result.emit(
+                False,
+                "Train mạnh cần ít nhất 24 ảnh đã duyệt và 6 ảnh holdout.",
+            )
+            self.learn_now_status_changed.emit(status)
+            return
+        try:
+            pid = start_learn_now_training(self._project_root(), class_name, profile)
+        except (FileNotFoundError, OSError) as e:
+            self.learn_now_action_result.emit(False, str(e))
+            return
+        self.learn_now_action_result.emit(
+            True,
+            f"Đã bắt đầu train {profile} candidate cho {class_name} (PID {pid}).",
+        )
+        self.refresh_training_status()
+
+    def stop_learn_now_training(self) -> None:
+        stopped = stop_training_processes()
+        if stopped:
+            self.learn_now_action_result.emit(True, f"Đã dừng training PID: {', '.join(map(str, stopped))}.")
+        else:
+            self.learn_now_action_result.emit(False, "Không có training đang chạy.")
+        self.refresh_training_status()
+
+    def load_candidate_model_for_test(self, path: str) -> None:
+        try:
+            new_engine = InferenceEngine(
+                path,
+                device=self.cfg.model.device,
+                conf=self.cfg.model.conf_threshold,
+                iou=self.cfg.model.iou_threshold,
+                imgsz=self.cfg.model.input_size,
+                half=self.cfg.model.half_precision,
+            )
+        except Exception as e:
+            self.reload_model_result.emit(False, str(e))
+            return
+        self._engine = new_engine
+        if self._pipeline is not None:
+            self._pipeline.engine = new_engine
+            self._pipeline.reset_dispatch_state()
+        self.model_status.emit(True)
+        self.reload_model_result.emit(
+            True,
+            f"Loaded candidate tạm thời: {len(new_engine.class_names)} classes. Config production chưa đổi.",
+        )
 
     def reload_model(self, path: str) -> None:
         try:
@@ -629,6 +851,10 @@ class AppController(QObject):
             self._pipeline.engine = new_engine
         self.cfg.model.path = path
         self.reload_model_result.emit(True, f"Loaded {len(new_engine.class_names)} classes")
+
+    @staticmethod
+    def _project_root() -> Path:
+        return Path(__file__).resolve().parents[2]
 
     @property
     def history(self):
@@ -651,6 +877,38 @@ class AppController(QObject):
             self.snapshot_saved.emit(True, str(out))
         except Exception as e:
             self.snapshot_saved.emit(False, str(e))
+
+    def import_manual_phone_samples(self, cls_name: str, cls_id: int, files) -> None:
+        from app.core.dataset_queue import import_manual_phone_images
+        from app.core.waste_categories import default_class_id_for_name
+        from app.utils.paths import dataset_db_path
+
+        class_name = canonical_class_name(cls_name)
+        class_id = default_class_id_for_name(class_name)
+        if not class_name or class_id is None:
+            self.snapshot_saved.emit(False, "Nhập nhãn hợp lệ trước khi thêm ảnh thủ công.")
+            return
+        image_files = [str(path) for path in (files or []) if str(path or "").strip()]
+        if not image_files:
+            self.snapshot_saved.emit(False, "Chưa chọn ảnh để thêm vào huấn luyện.")
+            return
+        try:
+            added = import_manual_phone_images(
+                image_files,
+                self._capture_queue_dir(),
+                class_name,
+                int(class_id if class_id is not None else cls_id),
+                catalog_path=dataset_db_path(),
+            )
+        except Exception as e:
+            self.snapshot_saved.emit(False, str(e))
+            return
+        self.capture_saved.emit(str(self._capture_queue_dir()))
+        self.snapshot_saved.emit(
+            True,
+            f"Đã thêm {added} ảnh {class_name}; cần vẽ bbox và lưu đã duyệt trước khi train.",
+        )
+        self.refresh_learn_now_status(class_name)
 
     def capture_camera_sample(self, cls_name: str) -> None:
         from app.core.dataset_queue import import_manual_camera_frame
@@ -692,21 +950,198 @@ class AppController(QObject):
         self.capture_saved.emit(str(img_path))
         self.snapshot_saved.emit(
             True,
-            f"Da ghi mau {cls_name}: {img_path.name}. Mo Web annotate de chinh box truoc khi train.",
+            f"Đã ghi mẫu {cls_name}: {img_path.name}. Mở Web annotate để chỉnh box trước khi train.",
         )
 
+        self.refresh_learn_now_status(cls_name)
+
+    def camera_annotation_snapshot(self, cls_name: str):
+        if not self.is_camera_running() or self._last_frame is None:
+            return False, "Bật camera và chờ có frame trước khi chụp & gắn nhãn.", None, None
+        frame = self._last_frame.copy()
+        self._annotation_frame = frame.copy()
+        bbox = self._suggest_annotation_bbox(frame, cls_name)
+        return True, "", frame, bbox
+
+    def capture_reviewed_camera_sample(
+        self,
+        cls_name: str,
+        cls_id: int,
+        xyxy,
+        approve_now: bool,
+    ) -> None:
+        from app.core.dataset_queue import (
+            import_manual_camera_frame,
+            save_reviewed_camera_annotation,
+        )
+        from app.utils.paths import dataset_db_path
+
+        cls_name = str(cls_name or "").strip()
+        if not cls_name:
+            self.snapshot_saved.emit(False, "missing class label")
+            return
+        frame = self._annotation_frame
+        if frame is None and self._last_frame is not None:
+            frame = self._last_frame.copy()
+        if frame is None:
+            self.snapshot_saved.emit(False, "Bật camera và chờ có frame trước khi lưu mẫu.")
+            return
+        if xyxy is None:
+            self.snapshot_saved.emit(False, "Vui lòng vẽ bbox trước khi lưu mẫu.")
+            return
+        queue_dir = self._capture_queue_dir()
+        try:
+            if approve_now:
+                img_path = save_reviewed_camera_annotation(
+                    frame,
+                    queue_dir,
+                    cls_name,
+                    int(cls_id),
+                    xyxy,
+                    catalog_path=dataset_db_path(),
+                )
+            else:
+                img_path = import_manual_camera_frame(
+                    frame,
+                    queue_dir,
+                    cls_name,
+                    int(cls_id),
+                    xyxy=xyxy,
+                    catalog_path=dataset_db_path(),
+                )
+        except Exception as e:
+            self.snapshot_saved.emit(False, str(e))
+            return
+        self._annotation_frame = None
+        if self._pipeline is not None:
+            self._pipeline.refresh_manual_references()
+        self.capture_saved.emit(str(img_path))
+        state = "đã duyệt/trainable" if approve_now else "cần duyệt"
+        self.snapshot_saved.emit(True, f"Đã lưu mẫu {cls_name} ({state}): {img_path.name}.")
+
+        self.refresh_learn_now_status(cls_name)
+
+    def capture_hard_negative_sample(self, reason: str) -> None:
+        from app.core.hard_negative_dataset import capture_hard_negative_frame
+        from app.utils.paths import dataset_db_path, resource_path
+
+        reason = str(reason or "").strip()
+        if not reason:
+            self.snapshot_saved.emit(False, "missing hard negative reason")
+            return
+        if not self.is_camera_running() or self._last_frame is None:
+            self.snapshot_saved.emit(False, "Bat camera va cho co frame truoc khi ghi hard negative.")
+            return
+        output_path = Path(self.cfg.capture.output_dir).expanduser()
+        if output_path.is_absolute():
+            queue_dir = output_path / "low_conf_queue"
+        else:
+            candidate = Path.cwd() / output_path / "low_conf_queue"
+            queue_dir = candidate if candidate.exists() else resource_path(".") / output_path / "low_conf_queue"
+        try:
+            img_path = capture_hard_negative_frame(
+                self._last_frame,
+                queue_dir,
+                reason,
+                catalog_path=dataset_db_path(),
+                extra_meta={"capture_mode": "hard_negative_desktop", "hardware_blocked": True},
+            )
+        except Exception as e:
+            self.snapshot_saved.emit(False, str(e))
+            return
+        self.capture_saved.emit(str(img_path))
+        self.snapshot_saved.emit(True, f"Đã ghi hard negative {reason}: {img_path.name}. Mẫu này không vào train.")
+
+        self.refresh_learn_now_status("")
+
+    def _capture_queue_dir(self) -> Path:
+        from app.utils.paths import resource_path
+
+        output_path = Path(self.cfg.capture.output_dir).expanduser()
+        if output_path.is_absolute():
+            return output_path / "low_conf_queue"
+        candidate = Path.cwd() / output_path / "low_conf_queue"
+        return candidate if candidate.exists() else resource_path(".") / output_path / "low_conf_queue"
+
+    def _suggest_annotation_bbox(self, frame, cls_name: str) -> tuple[int, int, int, int]:
+        from app.core.multi_object_dispatch import foreground_object_boxes
+        from app.core.waste_categories import canonical_class_name
+
+        height, width = frame.shape[:2]
+        target = canonical_class_name(cls_name) or str(cls_name or "").strip()
+
+        def _area(box: tuple[int, int, int, int]) -> int:
+            return max(0, box[2] - box[0]) * max(0, box[3] - box[1])
+
+        detections = list(self._last_detections or [])
+        matching = [
+            tuple(int(value) for value in det.xyxy)
+            for det in detections
+            if (canonical_class_name(det.cls_name) or det.cls_name) == target
+        ]
+        if matching:
+            return self._clamp_bbox(max(matching, key=_area), width, height)
+        all_boxes = [tuple(int(value) for value in det.xyxy) for det in detections]
+        if all_boxes:
+            return self._clamp_bbox(max(all_boxes, key=_area), width, height)
+        foreground = foreground_object_boxes(
+            frame,
+            roi=self.cfg.roi,
+            min_area_ratio=self.cfg.unknown_fallback.min_area_ratio,
+        )
+        if foreground:
+            return self._clamp_bbox(foreground[0], width, height)
+        if self.cfg.roi.enabled and self.cfg.roi.width > 0 and self.cfg.roi.height > 0:
+            return self._clamp_bbox(
+                (
+                    self.cfg.roi.x,
+                    self.cfg.roi.y,
+                    self.cfg.roi.x + self.cfg.roi.width,
+                    self.cfg.roi.y + self.cfg.roi.height,
+                ),
+                width,
+                height,
+            )
+        return (0, 0, width, height)
+
+    @staticmethod
+    def _clamp_bbox(box: tuple[int, int, int, int], width: int, height: int) -> tuple[int, int, int, int]:
+        x1, y1, x2, y2 = box
+        left = max(0, min(width, min(int(x1), int(x2))))
+        top = max(0, min(height, min(int(y1), int(y2))))
+        right = max(0, min(width, max(int(x1), int(x2))))
+        bottom = max(0, min(height, max(int(y1), int(y2))))
+        if right <= left or bottom <= top:
+            return (0, 0, width, height)
+        return (left, top, right, bottom)
+
     def stop(self) -> None:
-        if self._camera is not None:
-            self._camera.stop()
-            self._camera.wait(2000)
-            self._camera = None
-        if self._camera_lock is not None:
-            self._camera_lock.release()
-            self._camera_lock = None
+        self.stop_camera()
         if self._inference_worker is not None:
-            self._inference_worker.stop()
-            self._inference_worker.wait(2000)
+            worker = self._inference_worker
+            self._inference_worker = None
+            worker.stop()
+            worker.wait(2000)
+            worker.deleteLater()
+        if self._model_loader is not None:
+            self._model_loader.wait(10000)
+            if not self._model_loader.isRunning():
+                self._model_loader.deleteLater()
+            self._model_loader = None
+            self._model_loading = False
+        for worker in list(self._probes):
+            with suppress(RuntimeError):
+                worker.requestInterruption()
+            with suppress(RuntimeError):
+                worker.quit()
+            with suppress(RuntimeError):
+                if not worker.isRunning() or worker.wait(500):
+                    self._forget_probe(worker)
         self._stop_uart_worker()
         if self._pipeline is not None:
             self._pipeline.close()
+            self._pipeline = None
+        self._pending_camera_start = False
+        self._pending_uart_tests.clear()
+        self._clear_runtime_buffers()
         logger.info("controller stopped")
