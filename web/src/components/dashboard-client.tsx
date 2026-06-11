@@ -301,7 +301,6 @@ export function DashboardClient() {
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [chatBusy, setChatBusy] = useState(false);
-  const refreshInFlightRef = useRef(false);
 
   const cameraStream = useMemo(() => {
     if (!cameraStreamTicket) {
@@ -1117,45 +1116,31 @@ export function DashboardClient() {
     }
   }
 
-  async function refreshActive(scope: TabId = active) {
+  async function refreshActive(scope: TabId = active, signal?: AbortSignal) {
+    const scopedFetch = <T,>(path: string, init: AgentFetchInit = {}) =>
+      fetchAgent<T>(path, { ...init, signal });
     try {
       const settingsLike = scope === "settings" || scope === "model" || scope === "audio";
       const operationsLike = scope === "roles" || scope === "devices" || scope === "bin-map" || scope === "alerts";
       const dataLike = scope === "data";
       const trainingLike = scope === "training";
       const statusPath = settingsLike ? "/api/status" : "/api/status?include_devices=false";
-      const [statusRes, trainingRes] = await Promise.all([
-        fetchAgent<RuntimeStatus>(statusPath),
-        fetchAgent<TrainingStatus>("/api/training/status")
-      ]);
+      const statusRes = await scopedFetch<RuntimeStatus>(statusPath);
       setStatus(statusRes);
-      setTraining(trainingRes);
 
       if (dataLike) {
-        const [
-          dataRes,
-          itemRes,
-          classesRes,
-          commonWasteRes,
-          captureSessionRes,
-          learnNowRes,
-          sourceQualityRes
-        ] = await Promise.all([
-          fetchAgent<DatasetSummary>("/api/dataset/summary"),
-          fetchAgent<DatasetItemsResponse>(datasetItemsPath()),
-          fetchAgent<ModelClassesResponse>("/api/model/classes"),
-          fetchAgent<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
-          fetchAgent<CaptureSession>("/api/dataset/capture-session"),
-          fetchAgent<LearnNowStatus>(learnNowPath()),
-          fetchAgent<SourceQuality>("/api/dataset/source-quality")
+        const [dataRes, itemRes, classesRes, commonWasteRes, sourceQualityRes] = await Promise.all([
+          scopedFetch<DatasetSummary>("/api/dataset/summary"),
+          scopedFetch<DatasetItemsResponse>(datasetItemsPath()),
+          scopedFetch<ModelClassesResponse>("/api/model/classes"),
+          scopedFetch<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
+          scopedFetch<SourceQuality>("/api/dataset/source-quality")
         ]);
         setSummary(dataRes);
         setDatasetItems(itemRes.rows);
         setDatasetTotal(itemRes.total);
         setModelClasses(classesRes.classes);
         setCommonWasteItems(commonWasteRes.items);
-        setCaptureSession(captureSessionRes);
-        setLearnNow(learnNowRes);
         setSourceQuality(sourceQualityRes);
         setManualClass((current) => current || classesRes.classes[0]?.name || "");
         setSelectedPaths((current) =>
@@ -1164,12 +1149,16 @@ export function DashboardClient() {
       }
 
       if (trainingLike) {
-        const [classesRes, commonWasteRes, captureSessionRes, learnNowRes] = await Promise.all([
-          fetchAgent<ModelClassesResponse>("/api/model/classes"),
-          fetchAgent<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
-          fetchAgent<CaptureSession>("/api/dataset/capture-session"),
-          fetchAgent<LearnNowStatus>(learnNowPath("/api/learn-now/status", trainingManualClass), { timeoutMs: 30_000 })
+        const [trainingRes, classesRes, commonWasteRes, captureSessionRes, learnNowRes] = await Promise.all([
+          scopedFetch<TrainingStatus>("/api/training/status"),
+          scopedFetch<ModelClassesResponse>("/api/model/classes"),
+          scopedFetch<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
+          scopedFetch<CaptureSession>("/api/dataset/capture-session"),
+          scopedFetch<LearnNowStatus>(learnNowPath("/api/learn-now/status", trainingManualClass), {
+            timeoutMs: 30_000
+          })
         ]);
+        setTraining(trainingRes);
         setModelClasses(classesRes.classes);
         setCommonWasteItems(commonWasteRes.items);
         setCaptureSession(captureSessionRes);
@@ -1177,15 +1166,15 @@ export function DashboardClient() {
       }
 
       if (scope === "history") {
-        const historyRes = await fetchAgent<HistoryResponse>("/api/history?limit=20");
+        const historyRes = await scopedFetch<HistoryResponse>("/api/history?limit=20");
         setHistory(historyRes.rows);
       }
 
       if (scope === "reports") {
         const [historyRes, dataRes, sourceQualityRes] = await Promise.all([
-          fetchAgent<HistoryResponse>("/api/history?limit=20"),
-          fetchAgent<DatasetSummary>("/api/dataset/summary"),
-          fetchAgent<SourceQuality>("/api/dataset/source-quality")
+          scopedFetch<HistoryResponse>("/api/history?limit=20"),
+          scopedFetch<DatasetSummary>("/api/dataset/summary"),
+          scopedFetch<SourceQuality>("/api/dataset/source-quality")
         ]);
         setHistory(historyRes.rows);
         setSummary(dataRes);
@@ -1193,18 +1182,18 @@ export function DashboardClient() {
       }
 
       if (scope === "logs") {
-        const logsRes = await fetchAgent<LogsResponse>("/api/logs?limit=120");
+        const logsRes = await scopedFetch<LogsResponse>("/api/logs?limit=120");
         setLogs(logsRes.lines);
       }
 
       if (settingsLike) {
         const [settingsRes, classesRes, commonWasteRes, hardwareRes, hardwareDiagnosticsRes, actuationRes] = await Promise.all([
-          fetchAgent<SettingsResponse>("/api/settings"),
-          fetchAgent<ModelClassesResponse>("/api/model/classes"),
-          fetchAgent<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
-          fetchAgent<HardwareProfile>("/api/hardware/profile"),
-          fetchAgent<HardwareDiagnostics>("/api/hardware/diagnostics"),
-          fetchAgent<ActuationTestMode>("/api/actuation/test-mode")
+          scopedFetch<SettingsResponse>("/api/settings"),
+          scopedFetch<ModelClassesResponse>("/api/model/classes"),
+          scopedFetch<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
+          scopedFetch<HardwareProfile>("/api/hardware/profile"),
+          scopedFetch<HardwareDiagnostics>("/api/hardware/diagnostics"),
+          scopedFetch<ActuationTestMode>("/api/actuation/test-mode")
         ]);
         setConfig(settingsRes.config);
         setModelClasses(classesRes.classes);
@@ -1213,7 +1202,7 @@ export function DashboardClient() {
         setHardwareDiagnostics(hardwareDiagnosticsRes);
         setActuationMode(actuationRes);
         setVoicePackStatus(
-          await fetchAgent<AudioVoicePackStatusResponse>(
+          await scopedFetch<AudioVoicePackStatusResponse>(
             `/api/audio/voice-pack-status?gender=${encodeURIComponent(settingsRes.config.speaker.voice_gender ?? "female")}`
           )
         );
@@ -1221,7 +1210,7 @@ export function DashboardClient() {
       }
 
       if (scope === "mapping") {
-        const mappingRes = await fetchAgent<MappingsResponse>("/api/mappings");
+        const mappingRes = await scopedFetch<MappingsResponse>("/api/mappings");
         setMappings(mappingRes.mappings);
         setManualClass((current) => current || mappingRes.mappings[0]?.class_name || "");
       }
@@ -1235,6 +1224,9 @@ export function DashboardClient() {
       }
       setAgentError("");
     } catch (error) {
+      if (signal?.aborted) {
+        return;
+      }
       setAgentError(error instanceof Error ? error.message : "Không kết nối được agent");
     }
   }
@@ -1247,20 +1239,25 @@ export function DashboardClient() {
       active === "bin-map" || active === "alerts" || active === "roles" || active === "devices" || active === "training"
         ? 12_000
         : 4_000;
+    const controller = new AbortController();
+    let refreshInFlight = false;
     const runRefresh = async () => {
-      if (refreshInFlightRef.current || chatBusy || document.visibilityState === "hidden") {
+      if (refreshInFlight || chatBusy || document.visibilityState === "hidden") {
         return;
       }
-      refreshInFlightRef.current = true;
+      refreshInFlight = true;
       try {
-        await refreshActive(active);
+        await refreshActive(active, controller.signal);
       } finally {
-        refreshInFlightRef.current = false;
+        refreshInFlight = false;
       }
     };
     void runRefresh();
     const timer = window.setInterval(() => void runRefresh(), pollingIntervalMs);
-    return () => window.clearInterval(timer);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
   }, [
     active,
     agentToken,

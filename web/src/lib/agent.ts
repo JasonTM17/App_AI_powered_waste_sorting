@@ -124,10 +124,22 @@ export type AppConfig = {
     empty_rearm_seconds: number;
     empty_rearm_frames: number;
     require_roi_for_dispatch: boolean;
+    max_objects_per_dispatch: number;
     max_classes_per_dispatch: number;
     multi_class_warning_cooldown_seconds: number;
     multi_class_warning_text: string;
     multi_class_warning_audio_track: number;
+  };
+  unknown_fallback: {
+    enabled: boolean;
+    class_name: string;
+    dispatch_enabled: boolean;
+    command: string;
+    bin_index: number;
+    min_raw_confidence: number;
+    min_area_ratio: number;
+    stable_frames: number;
+    warmup_frames: number;
   };
   manual_reference_recognition: {
     enabled: boolean;
@@ -157,6 +169,7 @@ export type AppConfig = {
   speaker: {
     enabled: boolean;
     output_mode: "hardware" | "computer_speaker";
+    voice_gender: "female" | "male";
     cooldown_seconds: number;
   };
   theme: "dark" | "light";
@@ -323,6 +336,15 @@ export type DatasetItem = {
   updated_at: string;
   trusted: boolean;
   reviewed: boolean;
+  trust_state?: string;
+  trust_reasons?: string[];
+  review_decision?: string;
+  review_reason?: string;
+  reviewed_by?: string;
+  bbox_reviewed?: boolean;
+  training_excluded?: boolean;
+  quarantined?: boolean;
+  quarantine_reason?: string;
 };
 
 export type DatasetBox = {
@@ -335,6 +357,22 @@ export type DatasetBox = {
 export type DatasetAnnotationResponse = {
   item: DatasetItem;
   boxes: DatasetBox[];
+};
+
+export type DatasetReviewRequest = {
+  action:
+    | "approve"
+    | "relabel"
+    | "bbox_approved"
+    | "needs_annotation"
+    | "hard_negative"
+    | "holdout"
+    | "quarantine"
+    | "exclude";
+  cls_name?: string | null;
+  cls_id?: number | null;
+  reason?: string;
+  boxes?: DatasetBox[];
 };
 
 export type VisionLabelSuggestion = {
@@ -961,11 +999,32 @@ export type KnowledgeEvaluateResponse = {
   payload_chars: number;
 };
 
+export type CameraStreamTokenResponse = {
+  token: string;
+  expires_at: string;
+};
+
+export type AudioVoicePackStatusResponse = {
+  gender: "female" | "male";
+  available_count: number;
+  total_count: number;
+  missing_events: string[];
+  events: Array<{
+    event_key: string;
+    label: string;
+    available: boolean;
+  }>;
+};
+
 export const AGENT_URL =
   process.env.NEXT_PUBLIC_AGENT_URL?.replace(/\/$/, "") || "http://localhost:8765";
 
 export const DEFAULT_AGENT_TOKEN = process.env.NEXT_PUBLIC_AGENT_TOKEN || "";
 const AGENT_FETCH_TIMEOUT_MS = 20000;
+
+export type AgentFetchInit = RequestInit & {
+  timeoutMs?: number;
+};
 
 export class AgentApiError extends Error {
   status: number;
@@ -977,10 +1036,10 @@ export class AgentApiError extends Error {
   }
 }
 
-export function streamUrl(token = DEFAULT_AGENT_TOKEN) {
+export function streamUrl(streamToken = "") {
   const url = new URL(`${AGENT_URL}/api/camera/stream`);
-  if (token) {
-    url.searchParams.set("token", token);
+  if (streamToken) {
+    url.searchParams.set("stream_token", streamToken);
   }
   return url.toString();
 }
@@ -1039,24 +1098,28 @@ export function userHistoryExportUrl(rangeDays: AnalyticsRangeDays, token = DEFA
 
 export async function agentFetch<T>(
   path: string,
-  init?: RequestInit,
+  init?: AgentFetchInit,
   token = DEFAULT_AGENT_TOKEN
 ): Promise<T> {
+  const { timeoutMs, signal, ...requestInit } = init ?? {};
   const headers = new Headers(init?.headers);
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
   const controller = new AbortController();
-  const timeoutId = globalThis.setTimeout(() => controller.abort(), AGENT_FETCH_TIMEOUT_MS);
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs ?? AGENT_FETCH_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(`${AGENT_URL}${path}`, {
-      ...init,
+      ...requestInit,
       headers,
       cache: "no-store",
-      signal: init?.signal ?? controller.signal
+      signal: signal ?? controller.signal
     });
   } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
     const aborted = error instanceof DOMException && error.name === "AbortError";
     throw new AgentApiError(
       aborted
