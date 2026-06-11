@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from datetime import date, datetime
 from pathlib import Path
+from threading import Lock, Thread
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -15,12 +17,16 @@ from sqlalchemy import (
     Table,
     create_engine,
     func,
+    inspect,
     or_,
     select,
     text,
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
+
+from app.agent.auth_service import create_database_engine, normalize_database_url
+from app.agent.schema_readiness import SchemaReadiness
 
 metadata = MetaData()
 
@@ -145,11 +151,27 @@ device_issues = Table(
 
 DEFAULT_CENTER = {"latitude": 10.843195, "longitude": 106.777800, "zoom": 12}
 SEED_SOURCE = "thu_duc_seed_2026_06_10"
+DEFAULT_SEED_OWNER_USERNAME = "user"
+DEFAULT_USER_STATION_COUNT = 2
+_ENGINE_CACHE: dict[str, Engine] = {}
+_ENGINE_LOCK = Lock()
+_SCHEMA_READINESS = SchemaReadiness()
 CHILD_BIN_SEEDS = [
     {"suffix": "O", "command": "O", "bin_index": 1, "label": "Huu co"},
     {"suffix": "R", "command": "R", "bin_index": 2, "label": "Vo co"},
     {"suffix": "I", "command": "I", "bin_index": 3, "label": "Tai che"},
 ]
+
+
+def configured_operations_database_url() -> str:
+    if os.environ.get("PYTEST_CURRENT_TEST") and os.environ.get("TRASH_SORTER_TEST_ALLOW_OPERATIONS_DATABASE_URL") != "1":
+        return ""
+    raw = (
+        os.environ.get("TRASH_SORTER_OPERATIONS_DATABASE_URL", "").strip()
+        or os.environ.get("TRASH_SORTER_AUTH_DATABASE_URL", "").strip()
+        or os.environ.get("DATABASE_URL", "").strip()
+    )
+    return normalize_database_url(raw)
 THU_DUC_SEED_STATIONS = [
     {
         "station_id": "td-bin-001",
@@ -235,28 +257,39 @@ THU_DUC_SEED_STATIONS = [
 
 
 class OperationsStore:
-    def __init__(self, db_path: Path, *, device_defaults: dict[str, str] | None = None):
-        db_path.parent.mkdir(parents=True, exist_ok=True)
+    def __init__(
+        self,
+        db_path: Path,
+        *,
+        database_url: str | None = None,
+        device_defaults: dict[str, str] | None = None,
+    ):
+        configured_url = database_url or configured_operations_database_url()
         self.db_path = db_path
-        self._engine: Engine = create_engine(f"sqlite:///{db_path}", future=True)
-        metadata.create_all(self._engine)
-        with self._engine.begin() as conn:
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bin_stations_active ON bin_stations(active)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bins_station ON bins(station_id)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_schedules_station ON collection_schedules(station_id)"))
-        self.seed_defaults(device_defaults=device_defaults or {})
+        self.database_url = configured_url
+        self._device_defaults = dict(device_defaults or {})
+        if configured_url:
+            self._engine = _shared_database_engine(configured_url)
+            self._dispose_on_close = False
+        else:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._engine: Engine = create_engine(f"sqlite:///{db_path}", future=True)
+            self._dispose_on_close = True
 
     def seed_defaults(self, *, device_defaults: dict[str, str]) -> None:
+        self.ensure_ready()
+        self._seed_defaults(device_defaults=device_defaults)
+
+    def _seed_defaults(self, *, device_defaults: dict[str, str]) -> None:
         now = _now()
         device_id = _clean(device_defaults.get("device_id")) or "local-trash-sorter"
         device_name = _clean(device_defaults.get("device_name")) or "Trash Sorter Local"
         location = _clean(device_defaults.get("location")) or "Thu Duc local seed"
-        owner_username = _clean(device_defaults.get("owner_username"))
+        owner_username = _clean(device_defaults.get("owner_username")) or DEFAULT_SEED_OWNER_USERNAME
         today = date.today().isoformat()
         with self._engine.begin() as conn:
             conn.execute(
-                sqlite_insert(devices)
+                self._insert_do_nothing(devices)
                 .values(
                     device_id=device_id,
                     device_name=device_name,
@@ -270,16 +303,17 @@ class OperationsStore:
                 )
                 .on_conflict_do_nothing(index_elements=["device_id"])
             )
-            for station in THU_DUC_SEED_STATIONS:
+            for index, station in enumerate(THU_DUC_SEED_STATIONS):
                 station_id = station["station_id"]
+                station_owner = owner_username if index < DEFAULT_USER_STATION_COUNT else ""
                 conn.execute(
-                    sqlite_insert(bin_stations)
+                    self._insert_do_nothing(bin_stations)
                     .values(
                         **station,
                         status="candidate",
                         coordinate_verified=0,
                         source=SEED_SOURCE,
-                        assigned_owner_username="",
+                        assigned_owner_username=station_owner,
                         active=1,
                         created_at=now,
                         updated_at=now,
@@ -289,7 +323,7 @@ class OperationsStore:
                 for child in CHILD_BIN_SEEDS:
                     bin_id = f"{station_id}-{child['suffix']}"
                     conn.execute(
-                        sqlite_insert(bins)
+                        self._insert_do_nothing(bins)
                         .values(
                             bin_id=bin_id,
                             station_id=station_id,
@@ -305,11 +339,11 @@ class OperationsStore:
                     )
                 schedule_id = f"sched-{station_id}-seed"
                 conn.execute(
-                    sqlite_insert(collection_schedules)
+                    self._insert_do_nothing(collection_schedules)
                     .values(
                         schedule_id=schedule_id,
                         station_id=station_id,
-                        assigned_owner_username="",
+                        assigned_owner_username=station_owner,
                         scheduled_date=today,
                         window_start="07:00",
                         window_end="11:00",
@@ -322,6 +356,19 @@ class OperationsStore:
                     )
                     .on_conflict_do_nothing(index_elements=["schedule_id"])
                 )
+            assigned_seed_ids = [station["station_id"] for station in THU_DUC_SEED_STATIONS[:DEFAULT_USER_STATION_COUNT]]
+            conn.execute(
+                bin_stations.update()
+                .where(bin_stations.c.station_id.in_(assigned_seed_ids))
+                .where(bin_stations.c.assigned_owner_username == "")
+                .values(assigned_owner_username=owner_username, updated_at=now)
+            )
+            conn.execute(
+                collection_schedules.update()
+                .where(collection_schedules.c.station_id.in_(assigned_seed_ids))
+                .where(collection_schedules.c.assigned_owner_username == "")
+                .values(assigned_owner_username=owner_username, updated_at=now)
+            )
 
     def list_role_catalog(self) -> list[dict[str, object]]:
         from app.agent.auth import ADMIN_CAPABILITIES, USER_CAPABILITIES
@@ -342,11 +389,13 @@ class OperationsStore:
         ]
 
     def list_devices(self) -> list[dict[str, object]]:
+        self.ensure_ready()
         with self._engine.begin() as conn:
             rows = conn.execute(select(devices).order_by(devices.c.device_name)).mappings().all()
         return [_device_dict(row) for row in rows]
 
     def upsert_device(self, values: dict[str, object]) -> dict[str, object]:
+        self.ensure_ready()
         now = _now()
         device_id = _clean(values.get("device_id")) or "local-trash-sorter"
         payload = {
@@ -370,6 +419,7 @@ class OperationsStore:
         return self.get_device(device_id) or {}
 
     def get_device(self, device_id: str) -> dict[str, object] | None:
+        self.ensure_ready()
         with self._engine.begin() as conn:
             row = conn.execute(
                 select(devices).where(devices.c.device_id == device_id)
@@ -382,6 +432,7 @@ class OperationsStore:
         owner_username: str | None = None,
         include_inactive: bool = False,
     ) -> dict[str, object]:
+        self.ensure_ready()
         stations = self._station_rows(owner_username=owner_username, include_inactive=include_inactive)
         station_ids = [str(row["station_id"]) for row in stations]
         child_bins = self._bins_by_station(station_ids)
@@ -398,6 +449,7 @@ class OperationsStore:
         }
 
     def create_station(self, values: dict[str, object]) -> dict[str, object]:
+        self.ensure_ready()
         now = _now()
         station_id = _clean(values.get("station_id")) or f"custom-{uuid4().hex[:10]}"
         payload = _station_values(values, station_id=station_id, now=now)
@@ -425,6 +477,7 @@ class OperationsStore:
         return self.get_station(station_id, include_inactive=True) or {}
 
     def patch_station(self, station_id: str, values: dict[str, object]) -> dict[str, object] | None:
+        self.ensure_ready()
         existing = self.get_station(station_id, include_inactive=True)
         if existing is None:
             return None
@@ -441,6 +494,7 @@ class OperationsStore:
         return self.get_station(station_id, include_inactive=True)
 
     def get_station(self, station_id: str, *, include_inactive: bool = False) -> dict[str, object] | None:
+        self.ensure_ready()
         with self._engine.begin() as conn:
             stmt = select(bin_stations).where(bin_stations.c.station_id == station_id)
             if not include_inactive:
@@ -453,7 +507,45 @@ class OperationsStore:
         return _station_dict(row, child_bins, alerts_by_station)
 
     def delete_station(self, station_id: str) -> bool:
+        self.ensure_ready()
         return self.patch_station(station_id, {"active": False, "status": "inactive"}) is not None
+
+    def update_bin_fullness(
+        self,
+        bin_index: int,
+        percent: int | float,
+        *,
+        station_id: str = "",
+        device_id: str = "",
+        owner_username: str = "",
+    ) -> dict[str, object] | None:
+        self.ensure_ready()
+        if bin_index < 1 or bin_index > len(CHILD_BIN_SEEDS):
+            return None
+        resolved_station_id = self._resolve_station_id(
+            station_id=station_id,
+            device_id=device_id,
+            owner_username=owner_username,
+        )
+        if not resolved_station_id:
+            return None
+        clamped = max(0.0, min(100.0, float(percent)))
+        now = _now()
+        with self._engine.begin() as conn:
+            result = conn.execute(
+                bins.update()
+                .where(bins.c.station_id == resolved_station_id)
+                .where(bins.c.bin_index == bin_index)
+                .where(bins.c.active == 1)
+                .values(
+                    fullness_percent=clamped,
+                    status=_fullness_status(clamped),
+                    updated_at=now,
+                )
+            )
+            if result.rowcount == 0:
+                return None
+        return self.get_station(resolved_station_id, include_inactive=True)
 
     def list_alerts(
         self,
@@ -461,6 +553,7 @@ class OperationsStore:
         owner_username: str | None = None,
         include_resolved: bool = True,
     ) -> list[dict[str, object]]:
+        self.ensure_ready()
         station_ids = {
             str(row["station_id"])
             for row in self._station_rows(owner_username=owner_username, include_inactive=False)
@@ -487,6 +580,7 @@ class OperationsStore:
         status: str,
         actor_username: str = "",
     ) -> dict[str, object] | None:
+        self.ensure_ready()
         now = _now()
         resolved_at = now if status == "resolved" else ""
         with self._engine.begin() as conn:
@@ -509,6 +603,7 @@ class OperationsStore:
         return _alert_dict(row) if row is not None else None
 
     def list_schedules(self, *, owner_username: str | None = None) -> list[dict[str, object]]:
+        self.ensure_ready()
         station_rows = self._station_rows(owner_username=owner_username, include_inactive=False)
         station_by_id = {str(row["station_id"]): _station_dict(row, []) for row in station_rows}
         station_ids = set(station_by_id)
@@ -534,6 +629,7 @@ class OperationsStore:
         actor_account_id: int | None,
         note: str = "",
     ) -> dict[str, object] | None:
+        self.ensure_ready()
         now = _now()
         with self._engine.begin() as conn:
             criteria = collection_schedules.c.schedule_id == schedule_id
@@ -592,6 +688,7 @@ class OperationsStore:
         reporter_username: str,
         reporter_account_id: int | None,
     ) -> dict[str, object]:
+        self.ensure_ready()
         now = _now()
         issue_id = f"issue-{uuid4().hex[:12]}"
         alert_id = f"alert-{uuid4().hex[:12]}"
@@ -644,6 +741,7 @@ class OperationsStore:
         return _issue_dict(row) if row is not None else {}
 
     def summary(self, *, owner_username: str | None = None) -> dict[str, object]:
+        self.ensure_ready()
         map_data = self.list_bin_map(owner_username=owner_username, include_inactive=False)
         schedules = self.list_schedules(owner_username=owner_username)
         alerts_list = self.list_alerts(owner_username=owner_username, include_resolved=False)
@@ -663,6 +761,7 @@ class OperationsStore:
         }
 
     def health(self) -> dict[str, object]:
+        self.ensure_ready()
         with self._engine.begin() as conn:
             station_total = int(conn.execute(select(func.count()).select_from(bin_stations)).scalar_one())
             bin_total = int(conn.execute(select(func.count()).select_from(bins)).scalar_one())
@@ -671,7 +770,7 @@ class OperationsStore:
             )
         return {
             "ok": station_total >= len(THU_DUC_SEED_STATIONS) and bin_total >= 30,
-            "path": str(self.db_path),
+            "path": self._store_location(),
             "station_total": station_total,
             "bin_total": bin_total,
             "schedule_total": schedule_total,
@@ -679,109 +778,231 @@ class OperationsStore:
         }
 
     def close(self) -> None:
-        self._engine.dispose()
+        if self._dispose_on_close:
+            self._engine.dispose()
 
-    def _station_rows(
-        self,
-        *,
-        owner_username: str | None,
-        include_inactive: bool,
-    ) -> list[dict[str, object]]:
-        with self._engine.begin() as conn:
-            stmt = select(bin_stations).order_by(bin_stations.c.station_id)
-            if not include_inactive:
-                stmt = stmt.where(bin_stations.c.active == 1)
-            if owner_username:
-                stmt = stmt.where(
-                    or_(
-                        bin_stations.c.assigned_owner_username == "",
-                        bin_stations.c.assigned_owner_username == owner_username,
-                    )
-                )
-            return [dict(row) for row in conn.execute(stmt).mappings().all()]
+    def ensure_ready(self) -> None:
+        init_key = self.database_url or str(self.db_path.resolve())
+        if (
+            not self.database_url
+            and _SCHEMA_READINESS.is_ready(init_key)
+            and (not self.db_path.exists() or not _sqlite_schema_ready(self._engine))
+        ):
+            _SCHEMA_READINESS.reset(init_key)
 
-    def _bins_by_station(self, station_ids: list[str]) -> dict[str, list[dict[str, object]]]:
-        if not station_ids:
-            return {}
-        with self._engine.begin() as conn:
-            rows = conn.execute(
-                select(bins)
-                .where(bins.c.station_id.in_(station_ids))
-                .order_by(bins.c.station_id, bins.c.bin_index)
-            ).mappings().all()
-        out: dict[str, list[dict[str, object]]] = {}
-        for row in rows:
-            out.setdefault(str(row["station_id"]), []).append(_bin_dict(row))
-        return out
+        def _bootstrap() -> None:
+            metadata.create_all(self._engine)
+            with self._engine.begin() as conn:
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bin_stations_active ON bin_stations(active)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bins_station ON bins(station_id)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_alerts_status ON alerts(status)"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_schedules_station ON collection_schedules(station_id)"))
+            self._seed_defaults(device_defaults=self._device_defaults)
 
-    def _alert_counts_by_station(
-        self,
-        station_ids: list[str],
-        *,
-        owner_username: str | None,
-    ) -> dict[str, dict[str, int]]:
-        if not station_ids:
-            return {}
-        alert_rows = self.list_alerts(owner_username=owner_username, include_resolved=False)
-        out: dict[str, dict[str, int]] = {}
-        for alert in alert_rows:
-            station_id = str(alert.get("station_id") or "")
-            if station_id not in station_ids:
-                continue
-            severity = str(alert.get("severity") or "info")
-            out.setdefault(station_id, {})
-            out[station_id][severity] = out[station_id].get(severity, 0) + 1
-        return out
+        _SCHEMA_READINESS.ensure(init_key, _bootstrap)
 
-    def _derived_alerts(self, *, owner_username: str | None) -> list[dict[str, object]]:
-        stations = self._station_rows(owner_username=owner_username, include_inactive=False)
-        station_ids = [str(row["station_id"]) for row in stations]
-        child_bins = [item for values in self._bins_by_station(station_ids).values() for item in values]
-        out: list[dict[str, object]] = []
-        generated_at = _now()
-        for item in child_bins:
-            fullness = item.get("fullness_percent")
-            if not isinstance(fullness, int | float):
-                continue
-            if fullness >= 95:
-                severity = "danger"
-            elif fullness >= 80:
-                severity = "warning"
-            else:
-                continue
-            out.append(
-                {
-                    "alert_id": f"derived-fullness-{item['bin_id']}",
-                    "station_id": item["station_id"],
-                    "bin_id": item["bin_id"],
-                    "device_id": "",
-                    "severity": severity,
-                    "title": "Thung rac gan day",
-                    "message": f"{item['label']} dang day {round(float(fullness))}%.",
-                    "status": "open",
-                    "source": "derived_fullness",
-                    "created_at": generated_at,
-                    "updated_at": generated_at,
-                    "resolved_at": "",
-                    "actor_username": "",
-                    "derived": True,
-                }
+    def _initialize_store(self, *, device_defaults: dict[str, str]) -> None:
+        self._device_defaults = dict(device_defaults)
+        self.ensure_ready()
+
+    def _insert_do_nothing(self, table):
+        if self._engine.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as postgres_insert
+
+            return postgres_insert(table)
+        return sqlite_insert(table)
+
+    def _store_location(self) -> str:
+        if self.database_url:
+            return f"{self._engine.dialect.name}:configured"
+        return str(self.db_path)
+
+
+
+def _sqlite_schema_ready(engine: Engine) -> bool:
+    if engine.dialect.name != "sqlite":
+        return True
+    inspector = inspect(engine)
+    required_tables = ("bin_stations", "bins", "alerts", "collection_schedules")
+    return all(inspector.has_table(table_name) for table_name in required_tables)
+
+
+def _shared_database_engine(database_url: str) -> Engine:
+    with _ENGINE_LOCK:
+        engine = _ENGINE_CACHE.get(database_url)
+        if engine is None:
+            engine = create_database_engine(database_url)
+            _ENGINE_CACHE[database_url] = engine
+        return engine
+
+
+def ensure_operations_schema_ready(
+    db_path: Path,
+    *,
+    database_url: str | None = None,
+    device_defaults: dict[str, str] | None = None,
+) -> None:
+    store = OperationsStore(
+        db_path,
+        database_url=database_url,
+        device_defaults=device_defaults,
+    )
+    try:
+        store.ensure_ready()
+    finally:
+        store.close()
+
+
+def prewarm_operations_schema_async(
+    db_path: Path,
+    *,
+    database_url: str | None = None,
+    device_defaults: dict[str, str] | None = None,
+) -> Thread:
+    def _worker() -> None:
+        try:
+            ensure_operations_schema_ready(
+                db_path,
+                database_url=database_url,
+                device_defaults=device_defaults,
             )
-        return out
+        except Exception:
+            return
 
-    def _issue_counts(self, *, owner_username: str | None) -> dict[str, int]:
-        station_ids = {
-            str(row["station_id"])
-            for row in self._station_rows(owner_username=owner_username, include_inactive=False)
-        }
-        with self._engine.begin() as conn:
-            rows = conn.execute(select(device_issues)).mappings().all()
-        filtered = [
-            _issue_dict(row)
-            for row in rows
-            if not owner_username or not row["station_id"] or row["station_id"] in station_ids
-        ]
-        return _count_by(filtered, "issue_type")
+    thread = Thread(target=_worker, name="operations-schema-prewarm", daemon=True)
+    thread.start()
+    return thread
+
+
+def _station_rows(
+    self,
+    *,
+    owner_username: str | None,
+    include_inactive: bool,
+) -> list[dict[str, object]]:
+    with self._engine.begin() as conn:
+        stmt = select(bin_stations).order_by(bin_stations.c.station_id)
+        if not include_inactive:
+            stmt = stmt.where(bin_stations.c.active == 1)
+        if owner_username:
+            stmt = stmt.where(bin_stations.c.assigned_owner_username == owner_username)
+        return [dict(row) for row in conn.execute(stmt).mappings().all()]
+
+
+def _bins_by_station(self, station_ids: list[str]) -> dict[str, list[dict[str, object]]]:
+    if not station_ids:
+        return {}
+    with self._engine.begin() as conn:
+        rows = conn.execute(
+            select(bins)
+            .where(bins.c.station_id.in_(station_ids))
+            .order_by(bins.c.station_id, bins.c.bin_index)
+        ).mappings().all()
+    out: dict[str, list[dict[str, object]]] = {}
+    for row in rows:
+        out.setdefault(str(row["station_id"]), []).append(_bin_dict(row))
+    return out
+
+
+def _alert_counts_by_station(
+    self,
+    station_ids: list[str],
+    *,
+    owner_username: str | None,
+) -> dict[str, dict[str, int]]:
+    if not station_ids:
+        return {}
+    alert_rows = self.list_alerts(owner_username=owner_username, include_resolved=False)
+    out: dict[str, dict[str, int]] = {}
+    for alert in alert_rows:
+        station_id = str(alert.get("station_id") or "")
+        if station_id not in station_ids:
+            continue
+        severity = str(alert.get("severity") or "info")
+        out.setdefault(station_id, {})
+        out[station_id][severity] = out[station_id].get(severity, 0) + 1
+    return out
+
+
+def _derived_alerts(self, *, owner_username: str | None) -> list[dict[str, object]]:
+    stations = self._station_rows(owner_username=owner_username, include_inactive=False)
+    station_ids = [str(row["station_id"]) for row in stations]
+    child_bins = [item for values in self._bins_by_station(station_ids).values() for item in values]
+    out: list[dict[str, object]] = []
+    generated_at = _now()
+    for item in child_bins:
+        fullness = item.get("fullness_percent")
+        if not isinstance(fullness, int | float):
+            continue
+        if fullness >= 95:
+            severity = "danger"
+        elif fullness >= 80:
+            severity = "warning"
+        else:
+            continue
+        out.append(
+            {
+                "alert_id": f"derived-fullness-{item['bin_id']}",
+                "station_id": item["station_id"],
+                "bin_id": item["bin_id"],
+                "device_id": "",
+                "severity": severity,
+                "title": "Th?ng r?c g?n ??y",
+                "message": f"{item['label']} ?ang ??y {round(float(fullness))}%.",
+                "status": "open",
+                "source": "derived_fullness",
+                "created_at": generated_at,
+                "updated_at": generated_at,
+                "resolved_at": "",
+                "actor_username": "",
+                "derived": True,
+            }
+        )
+    return out
+
+
+def _issue_counts(self, *, owner_username: str | None) -> dict[str, int]:
+    station_ids = {
+        str(row["station_id"])
+        for row in self._station_rows(owner_username=owner_username, include_inactive=False)
+    }
+    with self._engine.begin() as conn:
+        rows = conn.execute(select(device_issues)).mappings().all()
+    filtered = [
+        _issue_dict(row)
+        for row in rows
+        if not owner_username or not row["station_id"] or row["station_id"] in station_ids
+    ]
+    return _count_by(filtered, "issue_type")
+
+
+def _resolve_station_id(self, *, station_id: str, device_id: str, owner_username: str) -> str:
+    station_id = _clean(station_id)
+    if station_id and self.get_station(station_id) is not None:
+        return station_id
+
+    owner_username = _clean(owner_username)
+    device_id = _clean(device_id)
+    if not owner_username and device_id:
+        device = self.get_device(device_id)
+        if device:
+            owner_username = _clean(device.get("owner_username"))
+
+    rows = self._station_rows(
+        owner_username=owner_username or None,
+        include_inactive=False,
+    )
+    if rows:
+        return str(rows[0]["station_id"])
+    return ""
+
+
+OperationsStore._station_rows = _station_rows
+OperationsStore._bins_by_station = _bins_by_station
+OperationsStore._alert_counts_by_station = _alert_counts_by_station
+OperationsStore._derived_alerts = _derived_alerts
+OperationsStore._issue_counts = _issue_counts
+OperationsStore._resolve_station_id = _resolve_station_id
 
 
 def _now() -> str:
@@ -794,6 +1015,16 @@ def _clean(value: object) -> str:
 
 def _bool(value: object) -> bool:
     return bool(int(value or 0))
+
+
+def _fullness_status(fullness: float | None) -> str:
+    if fullness is None:
+        return "unknown"
+    if fullness >= 95:
+        return "full"
+    if fullness >= 80:
+        return "warning"
+    return "normal"
 
 
 def _device_dict(row) -> dict[str, object]:
@@ -812,6 +1043,8 @@ def _device_dict(row) -> dict[str, object]:
 
 
 def _bin_dict(row) -> dict[str, object]:
+    fullness = row["fullness_percent"]
+    fill_percent = float(fullness) if isinstance(fullness, int | float) else 0.0
     return {
         "id": int(row["id"]),
         "bin_id": str(row["bin_id"]),
@@ -819,8 +1052,9 @@ def _bin_dict(row) -> dict[str, object]:
         "command": str(row["command"]),
         "bin_index": int(row["bin_index"]),
         "label": str(row["label"]),
-        "fullness_percent": row["fullness_percent"],
-        "status": str(row["status"] or "unknown"),
+        "fullness_percent": fullness,
+        "fill_percent": fill_percent,
+        "status": _fullness_status(fill_percent) if fullness is not None else str(row["status"] or "unknown"),
         "active": _bool(row["active"]),
         "updated_at": str(row["updated_at"] or ""),
     }
@@ -832,6 +1066,10 @@ def _station_dict(
     alerts_by_station: dict[str, dict[str, int]] | None = None,
 ) -> dict[str, object]:
     station_id = str(row["station_id"])
+    alert_counts = (alerts_by_station or {}).get(station_id, {})
+    open_alert_total = sum(alert_counts.values())
+    assigned_owner = str(row["assigned_owner_username"] or "")
+    source = str(row["source"] or "")
     return {
         "id": int(row["id"]),
         "station_id": station_id,
@@ -842,13 +1080,19 @@ def _station_dict(
         "longitude": row["longitude"],
         "status": str(row["status"] or "candidate"),
         "coordinate_verified": _bool(row["coordinate_verified"]),
-        "source": str(row["source"] or ""),
-        "assigned_owner_username": str(row["assigned_owner_username"] or ""),
+        "source": source,
+        "seed_source": source,
+        "assigned_owner_username": assigned_owner,
+        "owner_username": assigned_owner,
+        "device_id": "",
+        "note": "",
         "active": _bool(row["active"]),
         "created_at": str(row["created_at"] or ""),
         "updated_at": str(row["updated_at"] or ""),
         "bins": child_bins,
-        "alert_counts": (alerts_by_station or {}).get(station_id, {}),
+        "alert_counts": alert_counts,
+        "alert_total": open_alert_total,
+        "open_alert_total": open_alert_total,
     }
 
 
@@ -863,7 +1107,7 @@ def _station_values(values: dict[str, object], *, station_id: str, now: str) -> 
         "status": _clean(values.get("status")) or "candidate",
         "coordinate_verified": 1 if values.get("coordinate_verified") else 0,
         "source": _clean(values.get("source")) or "admin",
-        "assigned_owner_username": _clean(values.get("assigned_owner_username")),
+        "assigned_owner_username": _clean(values.get("assigned_owner_username") or values.get("owner_username")),
         "active": 1 if values.get("active", True) else 0,
         "updated_at": now,
     }
@@ -880,6 +1124,7 @@ def _station_patch_values(values: dict[str, object], *, now: str) -> dict[str, o
         "coordinate_verified",
         "source",
         "assigned_owner_username",
+        "owner_username",
         "active",
     }
     out: dict[str, object] = {}
@@ -890,6 +1135,8 @@ def _station_patch_values(values: dict[str, object], *, now: str) -> dict[str, o
             out[key] = 1 if value else 0
         elif key in {"latitude", "longitude"}:
             out[key] = value
+        elif key == "owner_username":
+            out["assigned_owner_username"] = _clean(value)
         else:
             out[key] = _clean(value)
     if out:
@@ -970,18 +1217,18 @@ def _issue_dict(row) -> dict[str, object]:
 
 
 def _assigned_to_scope(assigned_owner: str, owner_username: str | None) -> bool:
-    return not owner_username or not assigned_owner or assigned_owner == owner_username
+    return not owner_username or assigned_owner == owner_username
 
 
 def _issue_title(issue_type: str) -> str:
     labels = {
-        "full_bin": "Bao day thung rac",
-        "sensor_problem": "Loi cam bien",
-        "camera_problem": "Loi camera",
-        "servo_problem": "Loi servo",
-        "audio_problem": "Loi am thanh",
-        "dirty_bin": "Thung rac can ve sinh",
-        "other": "Bao loi thiet bi",
+        "full_bin": "Báo đầy thùng rác",
+        "sensor_problem": "Lỗi cảm biến",
+        "camera_problem": "Lỗi camera",
+        "servo_problem": "Lỗi servo",
+        "audio_problem": "Lỗi âm thanh",
+        "dirty_bin": "Thùng rác cần vệ sinh",
+        "other": "Báo lỗi thiết bị",
     }
     return labels.get(issue_type, labels["other"])
 
@@ -996,7 +1243,11 @@ def _count_by(rows: list[dict[str, object]], key: str) -> dict[str, int]:
 
 __all__ = [
     "DEFAULT_CENTER",
+    "DEFAULT_SEED_OWNER_USERNAME",
     "SEED_SOURCE",
     "THU_DUC_SEED_STATIONS",
     "OperationsStore",
+    "configured_operations_database_url",
+    "ensure_operations_schema_ready",
+    "prewarm_operations_schema_async",
 ]

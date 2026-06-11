@@ -7,12 +7,15 @@ import csv
 import io
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import tempfile
+import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Annotated, Literal
 
 from fastapi import (
@@ -52,6 +55,7 @@ from app.agent.auth_service import (
     AuthService,
     ChatQuota,
     InactiveAccountError,
+    prewarm_auth_schema_async,
 )
 from app.agent.chat_knowledge_service import (
     evaluate_knowledge_retrieval,
@@ -61,7 +65,11 @@ from app.agent.chat_knowledge_service import (
     retrieve_knowledge_snippets,
     upsert_knowledge_entry,
 )
-from app.agent.operations_store import OperationsStore
+from app.agent.operations_store import (
+    DEFAULT_SEED_OWNER_USERNAME,
+    OperationsStore,
+    prewarm_operations_schema_async,
+)
 from app.agent.runtime import STREAM_FRAME_INTERVAL_S, AgentRuntime
 from app.agent.schemas import (
     AccountCreateRequest,
@@ -77,6 +85,8 @@ from app.agent.schemas import (
     AlertPatchRequest,
     AlertsResponse,
     AnnotationRequest,
+    AudioVoiceEventStatusDTO,
+    AudioVoicePackStatusResponse,
     AuthChangePasswordRequest,
     AuthLoginRequest,
     AuthLoginResponse,
@@ -88,6 +98,7 @@ from app.agent.schemas import (
     BinStationPatchRequest,
     BulkDatasetRequest,
     CameraSampleRequest,
+    CameraStreamTokenResponse,
     CaptureSessionFrameRequest,
     CaptureSessionResponse,
     CaptureSessionStartRequest,
@@ -99,10 +110,12 @@ from app.agent.schemas import (
     DatasetBoxDTO,
     DatasetItemDTO,
     DatasetItemsResponse,
+    DatasetReviewRequestDTO,
     DatasetSummaryDTO,
     DeleteRequest,
     DeviceIssueCreateRequest,
     DeviceIssueResponse,
+    HardNegativeCaptureRequest,
     HardwareAudioTestRequest,
     HardwareAudioTestResponse,
     HardwareDiagnosticsResponse,
@@ -171,19 +184,28 @@ from app.core.dataset_queue import (
     delete_queue_items,
     import_manual_image_urls,
     import_manual_images,
-    is_trusted_meta,
-    mark_items_trusted,
-    quarantine_queue_items,
-    quarantine_untrusted_items,
-    relabel_images,
+    import_manual_phone_images,
     save_item_annotations,
     summarize_queue,
 )
+from app.core.dataset_review import (
+    DatasetReviewError,
+    DatasetReviewRequest,
+    apply_dataset_review_action,
+    review_dataset_item,
+)
+from app.core.dataset_trust import classify_dataset_item
 from app.core.history import HistoryService
 from app.core.learn_now import build_learn_now_status
+from app.core.learn_now_training import (
+    build_training_status,
+    start_learn_now_training,
+    training_processes,
+)
 from app.core.licensed_source_ingestion import validate_manual_url_source
 from app.core.source_quality_report import build_source_quality_report
 from app.core.vision_label_provider import suggest_unknown_labels
+from app.core.voice_pack import AUDIO_EVENT_LABELS, audio_event_status, normalize_voice_gender
 from app.core.waste_categories import (
     canonical_class_name,
     category_for_class,
@@ -194,7 +216,34 @@ from app.utils.dataset_import import import_yolo_dataset_to_queue
 from app.utils.paths import config_path, dataset_db_path, db_path, logs_dir
 
 ALLOWED_ORIGINS_ENV = "TRASH_SORTER_ALLOWED_ORIGINS"
-_login_limiter = LoginRateLimiter()
+LOGIN_RATE_LIMIT_ENV = "TRASH_SORTER_LOGIN_RATE_LIMIT"
+LOGIN_RATE_WINDOW_ENV = "TRASH_SORTER_LOGIN_RATE_WINDOW_SECONDS"
+DEFAULT_ALLOWED_ORIGINS = (
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3100",
+    "http://127.0.0.1:3100",
+)
+CHAT_MAP_STATION_LIMIT = 8
+CHAT_MAP_ALERT_LIMIT = 8
+CHAT_TEXT_FIELD_LIMIT = 220
+STREAM_TOKEN_TTL_SECONDS = 90.0
+_stream_tokens: dict[str, float] = {}
+_stream_token_lock = Lock()
+
+
+def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)).strip())
+    except ValueError:
+        value = default
+    return max(minimum, min(value, maximum))
+
+
+_login_limiter = LoginRateLimiter(
+    limit=_env_int(LOGIN_RATE_LIMIT_ENV, 5, minimum=1, maximum=100),
+    window_seconds=float(_env_int(LOGIN_RATE_WINDOW_ENV, 60, minimum=1, maximum=3600)),
+)
 
 
 def create_app(
@@ -221,11 +270,13 @@ def create_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_allowed_origins(),
-        allow_credentials=False,
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     app.state.runtime = rt
+    _start_auth_prewarm()
+    _start_operations_prewarm(rt)
 
     @app.get("/api/health", response_model=HealthResponse)
     def health() -> HealthResponse:
@@ -413,7 +464,9 @@ def create_app(
             return _user_chat_quota_response(quota)
         analytics = build_user_analytics(rt, 30, **_owner_scope(context))
         chat_context = _analytics_chat_context(analytics)
-        chat_context["operations"] = _operations_summary_context(rt, owner_username=context.username)
+        owner_username = _operations_owner_username(context)
+        chat_context["operations"] = _operations_summary_context(rt, owner_username=owner_username)
+        chat_context["operations_map"] = _operations_map_chat_context(rt, owner_username=owner_username)
         response = build_chat_response(
             role="user",
             message=payload.message,
@@ -432,9 +485,10 @@ def create_app(
     def user_bin_map(
         context: Annotated[AuthContext, Depends(require_active_user_token)],
     ) -> BinMapResponse:
+        owner_username = _operations_owner_username(context)
         store = _operations_store(rt)
         try:
-            return BinMapResponse(**store.list_bin_map(owner_username=context.username))
+            return BinMapResponse(**store.list_bin_map(owner_username=owner_username))
         finally:
             store.close()
 
@@ -443,10 +497,11 @@ def create_app(
         context: Annotated[AuthContext, Depends(require_active_user_token)],
         include_resolved: Annotated[bool, Query()] = True,
     ) -> AlertsResponse:
+        owner_username = _operations_owner_username(context)
         store = _operations_store(rt)
         try:
             rows = store.list_alerts(
-                owner_username=context.username,
+                owner_username=owner_username,
                 include_resolved=include_resolved,
             )
             return AlertsResponse(alerts=rows, total=len(rows))
@@ -457,9 +512,10 @@ def create_app(
     def user_collection_schedule(
         context: Annotated[AuthContext, Depends(require_active_user_token)],
     ) -> CollectionSchedulesResponse:
+        owner_username = _operations_owner_username(context)
         store = _operations_store(rt)
         try:
-            rows = store.list_schedules(owner_username=context.username)
+            rows = store.list_schedules(owner_username=owner_username)
             return CollectionSchedulesResponse(schedules=rows, total=len(rows))
         finally:
             store.close()
@@ -473,11 +529,12 @@ def create_app(
         payload: CollectionCompleteRequest,
         context: Annotated[AuthContext, Depends(require_active_user_token)],
     ) -> CollectionCompleteResponse:
+        owner_username = _operations_owner_username(context)
         store = _operations_store(rt)
         try:
             scoped = {
                 token
-                for row in store.list_schedules(owner_username=context.username)
+                for row in store.list_schedules(owner_username=owner_username)
                 for token in (str(row["id"]), str(row["schedule_id"]))
             }
             if schedule_id not in scoped:
@@ -503,12 +560,13 @@ def create_app(
         payload: DeviceIssueCreateRequest,
         context: Annotated[AuthContext, Depends(require_active_user_token)],
     ) -> DeviceIssueResponse:
+        owner_username = _operations_owner_username(context)
         store = _operations_store(rt)
         try:
             if payload.station_id:
                 scoped_stations = {
                     station["station_id"]
-                    for station in store.list_bin_map(owner_username=context.username)["stations"]
+                    for station in store.list_bin_map(owner_username=owner_username)["stations"]
                 }
                 if payload.station_id not in scoped_stations:
                     raise HTTPException(status_code=404, detail="Bin station not found")
@@ -760,6 +818,27 @@ def create_app(
     def hardware_audio_test(payload: HardwareAudioTestRequest) -> HardwareAudioTestResponse:
         return HardwareAudioTestResponse(**rt.test_audio(payload.track))
 
+    @router.get("/audio/voice-pack-status", response_model=AudioVoicePackStatusResponse)
+    def audio_voice_pack_status(gender: str = "female") -> AudioVoicePackStatusResponse:
+        clean_gender = normalize_voice_gender(gender)
+        status = audio_event_status(clean_gender)
+        events = [
+            AudioVoiceEventStatusDTO(
+                event_key=event_key,
+                label=AUDIO_EVENT_LABELS[event_key],
+                available=bool(status.get(event_key)),
+            )
+            for event_key in AUDIO_EVENT_LABELS
+        ]
+        missing_events = [event.event_key for event in events if not event.available]
+        return AudioVoicePackStatusResponse(
+            gender=clean_gender,
+            available_count=len(events) - len(missing_events),
+            total_count=len(events),
+            missing_events=missing_events,
+            events=events,
+        )
+
     @router.post("/hardware/mp3-test", response_model=HardwareMp3TestResponse)
     def hardware_mp3_test(payload: HardwareMp3TestRequest) -> HardwareMp3TestResponse:
         return HardwareMp3TestResponse(**rt.test_mp3(payload.command, payload.value))
@@ -808,9 +887,16 @@ def create_app(
         ok, msg = rt.stop_camera()
         return ActionResult(ok=ok, message=msg)
 
+    @router.post("/camera/stream-token", response_model=CameraStreamTokenResponse)
+    def camera_stream_token() -> CameraStreamTokenResponse:
+        return _issue_stream_token()
+
     @app.get("/api/camera/stream")
-    async def camera_stream(token: str | None = None) -> StreamingResponse:
-        _require_stream_token(token)
+    async def camera_stream(
+        token: str | None = None,
+        stream_token: str | None = None,
+    ) -> StreamingResponse:
+        _require_stream_token(query_token=token, stream_token=stream_token)
 
         async def frames():
             while True:
@@ -1106,6 +1192,22 @@ def create_app(
             boxes=[_dataset_box_to_dto(box) for box in boxes],
         )
 
+    @router.post("/dataset/items/{item_id}/review", response_model=DatasetAnnotationResponse)
+    def dataset_item_review(
+        item_id: str,
+        payload: DatasetReviewRequestDTO,
+        context: Annotated[AuthContext, Depends(require_active_admin_token)],
+    ) -> DatasetAnnotationResponse:
+        request = _dataset_review_request_from_dto(payload, context)
+        try:
+            review_dataset_item(item_id, request, catalog_path=rt.dataset_file)
+        except DatasetReviewError as exc:
+            detail = str(exc)
+            status_code = 404 if "not found" in detail.lower() else 400
+            raise HTTPException(status_code=status_code, detail=detail) from exc
+        rt.refresh_manual_references()
+        return _dataset_annotation_response(rt.dataset_file, item_id)
+
     @router.post("/dataset/sync", response_model=ActionResult)
     def dataset_sync() -> ActionResult:
         queue_dir = _queue_dir(rt)
@@ -1171,6 +1273,37 @@ def create_app(
             shutil.rmtree(tmp, ignore_errors=True)
         return ActionResult(ok=True, message="Manual images imported", count=added)
 
+    @router.post("/dataset/manual-phone", response_model=ActionResult)
+    async def dataset_manual_phone(
+        files: Annotated[list[UploadFile], File()],
+        cls_name: Annotated[str, Form()],
+        cls_id: Annotated[int, Form()] = 0,
+    ) -> ActionResult:
+        class_name = canonical_class_name(cls_name)
+        if not class_name or default_class_id_for_name(class_name) is None:
+            raise HTTPException(status_code=400, detail="cls_name must match the 45-class taxonomy")
+        tmp = Path(tempfile.mkdtemp(prefix="trash_sorter_manual_phone_"))
+        saved: list[str] = []
+        try:
+            for upload in files:
+                name = Path(upload.filename or "image.jpg").name
+                out = tmp / name
+                with out.open("wb") as f:
+                    shutil.copyfileobj(upload.file, f)
+                saved.append(str(out))
+            added = import_manual_phone_images(
+                saved,
+                _queue_dir(rt),
+                class_name,
+                _manual_class_id(class_name, cls_id),
+                catalog_path=rt.dataset_file,
+            )
+            if added:
+                _ensure_manual_class_mapping(rt, class_name)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        return ActionResult(ok=True, message="Manual phone images imported", count=added)
+
     @router.post("/dataset/camera-sample", response_model=ActionResult)
     def dataset_camera_sample(payload: CameraSampleRequest) -> ActionResult:
         class_name = canonical_class_name(payload.cls_name)
@@ -1188,6 +1321,16 @@ def create_app(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         return ActionResult(ok=True, message=f"Camera sample saved: {img_path.name}", count=1)
+
+    @router.post("/dataset/hard-negative", response_model=ActionResult)
+    def dataset_hard_negative(payload: HardNegativeCaptureRequest) -> ActionResult:
+        try:
+            img_path = rt.capture_hard_negative_sample(payload.reason)
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        return ActionResult(ok=True, message=f"Hard negative saved: {img_path.name}", count=1)
 
     @router.post("/dataset/capture-session/start", response_model=CaptureSessionResponse)
     def dataset_capture_session_start(
@@ -1282,17 +1425,25 @@ def create_app(
         return WebSourceDiscoveryResponse(**result)
 
     @router.post("/dataset/relabel", response_model=ActionResult)
-    def dataset_relabel(payload: RelabelRequest) -> ActionResult:
+    def dataset_relabel(
+        payload: RelabelRequest,
+        context: Annotated[AuthContext, Depends(require_active_admin_token)],
+    ) -> ActionResult:
         class_name = canonical_class_name(payload.cls_name)
+        if not class_name:
+            raise HTTPException(status_code=400, detail="cls_name is required")
         class_id = default_class_id_for_name(class_name)
         if class_id is None:
             class_id = payload.cls_id
         _ensure_manual_class_mapping(rt, class_name)
-        changed = relabel_images(
+        changed = _apply_bulk_review(
             [Path(p) for p in payload.image_paths],
-            class_name,
-            class_id,
-            catalog_path=rt.dataset_file,
+            "relabel",
+            rt.dataset_file,
+            context,
+            cls_name=class_name,
+            cls_id=class_id,
+            reason="legacy_relabel_endpoint",
         )
         return ActionResult(ok=True, message="Images relabeled", count=changed)
 
@@ -1302,39 +1453,49 @@ def create_app(
         return ActionResult(ok=True, message="Images deleted", count=removed)
 
     @router.post("/dataset/bulk", response_model=ActionResult)
-    def dataset_bulk(payload: BulkDatasetRequest) -> ActionResult:
+    def dataset_bulk(
+        payload: BulkDatasetRequest,
+        context: Annotated[AuthContext, Depends(require_active_admin_token)],
+    ) -> ActionResult:
         image_paths = [Path(p) for p in payload.image_paths]
         if payload.action == "delete":
             count = delete_queue_items(image_paths, catalog_path=rt.dataset_file)
             return ActionResult(ok=True, message="Bulk delete completed", count=count)
         if payload.action == "quarantine":
-            count = quarantine_queue_items(image_paths, catalog_path=rt.dataset_file)
-            return ActionResult(ok=True, message="Bulk quarantine completed", count=count)
+            count = _apply_bulk_review(image_paths, "quarantine", rt.dataset_file, context, reason="bulk_quarantine")
+            return ActionResult(ok=True, message="Bulk quarantine metadata completed", count=count)
         if payload.action == "mark_trusted":
-            count = mark_items_trusted(image_paths, trusted=True, catalog_path=rt.dataset_file)
-            return ActionResult(ok=True, message="Items marked trusted", count=count)
+            count = _apply_bulk_review(image_paths, "approve", rt.dataset_file, context, reason="bulk_approve")
+            return ActionResult(ok=True, message="Items approved", count=count)
         if payload.action == "mark_untrusted":
-            count = mark_items_trusted(image_paths, trusted=False, catalog_path=rt.dataset_file)
-            return ActionResult(ok=True, message="Items marked untrusted", count=count)
+            count = _apply_bulk_review(image_paths, "exclude", rt.dataset_file, context, reason="bulk_exclude")
+            return ActionResult(ok=True, message="Items excluded from training", count=count)
         if payload.cls_name is None or payload.cls_id is None:
             raise HTTPException(status_code=400, detail="cls_name and cls_id are required for relabel")
         class_name = canonical_class_name(payload.cls_name)
+        if not class_name:
+            raise HTTPException(status_code=400, detail="cls_name is required")
         class_id = default_class_id_for_name(class_name)
         if class_id is None:
             class_id = payload.cls_id
         _ensure_manual_class_mapping(rt, class_name)
-        count = relabel_images(
+        count = _apply_bulk_review(
             image_paths,
-            class_name,
-            class_id,
-            catalog_path=rt.dataset_file,
+            "relabel",
+            rt.dataset_file,
+            context,
+            cls_name=class_name,
+            cls_id=class_id,
+            reason="bulk_relabel",
         )
         return ActionResult(ok=True, message="Bulk relabel completed", count=count)
 
     @router.post("/dataset/quarantine", response_model=ActionResult)
-    def dataset_quarantine() -> ActionResult:
-        moved = quarantine_untrusted_items(_queue_dir(rt), catalog_path=rt.dataset_file)
-        return ActionResult(ok=True, message="Untrusted data quarantined", count=moved)
+    def dataset_quarantine(context: Annotated[AuthContext, Depends(require_active_admin_token)]) -> ActionResult:
+        queue_dir = _queue_dir(rt)
+        image_paths = [path for path in sorted(queue_dir.glob("*.jpg")) if _dataset_image_should_quarantine(path)]
+        count = _apply_bulk_review(image_paths, "quarantine", rt.dataset_file, context, reason="bulk_untrusted_quarantine")
+        return ActionResult(ok=True, message="Untrusted data quarantined in metadata", count=count)
 
     @router.get("/logs")
     def logs(limit: Annotated[int, Query(ge=1, le=1000)] = 200) -> dict:
@@ -1373,9 +1534,9 @@ def create_app(
 def _allowed_origins() -> list[str]:
     raw = os.getenv(ALLOWED_ORIGINS_ENV, "").strip()
     if not raw:
-        return ["*"]
+        return list(DEFAULT_ALLOWED_ORIGINS)
     values = [item.strip() for item in raw.split(",") if item.strip()]
-    return values or ["*"]
+    return values or list(DEFAULT_ALLOWED_ORIGINS)
 
 
 def _login_key(request: Request, username: str) -> str:
@@ -1414,12 +1575,38 @@ def _operations_store(runtime: AgentRuntime) -> OperationsStore:
     )
 
 
+def _start_auth_prewarm() -> None:
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("TRASH_SORTER_PREWARM_AUTH", "1") == "0":
+        return
+    prewarm_auth_schema_async()
+
+
+def _start_operations_prewarm(runtime: AgentRuntime) -> None:
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("TRASH_SORTER_PREWARM_OPERATIONS", "1") == "0":
+        return
+    prewarm_operations_schema_async(
+        runtime.operations_file,
+        device_defaults={
+            "device_id": runtime.cfg.device.device_id,
+            "device_name": runtime.cfg.device.device_name,
+            "location": runtime.cfg.device.location,
+            "owner_username": runtime.cfg.device.owner_username,
+        },
+    )
+
+
 def _owner_scope(context: AuthContext) -> dict[str, object]:
     if context.role == "admin":
         return {"owner_account_id": None, "owner_username": None}
     if context.account_id is not None and context.username:
         return {"owner_account_id": context.account_id, "owner_username": context.username}
     return {"owner_account_id": None, "owner_username": "__session_owner_required__"}
+
+
+def _operations_owner_username(context: AuthContext) -> str:
+    if context.username:
+        return context.username
+    return DEFAULT_SEED_OWNER_USERNAME
 
 
 def _consume_user_chat_quota(context: AuthContext) -> ChatQuota | None:
@@ -1573,6 +1760,7 @@ def _admin_chat_context(runtime: AgentRuntime) -> dict[str, object]:
         "scope": "admin_all_history",
         "analytics": _analytics_chat_context(analytics),
         "operations": _operations_summary_context(runtime, owner_username=None),
+        "operations_map": _operations_map_chat_context(runtime, owner_username=None),
         "runtime": {
             "camera": _device_state_context(status.camera),
             "uart": _device_state_context(status.uart),
@@ -1597,6 +1785,121 @@ def _operations_summary_context(
         return {"available": False, "error": str(exc)[:180]}
     finally:
         store.close()
+
+
+def _operations_map_chat_context(
+    runtime: AgentRuntime,
+    *,
+    owner_username: str | None,
+) -> dict[str, object]:
+    store = _operations_store(runtime)
+    try:
+        map_data = store.list_bin_map(owner_username=owner_username, include_inactive=False)
+        alerts = store.list_alerts(owner_username=owner_username, include_resolved=False)
+        stations = [_station_chat_context(item) for item in map_data.get("stations", [])]
+        return {
+            "available": True,
+            "scope": "admin_all_stations" if owner_username is None else "user_assigned_stations",
+            "owner_username": owner_username or "",
+            "generated_at": _chat_text(map_data.get("generated_at")),
+            "station_total": int(map_data.get("total") or 0),
+            "shown_station_total": min(len(stations), CHAT_MAP_STATION_LIMIT),
+            "center": map_data.get("center") or {},
+            "seed_source": _chat_text(map_data.get("seed_source")),
+            "stations": stations[:CHAT_MAP_STATION_LIMIT],
+            "open_alert_total": len(alerts),
+            "open_alerts": [_alert_chat_context(item) for item in alerts[:CHAT_MAP_ALERT_LIMIT]],
+            "full_or_warning_bins": _full_or_warning_bins(stations),
+        }
+    except Exception as exc:
+        return {"available": False, "error": str(exc)[:180]}
+    finally:
+        store.close()
+
+
+def _station_chat_context(station: dict[str, object]) -> dict[str, object]:
+    child_bins = [
+        _bin_chat_context(item)
+        for item in station.get("bins", [])
+        if isinstance(item, dict) and bool(item.get("active", True))
+    ]
+    return {
+        "station_id": _chat_text(station.get("station_id")),
+        "name": _chat_text(station.get("name")),
+        "area": _chat_text(station.get("area")),
+        "address": _chat_text(station.get("address")),
+        "latitude": _chat_float(station.get("latitude")),
+        "longitude": _chat_float(station.get("longitude")),
+        "status": _chat_text(station.get("status")),
+        "coordinate_verified": bool(station.get("coordinate_verified")),
+        "assigned_owner_username": _chat_text(
+            station.get("assigned_owner_username") or station.get("owner_username")
+        ),
+        "open_alert_total": int(station.get("open_alert_total") or 0),
+        "bins": child_bins,
+        "updated_at": _chat_text(station.get("updated_at")),
+    }
+
+
+def _bin_chat_context(item: dict[str, object]) -> dict[str, object]:
+    return {
+        "bin_id": _chat_text(item.get("bin_id")),
+        "command": _chat_text(item.get("command")),
+        "bin_index": int(item.get("bin_index") or 0),
+        "label": _chat_text(item.get("label")),
+        "fill_percent": _chat_float(item.get("fill_percent")),
+        "status": _chat_text(item.get("status")),
+        "updated_at": _chat_text(item.get("updated_at")),
+    }
+
+
+def _alert_chat_context(item: dict[str, object]) -> dict[str, object]:
+    return {
+        "alert_id": _chat_text(item.get("alert_id")),
+        "station_id": _chat_text(item.get("station_id")),
+        "bin_id": _chat_text(item.get("bin_id")),
+        "severity": _chat_text(item.get("severity")),
+        "title": _chat_text(item.get("title")),
+        "message": _chat_text(item.get("message")),
+        "status": _chat_text(item.get("status")),
+        "source": _chat_text(item.get("source")),
+        "updated_at": _chat_text(item.get("updated_at")),
+    }
+
+
+def _full_or_warning_bins(stations: list[dict[str, object]]) -> list[dict[str, object]]:
+    flagged: list[dict[str, object]] = []
+    for station in stations:
+        for child in station.get("bins", []):
+            if not isinstance(child, dict):
+                continue
+            fill = float(child.get("fill_percent") or 0.0)
+            status = str(child.get("status") or "")
+            if fill < 80 and status not in {"warning", "full"}:
+                continue
+            flagged.append(
+                {
+                    "station_id": station.get("station_id"),
+                    "station_name": station.get("name"),
+                    "bin_id": child.get("bin_id"),
+                    "command": child.get("command"),
+                    "label": child.get("label"),
+                    "fill_percent": fill,
+                    "status": status,
+                }
+            )
+    flagged.sort(key=lambda item: float(item.get("fill_percent") or 0.0), reverse=True)
+    return flagged[:CHAT_MAP_ALERT_LIMIT]
+
+
+def _chat_text(value: object, *, limit: int = CHAT_TEXT_FIELD_LIMIT) -> str:
+    return str(value or "").strip().replace("\r", " ").replace("\n", " ")[:limit]
+
+
+def _chat_float(value: object) -> float | None:
+    if isinstance(value, int | float):
+        return round(float(value), 6)
+    return None
 
 
 def _device_state_context(state) -> dict[str, object]:
@@ -1625,41 +1928,63 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _require_stream_token(query_token: str | None) -> None:
+def _issue_stream_token() -> CameraStreamTokenResponse:
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=STREAM_TOKEN_TTL_SECONDS)
+    now = time.monotonic()
+    expiry = now + STREAM_TOKEN_TTL_SECONDS
+    with _stream_token_lock:
+        _prune_stream_tokens(now)
+        _stream_tokens[token] = expiry
+    return CameraStreamTokenResponse(token=token, expires_at=expires_at.isoformat())
+
+
+def _require_stream_token(*, query_token: str | None, stream_token: str | None) -> None:
+    clean_stream_token = str(stream_token or "").strip()
+    if clean_stream_token and _consume_stream_token(clean_stream_token):
+        return
+    if clean_stream_token:
+        raise HTTPException(status_code=403, detail="Invalid or expired stream token")
     context = authenticate_token_values(query_token=query_token)
     if context.role == "admin" and not context.password_default:
         return
     raise HTTPException(status_code=403, detail="Admin access required")
 
 
+def _consume_stream_token(token: str) -> bool:
+    now = time.monotonic()
+    with _stream_token_lock:
+        _prune_stream_tokens(now)
+        expiry = _stream_tokens.get(token)
+        if expiry is None or expiry < now:
+            _stream_tokens.pop(token, None)
+            return False
+        return True
+
+
+def _prune_stream_tokens(now: float) -> None:
+    expired = [token for token, expiry in _stream_tokens.items() if expiry < now]
+    for token in expired:
+        _stream_tokens.pop(token, None)
+
+
 def _start_learn_now_training(root: Path, class_name: str, profile: str) -> int:
-    script = root / "scripts" / (
-        "start_vietnam_common_strong_train.ps1"
-        if profile == "strong"
-        else "start_learn_now_micro_train.ps1"
-    )
-    if not script.exists():
-        raise HTTPException(status_code=500, detail=f"Missing training script: {script}")
-    command = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)]
-    if profile == "strong":
-        command.extend(["-FocusClass", class_name])
-    else:
-        command.extend(["-ClassName", class_name, "-Profile", profile])
-    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     try:
-        process = subprocess.Popen(
-            command,
-            cwd=root,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=creationflags,
+        return start_learn_now_training(
+            root,
+            class_name,
+            profile,
+            popen=subprocess.Popen,
         )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"Could not start training: {e}") from e
-    return int(process.pid)
 
 
 def _training_status(root: Path) -> TrainingStatusDTO:
+    return TrainingStatusDTO(**build_training_status(root))
+
     processes = _training_processes()
     run_name = _active_training_run(processes)
     if not run_name:
@@ -1716,6 +2041,8 @@ def _training_status(root: Path) -> TrainingStatusDTO:
 
 
 def _training_processes() -> list[dict[str, object]]:
+    return training_processes()
+
     if os.name != "nt":
         return []
     command = (
@@ -1988,9 +2315,11 @@ def _dataset_summary(runtime: AgentRuntime) -> DatasetSummaryDTO:
     sources = {
         "roboflow": int(summary["roboflow"]),
         "manual_import": int(summary["manual"]),
+        "manual_phone_import": int(summary["sources"].get("manual_phone_import", 0)),
         "manual_camera_capture": int(summary["sources"].get("manual_camera_capture", 0)),
         "manual_web_import": int(summary["sources"].get("manual_web_import", 0)),
         "auto_low_conf": int(summary["auto"]),
+        "hard_negative": int(summary["sources"].get("hard_negative", 0)),
         "unknown": int(summary["unknown"]),
         "untrusted": int(summary["untrusted"]),
     }
@@ -2026,9 +2355,11 @@ def _dataset_sources(by_source: dict[str, int]) -> dict[str, int]:
     sources = {
         "roboflow": 0,
         "manual_import": 0,
+        "manual_phone_import": 0,
         "manual_camera_capture": 0,
         "manual_web_import": 0,
         "auto_low_conf": 0,
+        "hard_negative": 0,
         "unknown": 0,
         "untrusted": 0,
     }
@@ -2046,16 +2377,36 @@ def _dataset_item_to_dto(row: dict) -> DatasetItemDTO:
     source = str(row.get("source") or "unknown")
     reviewed = bool(row.get("reviewed"))
     trusted = bool(row.get("trusted", source not in {"unknown", "untrusted"}))
+    trust_state = ""
+    trust_reasons: list[str] = []
+    review_decision = ""
+    review_reason = ""
+    reviewed_by = ""
+    bbox_reviewed = False
+    training_excluded = False
+    quarantined = False
+    quarantine_reason = ""
     meta_path = Path(str(row.get("meta_path") or ""))
     if meta_path.exists():
         try:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             reviewed = bool(meta.get("reviewed")) if isinstance(meta, dict) else reviewed
-            trusted = is_trusted_meta(meta if isinstance(meta, dict) else {})
-            if isinstance(meta, dict) and source == "auto_low_conf" and not meta.get("reviewed"):
-                trusted = False
+            if isinstance(meta, dict):
+                decision = classify_dataset_item(meta)
+                trusted = decision.trainable
+                trust_state = decision.state.value
+                trust_reasons = list(decision.reasons)
+                review_decision = str(meta.get("review_decision") or "")
+                review_reason = str(meta.get("review_reason") or "")
+                reviewed_by = str(meta.get("reviewed_by") or "")
+                bbox_reviewed = bool(meta.get("bbox_reviewed"))
+                training_excluded = bool(meta.get("training_excluded"))
+                quarantined = bool(meta.get("quarantined"))
+                quarantine_reason = str(meta.get("quarantine_reason") or "")
         except (OSError, json.JSONDecodeError):
             trusted = False
+            trust_state = "quarantine"
+            trust_reasons = ["invalid_json"]
     return DatasetItemDTO(
         item_id=str(row.get("item_id") or ""),
         image_path=str(row.get("image_path") or ""),
@@ -2072,6 +2423,87 @@ def _dataset_item_to_dto(row: dict) -> DatasetItemDTO:
         updated_at=str(row.get("updated_at") or ""),
         trusted=trusted,
         reviewed=reviewed,
+        trust_state=trust_state,
+        trust_reasons=trust_reasons,
+        review_decision=review_decision,
+        review_reason=review_reason,
+        reviewed_by=reviewed_by,
+        bbox_reviewed=bbox_reviewed,
+        training_excluded=training_excluded,
+        quarantined=quarantined,
+        quarantine_reason=quarantine_reason,
+    )
+
+
+def _dataset_review_request_from_dto(
+    payload: DatasetReviewRequestDTO,
+    context: AuthContext,
+) -> DatasetReviewRequest:
+    return DatasetReviewRequest(
+        action=payload.action,
+        cls_name=payload.cls_name,
+        cls_id=payload.cls_id,
+        reason=payload.reason,
+        actor=payload.actor or context.username or "admin",
+        boxes=[box.model_dump(mode="json") for box in payload.boxes],
+    )
+
+
+def _apply_bulk_review(
+    image_paths: list[Path],
+    action: str,
+    catalog_path: Path,
+    context: AuthContext,
+    *,
+    cls_name: str | None = None,
+    cls_id: int | None = None,
+    reason: str = "",
+) -> int:
+    changed = 0
+    actor = context.username or "admin"
+    for image_path in image_paths:
+        try:
+            apply_dataset_review_action(
+                image_path,
+                DatasetReviewRequest(
+                    action=action,
+                    cls_name=cls_name,
+                    cls_id=cls_id,
+                    reason=reason,
+                    actor=actor,
+                ),
+                catalog_path=catalog_path,
+            )
+        except DatasetReviewError:
+            continue
+        changed += 1
+    return changed
+
+
+def _dataset_image_should_quarantine(image_path: Path) -> bool:
+    try:
+        meta = json.loads(image_path.with_suffix(".json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(meta, dict):
+        return False
+    decision = classify_dataset_item(meta)
+    blocking = {"off_taxonomy", "unknown_labels", "untrusted_meta", "untrusted_source"}
+    return decision.state.value == "quarantine" or bool(set(decision.reasons) & blocking)
+
+
+def _dataset_annotation_response(catalog_path: Path, item_id: str) -> DatasetAnnotationResponse:
+    catalog = DatasetCatalog(catalog_path)
+    try:
+        row = catalog.get_item(item_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Dataset item not found")
+        boxes = catalog.list_boxes(item_id)
+    finally:
+        catalog.close()
+    return DatasetAnnotationResponse(
+        item=_dataset_item_to_dto(row),
+        boxes=[_dataset_box_to_dto(box) for box in boxes],
     )
 
 

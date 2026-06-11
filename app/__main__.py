@@ -5,10 +5,13 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import time
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
-from app.core.config import load_config
+from app.core.config import load_config, save_config, startup_hardware_speaker_config
+from app.core.history import HistoryService
 from app.ui.controller import AppController
 from app.ui.live_status import live_ack_status_text, multi_object_warning_text
 from app.ui.main_window import MainWindow
@@ -36,6 +39,11 @@ def _seed_config_if_missing() -> None:
 
 def main() -> int:
     setup_logging()
+    startup_t0 = time.perf_counter()
+
+    def _log_startup(marker: str) -> None:
+        logger.info("startup_timing marker={} elapsed_ms={:.0f}", marker, (time.perf_counter() - startup_t0) * 1000)
+
     logger.info("starting app")
     app = QApplication(sys.argv)
     app.setApplicationName("Trash Sorter Pro")
@@ -45,11 +53,48 @@ def main() -> int:
     _seed_config_if_missing()
     cfg_path = config_path()
     cfg = load_config(cfg_path)
+    startup_cfg = startup_hardware_speaker_config(cfg)
+    if startup_cfg.speaker != cfg.speaker:
+        cfg = startup_cfg
+        save_config(cfg, cfg_path)
+        logger.info("speaker output reset to hardware for desktop startup")
     apply_theme(app, cfg.theme)
 
     from app.utils.i18n import install_translator
 
     install_translator(app, cfg.language)
+
+    from app.utils.local_web import apply_local_auth_environment
+
+    applied_auth_env = apply_local_auth_environment(allow_dev_defaults=True)
+    if applied_auth_env:
+        logger.info("desktop auth env loaded keys={}", sorted(applied_auth_env))
+
+    from app.agent.auth_service import prewarm_auth_schema_async
+    from app.agent.operations_store import prewarm_operations_schema_async
+    from app.utils.paths import operations_db_path
+
+    prewarm_auth_schema_async()
+    prewarm_operations_schema_async(
+        operations_db_path(),
+        device_defaults={
+            "device_id": cfg.device.device_id,
+            "device_name": cfg.device.device_name,
+            "location": cfg.device.location,
+            "owner_username": cfg.device.owner_username,
+        },
+    )
+    _log_startup("auth_env_and_schema_prewarm_started")
+
+    from app.ui.widgets.admin_login_dialog import AdminLoginDialog
+
+    login = AdminLoginDialog()
+    _log_startup("login_dialog_created")
+    if login.exec() != 1:
+        logger.info("desktop admin login cancelled")
+        return 0
+    logger.info("desktop admin login accepted user={}", login.identity.username if login.identity else "")
+    _log_startup("desktop_admin_login_accepted")
 
     from app.ui.widgets.splash import Splash
 
@@ -60,8 +105,10 @@ def main() -> int:
     splash.set_message("Loading model…")
     app.processEvents()
 
-    window = MainWindow(cfg)
     controller = AppController(cfg, cfg_path, db_path())
+    history_service = HistoryService(db_path())
+    window = MainWindow(cfg, history_service)
+    _log_startup("main_window_created")
     web_launchers = []
 
     controller.uart_status.connect(window.live_page.set_uart_status)
@@ -73,8 +120,10 @@ def main() -> int:
 
     def _sync_speaker_output_mode(mode: str) -> None:
         window.live_page.set_speaker_output_mode(mode)
+        window.live_page.set_speaker_voice_gender(controller.cfg.speaker.voice_gender)
         if window.settings_page is not None:
             window.settings_page.audio_section.set_output_mode(mode)
+            window.settings_page.audio_section.set_voice_gender(controller.cfg.speaker.voice_gender)
 
     def _on_camera_request(on: bool):
         if on:
@@ -101,6 +150,8 @@ def main() -> int:
         new_cfg.speaker.output_mode = mode
         controller.update_config(new_cfg)
         _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
+        if controller.cfg.speaker.output_mode == "computer_speaker":
+            controller.test_laptop_voice("warning")
 
     window.live_page.speaker_output_mode_changed.connect(_on_speaker_output_mode_request)
 
@@ -144,6 +195,7 @@ def main() -> int:
     if window.settings_page is not None:
         def _on_config_saved(new_cfg):
             apply_theme(app, new_cfg.theme)
+            window.sidebar.set_theme(new_cfg.theme)
             controller.update_config(new_cfg)
             _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
             from PySide6.QtCore import QPoint
@@ -200,6 +252,7 @@ def main() -> int:
         window.live_page.set_latency(latency)
         window.set_fps(fps)
         guard_status = controller.dispatch_status()
+        window.live_page.set_dispatch_status(guard_status)
         warning_text = multi_object_warning_text(
             guard_status,
             controller.cfg.dispatch_guard.multi_class_warning_text,
@@ -263,19 +316,87 @@ def main() -> int:
 
     controller.frame_processed.connect(_on_frame)
     window.live_page.snapshot_requested.connect(controller.take_snapshot)
+
+    def _open_camera_annotation_dialog(target_page, cls_name: str, cls_id: int) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        from app.ui.widgets.camera_annotation_dialog import CameraAnnotationDialog
+
+        ok, message, frame, bbox = controller.camera_annotation_snapshot(cls_name)
+        if not ok or frame is None:
+            QMessageBox.warning(window, "Chưa có frame", message)
+            return
+        dialog = CameraAnnotationDialog(
+            frame,
+            class_name=cls_name,
+            initial_bbox=bbox,
+            parent=window,
+        )
+        if dialog.exec() != 1:
+            return
+        box = dialog.bbox_xyxy()
+        if box is None:
+            QMessageBox.warning(window, "Thiếu bbox", "Vui lòng kéo vẽ bbox trước khi lưu mẫu.")
+            return
+        target_page.capture_reviewed_camera_sample_requested.emit(
+            cls_name,
+            int(cls_id),
+            box,
+            dialog.approve_now(),
+        )
+
+    def _on_capture_mode_changed(mode: str):
+        new_cfg = controller.cfg.model_copy(deep=True)
+        new_cfg.capture.mode = mode
+        controller.update_config(new_cfg)
+
     if window.capture_page is not None:
         window.capture_page.open_web_requested.connect(lambda: _open_web_dashboard("data"))
         window.capture_page.capture_camera_sample_requested.connect(controller.capture_camera_sample)
+        window.capture_page.capture_reviewed_camera_sample_requested.connect(
+            controller.capture_reviewed_camera_sample
+        )
+        window.capture_page.capture_hard_negative_requested.connect(controller.capture_hard_negative_sample)
         controller.capture_saved.connect(lambda _p: window.capture_page.reload())
 
-        def _on_capture_mode_changed(mode: str):
-            new_cfg = controller.cfg.model_copy(deep=True)
-            new_cfg.capture.mode = mode
-            controller.update_config(new_cfg)
+        window.capture_page.camera_annotation_requested.connect(
+            lambda cls_name, cls_id, page=window.capture_page: _open_camera_annotation_dialog(
+                page, cls_name, cls_id
+            )
+        )
 
         window.capture_page.mode_changed.connect(_on_capture_mode_changed)
 
+    if window.training_page is not None:
+        window.training_page.open_web_requested.connect(lambda: _open_web_dashboard("training"))
+        window.training_page.manual_phone_import_requested.connect(controller.import_manual_phone_samples)
+        window.training_page.capture_camera_sample_requested.connect(controller.capture_camera_sample)
+        window.training_page.capture_reviewed_camera_sample_requested.connect(
+            controller.capture_reviewed_camera_sample
+        )
+        window.training_page.learn_now_status_requested.connect(controller.refresh_learn_now_status)
+        window.training_page.learn_now_refresh_requested.connect(controller.refresh_learn_now_references)
+        window.training_page.learn_now_train_requested.connect(controller.start_learn_now_candidate_training)
+        window.training_page.training_stop_requested.connect(controller.stop_learn_now_training)
+        window.training_page.training_status_requested.connect(controller.refresh_training_status)
+        window.training_page.candidate_model_test_requested.connect(controller.load_candidate_model_for_test)
+        controller.learn_now_status_changed.connect(window.training_page.set_learn_now_status)
+        controller.learn_now_action_result.connect(window.training_page.set_learn_now_action_result)
+        controller.training_status_changed.connect(window.training_page.set_training_status)
+        controller.capture_saved.connect(lambda _p: window.training_page.reload())
+        window.training_page.camera_annotation_requested.connect(
+            lambda cls_name, cls_id, page=window.training_page: _open_camera_annotation_dialog(
+                page, cls_name, cls_id
+            )
+        )
+
+    def _place_startup_window() -> None:
+        if not getattr(window, "_user_minimized", False):
+            window.ensure_visible_on_screen(center=True)
+
     window.show()
+    for delay_ms in (0, 250, 1000):
+        QTimer.singleShot(delay_ms, _place_startup_window)
 
     from PySide6.QtWidgets import QSystemTrayIcon
 
@@ -284,8 +405,7 @@ def main() -> int:
     if QSystemTrayIcon.isSystemTrayAvailable():
         tray = TrayIcon(window, app.windowIcon())
         tray.show()
-        tray.show_requested.connect(window.show)
-        tray.show_requested.connect(window.activateWindow)
+        tray.show_requested.connect(window.restore_window)
         tray.quit_requested.connect(window.force_quit)
         window.tray = tray
         window._minimize_to_tray = cfg.minimize_to_tray
@@ -303,25 +423,20 @@ def main() -> int:
         controller.uart_status.connect(_notify_uart_disconnect)
 
     controller.start()
+    _log_startup("controller_started")
     if os.environ.get("TRASH_SORTER_AUTOSTART_CAMERA") == "1":
-        from PySide6.QtCore import QTimer
-
         QTimer.singleShot(700, controller.start_camera)
 
     splash.finish(window)
+    _place_startup_window()
+    _log_startup("main_window_shown")
 
-    history_service = controller.history
-    if history_service is not None:
-        from app.ui.pages.history import HistoryPage
-
-        hp = HistoryPage(history_service)
-        old = window.stack.widget(1)
-        window.stack.insertWidget(1, hp)
-        window.stack.removeWidget(old)
-        window.history_page = hp
-
-    rc = app.exec()
-    controller.stop()
+    rc = 0
+    try:
+        rc = app.exec()
+    finally:
+        controller.stop()
+        history_service.close()
     return rc
 
 

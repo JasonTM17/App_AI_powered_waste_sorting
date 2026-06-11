@@ -7,6 +7,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from threading import Lock, Thread
 from typing import Literal
 
 from sqlalchemy import create_engine, inspect, select, text
@@ -25,6 +26,7 @@ from app.agent.auth_crypto import (
 )
 from app.agent.auth_password_policy import validate_password_policy
 from app.agent.auth_tables import accounts, chat_usage, metadata, sessions
+from app.agent.schema_readiness import SchemaReadiness
 from app.utils.paths import auth_db_path
 
 AUTH_DB_ENV = "TRASH_SORTER_AUTH_DB"
@@ -35,6 +37,9 @@ BOOTSTRAP_ADMIN_USERNAME_ENV = "TRASH_SORTER_BOOTSTRAP_ADMIN_USERNAME"
 BOOTSTRAP_ADMIN_PASSWORD_ENV = "TRASH_SORTER_BOOTSTRAP_ADMIN_PASSWORD"
 USER_CHAT_MONTHLY_LIMIT = 36
 AuthRole = Literal["admin", "user"]
+_ENGINE_CACHE: dict[str, Engine] = {}
+_ENGINE_LOCK = Lock()
+_SCHEMA_READINESS = SchemaReadiness()
 
 
 @dataclass(frozen=True)
@@ -78,20 +83,15 @@ class AuthService:
     def __init__(self, db_path: Path | None = None, database_url: str | None = None):
         self.database_url = database_url or (configured_auth_database_url() if db_path is None else "")
         self.db_path = db_path or configured_auth_db_path()
-        if self.database_url:
-            self._engine: Engine = create_engine(self.database_url, future=True, pool_pre_ping=True)
-        else:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self._engine = create_engine(f"sqlite:///{self.db_path}", future=True)
-        metadata.create_all(self._engine)
-        self._ensure_columns()
-        self.seed_configured_accounts()
+        self._engine = _engine_for_auth_store(self.database_url, self.db_path)
 
     def has_accounts(self) -> bool:
+        self.ensure_ready()
         with self._engine.begin() as conn:
             return bool(conn.execute(select(accounts.c.id).limit(1)).first())
 
     def login(self, username: str, password: str, client_label: str = "") -> LoginResult | None:
+        self.ensure_ready()
         clean_username = username.strip()
         if not clean_username or not password:
             return None
@@ -136,6 +136,7 @@ class AuthService:
         return LoginResult(token=token, identity=identity)
 
     def authenticate_session(self, token: str) -> AuthIdentity | None:
+        self.ensure_ready()
         if not token:
             return None
         now = iso(utc_now())
@@ -167,6 +168,7 @@ class AuthService:
         )
 
     def revoke_session(self, token: str) -> bool:
+        self.ensure_ready()
         if not token:
             return False
         with self._engine.begin() as conn:
@@ -187,7 +189,25 @@ class AuthService:
         password_default: bool = False,
         allow_dev_default: bool = False,
     ) -> None:
+        self.ensure_ready()
         clean_username = username.strip()
+        self._insert_account(
+            clean_username,
+            password,
+            role,
+            password_default=password_default,
+            allow_dev_default=allow_dev_default,
+        )
+
+    def _insert_account(
+        self,
+        clean_username: str,
+        password: str,
+        role: AuthRole,
+        *,
+        password_default: bool = False,
+        allow_dev_default: bool = False,
+    ) -> None:
         if not clean_username or not password:
             raise ValueError("username and password are required")
         validate_password_policy(
@@ -221,6 +241,7 @@ class AuthService:
         temporary: bool = False,
         revoke_sessions: bool = False,
     ) -> bool:
+        self.ensure_ready()
         clean_username = username.strip()
         validate_password_policy(clean_username, password)
         salt, password_hash = hash_password(password)
@@ -258,6 +279,7 @@ class AuthService:
         new_password: str,
         current_token: str,
     ) -> bool:
+        self.ensure_ready()
         with self._engine.begin() as conn:
             row = conn.execute(select(accounts).where(accounts.c.id == account_id)).mappings().first()
             if row is None:
@@ -294,6 +316,7 @@ class AuthService:
             return True
 
     def revoke_account_sessions(self, username: str, *, except_token: str = "") -> bool:
+        self.ensure_ready()
         clean_username = username.strip()
         now = iso(utc_now())
         with self._engine.begin() as conn:
@@ -313,6 +336,7 @@ class AuthService:
             return True
 
     def set_active(self, username: str, active: bool) -> bool:
+        self.ensure_ready()
         with self._engine.begin() as conn:
             result = conn.execute(
                 accounts.update()
@@ -334,6 +358,7 @@ class AuthService:
             return changed
 
     def list_accounts(self) -> list[dict[str, object]]:
+        self.ensure_ready()
         with self._engine.begin() as conn:
             rows = conn.execute(
                 select(
@@ -349,6 +374,7 @@ class AuthService:
         return [dict(row) for row in rows]
 
     def get_user_chat_quota(self, account_id: int, *, limit: int = USER_CHAT_MONTHLY_LIMIT) -> ChatQuota:
+        self.ensure_ready()
         period = _current_chat_period()
         with self._engine.begin() as conn:
             row = conn.execute(
@@ -358,6 +384,7 @@ class AuthService:
         return _quota_from_used(used, limit=limit)
 
     def consume_user_chat_quota(self, account_id: int, *, limit: int = USER_CHAT_MONTHLY_LIMIT) -> ChatQuota:
+        self.ensure_ready()
         period = _current_chat_period()
         now = iso(utc_now())
         with self._engine.begin() as conn:
@@ -388,6 +415,10 @@ class AuthService:
         return _quota_from_used(next_used, limit=limit)
 
     def seed_configured_accounts(self) -> None:
+        self.ensure_ready()
+        self._seed_configured_accounts()
+
+    def _seed_configured_accounts(self) -> None:
         if env_flag(DEV_DEFAULTS_ENV):
             self._create_if_missing(
                 "admin",
@@ -422,7 +453,7 @@ class AuthService:
                 select(accounts.c.id).where(accounts.c.username == username)
             ).first()
         if exists is None:
-            self.create_account(
+            self._insert_account(
                 username,
                 password,
                 role,
@@ -440,6 +471,19 @@ class AuthService:
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_chat_usage_account_period ON chat_usage(account_id, period)"))
+
+    def ensure_ready(self) -> None:
+        init_key = _auth_store_key(self.database_url, self.db_path)
+
+        def _bootstrap() -> None:
+            metadata.create_all(self._engine)
+            self._ensure_columns()
+            self._seed_configured_accounts()
+
+        _SCHEMA_READINESS.ensure(init_key, _bootstrap)
+
+    def _initialize_store(self) -> None:
+        self.ensure_ready()
 
 
 def configured_auth_database_url() -> str:
@@ -464,9 +508,69 @@ def normalize_database_url(raw: str) -> str:
     return value
 
 
+def create_database_engine(database_url: str) -> Engine:
+    kwargs: dict[str, object] = {
+        "future": True,
+        "pool_pre_ping": True,
+        "pool_size": 2,
+        "max_overflow": 3,
+        "pool_timeout": 5,
+        "pool_recycle": 1800,
+    }
+    if database_url.startswith("postgresql+psycopg://"):
+        # Supabase pooler can reuse server-side prepared statement names across clients.
+        kwargs["connect_args"] = {"prepare_threshold": None}
+    return create_engine(database_url, **kwargs)
+
+
 def account_auth_is_configured() -> bool:
     service = AuthService()
     return service.has_accounts()
+
+
+def ensure_auth_schema_ready(
+    *,
+    db_path: Path | None = None,
+    database_url: str | None = None,
+) -> None:
+    AuthService(db_path=db_path, database_url=database_url).ensure_ready()
+
+
+def prewarm_auth_schema_async(
+    *,
+    db_path: Path | None = None,
+    database_url: str | None = None,
+) -> Thread:
+    def _worker() -> None:
+        try:
+            ensure_auth_schema_ready(db_path=db_path, database_url=database_url)
+        except Exception:
+            return
+
+    thread = Thread(target=_worker, name="auth-schema-prewarm", daemon=True)
+    thread.start()
+    return thread
+
+
+def _engine_for_auth_store(database_url: str, db_path: Path) -> Engine:
+    key = _auth_store_key(database_url, db_path)
+    with _ENGINE_LOCK:
+        engine = _ENGINE_CACHE.get(key)
+        if engine is not None:
+            return engine
+        if database_url:
+            engine = create_database_engine(database_url)
+        else:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            engine = create_engine(f"sqlite:///{db_path}", future=True)
+        _ENGINE_CACHE[key] = engine
+        return engine
+
+
+def _auth_store_key(database_url: str, db_path: Path) -> str:
+    if database_url:
+        return f"url:{database_url}"
+    return f"sqlite:{db_path.resolve()}"
 
 
 def _role(value: object) -> AuthRole:
@@ -512,5 +616,8 @@ __all__ = [
     "account_auth_is_configured",
     "configured_auth_database_url",
     "configured_auth_db_path",
+    "create_database_engine",
+    "ensure_auth_schema_ready",
     "normalize_database_url",
+    "prewarm_auth_schema_async",
 ]
