@@ -40,6 +40,17 @@ AuthRole = Literal["admin", "user"]
 _ENGINE_CACHE: dict[str, Engine] = {}
 _ENGINE_LOCK = Lock()
 _SCHEMA_READINESS = SchemaReadiness()
+_AUTH_SCHEMA_PROBES = (
+    (
+        "SELECT id, username, role, password_hash, salt, iterations, is_active, "
+        "password_default, created_at, updated_at, last_login_at FROM accounts WHERE 1=0"
+    ),
+    (
+        "SELECT id, account_id, token_hash, created_at, expires_at, revoked_at, "
+        "client_label FROM sessions WHERE 1=0"
+    ),
+    "SELECT id, account_id, period, used, updated_at FROM chat_usage WHERE 1=0",
+)
 
 
 @dataclass(frozen=True)
@@ -476,6 +487,10 @@ class AuthService:
         init_key = _auth_store_key(self.database_url, self.db_path)
 
         def _bootstrap() -> None:
+            if self.database_url and _remote_auth_schema_ready(self._engine):
+                if _auth_seed_requested():
+                    self._seed_configured_accounts()
+                return
             metadata.create_all(self._engine)
             self._ensure_columns()
             self._seed_configured_accounts()
@@ -524,7 +539,14 @@ def create_database_engine(database_url: str) -> Engine:
 
 
 def account_auth_is_configured() -> bool:
-    service = AuthService()
+    if configured_auth_database_url():
+        return True
+    if _auth_seed_requested():
+        return True
+    db_path = configured_auth_db_path()
+    if not db_path.exists():
+        return False
+    service = AuthService(db_path=db_path)
     return service.has_accounts()
 
 
@@ -571,6 +593,26 @@ def _auth_store_key(database_url: str, db_path: Path) -> str:
     if database_url:
         return f"url:{database_url}"
     return f"sqlite:{db_path.resolve()}"
+
+
+def _auth_seed_requested() -> bool:
+    return bool(
+        env_flag(DEV_DEFAULTS_ENV)
+        or (
+            os.getenv(BOOTSTRAP_ADMIN_USERNAME_ENV, "").strip()
+            and os.getenv(BOOTSTRAP_ADMIN_PASSWORD_ENV, "")
+        )
+    )
+
+
+def _remote_auth_schema_ready(engine: Engine) -> bool:
+    try:
+        with engine.begin() as conn:
+            for probe in _AUTH_SCHEMA_PROBES:
+                conn.execute(text(probe))
+    except Exception:
+        return False
+    return True
 
 
 def _role(value: object) -> AuthRole:

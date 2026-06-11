@@ -1,10 +1,14 @@
+from sqlalchemy import create_engine
+
 from app.agent import auth_service as auth_service_module
 from app.agent.auth_service import (
     AuthService,
+    account_auth_is_configured,
     configured_auth_database_url,
     create_database_engine,
     normalize_database_url,
 )
+from app.agent.auth_tables import metadata
 
 
 def test_normalize_postgres_database_url_uses_psycopg_driver():
@@ -52,3 +56,29 @@ def test_auth_service_constructor_defers_schema_bootstrap(tmp_path):
     AuthService(db_path=db_path)
 
     assert not db_path.exists()
+
+
+def test_account_auth_configured_short_circuits_when_database_url_is_set(monkeypatch):
+    monkeypatch.setenv("TRASH_SORTER_AUTH_DATABASE_URL", "postgresql://auth:pass@localhost/auth")
+
+    def fail_has_accounts(self):
+        raise AssertionError("has_accounts should not run just to detect configured auth")
+
+    monkeypatch.setattr(AuthService, "has_accounts", fail_has_accounts)
+
+    assert account_auth_is_configured() is True
+
+
+def test_remote_auth_schema_probe_skips_create_all_when_schema_exists(monkeypatch):
+    engine = create_engine("sqlite:///:memory:", future=True)
+    metadata.create_all(engine)
+    database_url = "postgresql+psycopg://user:pass@localhost/auth_probe_test"
+
+    monkeypatch.setattr(auth_service_module, "_engine_for_auth_store", lambda *_: engine)
+
+    def fail_create_all(_engine):
+        raise AssertionError("metadata.create_all should be skipped for ready remote schema")
+
+    monkeypatch.setattr(auth_service_module.metadata, "create_all", fail_create_all)
+
+    AuthService(database_url=database_url).ensure_ready()
