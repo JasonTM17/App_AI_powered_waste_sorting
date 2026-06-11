@@ -47,7 +47,7 @@ const userNav: Array<{ id: UserView; href: string; label: string; icon: LucideIc
 ];
 
 export function UserDashboardPanel(props: UserDashboardPanelProps) {
-  const { agentError, analytics, auth, busy, chatAnswer, chatQuestion, notice, rangeDays, view } = props;
+  const { agentError, analytics, auth, busy, chatAnswer, chatBusy, chatQuestion, notice, rangeDays, view } = props;
   const primaryNav = userNav.slice(0, 5);
   const secondaryNav = userNav.slice(5);
   return (
@@ -108,7 +108,7 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
         {props.chatbotEnabled ? (
           <RoleChatbotLauncher
             answer={chatAnswer}
-            busy={busy}
+            busy={chatBusy}
             defaultOpen={view === "ecopet"}
             label="EcoPet"
             placeholder="Hỏi EcoPet..."

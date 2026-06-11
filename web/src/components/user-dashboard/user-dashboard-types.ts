@@ -40,6 +40,7 @@ export type UserDashboardPanelProps = {
   auth: AuthMe | null;
   binMap: BinMapResponse | null;
   busy: boolean;
+  chatBusy: boolean;
   chatAnswer: AiChatResponse | null;
   chatQuestion: string;
   device: UserDevice | null;

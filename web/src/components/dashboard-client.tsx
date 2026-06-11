@@ -300,6 +300,7 @@ export function DashboardClient() {
   const [importSource, setImportSource] = useState("roboflow");
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
+  const [chatBusy, setChatBusy] = useState(false);
   const refreshInFlightRef = useRef(false);
 
   const cameraStream = useMemo(() => {
@@ -629,7 +630,7 @@ export function DashboardClient() {
 
   async function requestUserChat(value?: string) {
     const message = (value ?? userChatQuestion).trim() || "Hôm nay bạn thấy thói quen bỏ rác của mình thế nào?";
-    setBusy(true);
+    setChatBusy(true);
     try {
       const data = await fetchAgent<AiChatResponse>("/api/user/chat", {
         method: "POST",
@@ -643,9 +644,9 @@ export function DashboardClient() {
     } catch (error) {
       const fallback = localChatFailure("user", error);
       setUserChat(fallback);
-      setAgentError(fallback.message);
+      setNotice(fallback.message);
     } finally {
-      setBusy(false);
+      setChatBusy(false);
     }
   }
 
@@ -987,7 +988,7 @@ export function DashboardClient() {
 
   async function requestAdminChat(value?: string) {
     const message = (value ?? adminChatQuestion).trim() || "Tóm tắt hệ thống hôm nay.";
-    setBusy(true);
+    setChatBusy(true);
     try {
       const data = await fetchAgent<AiChatResponse>("/api/admin/chat", {
         method: "POST",
@@ -1001,9 +1002,9 @@ export function DashboardClient() {
     } catch (error) {
       const fallback = localChatFailure("admin", error);
       setAdminChat(fallback);
-      setAgentError(fallback.message);
+      setNotice(fallback.message);
     } finally {
-      setBusy(false);
+      setChatBusy(false);
     }
   }
 
@@ -1247,7 +1248,7 @@ export function DashboardClient() {
         ? 12_000
         : 4_000;
     const runRefresh = async () => {
-      if (refreshInFlightRef.current) {
+      if (refreshInFlightRef.current || chatBusy || document.visibilityState === "hidden") {
         return;
       }
       refreshInFlightRef.current = true;
@@ -1265,6 +1266,7 @@ export function DashboardClient() {
     agentToken,
     auth?.role,
     auth?.password_default,
+    chatBusy,
     datasetSource,
     datasetClass,
     datasetTrusted,
@@ -2091,6 +2093,7 @@ export function DashboardClient() {
         auth={auth}
         binMap={userBinMap}
         busy={busy}
+        chatBusy={chatBusy}
         chatAnswer={userChat}
         chatQuestion={userChatQuestion}
         device={userDevice}
@@ -2417,7 +2420,7 @@ export function DashboardClient() {
         {active !== "accounts" ? (
           <RoleChatbotLauncher
             answer={adminChat}
-            busy={busy}
+            busy={chatBusy}
             label="Chatbot Admin"
             placeholder="Hỏi về trạng thái camera, AI model, UART, dataset hoặc vận hành hôm nay."
             question={adminChatQuestion}
