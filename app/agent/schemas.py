@@ -767,6 +767,8 @@ class AiChatResponse(BaseModel):
     available: bool = False
     provider: str = "deepseek"
     model: str = ""
+    answer_source: Literal["local", "deepseek", "hybrid"] = "local"
+    latency_ms: float = 0.0
     role: Literal["admin", "user"]
     profile: str = ""
     message: str

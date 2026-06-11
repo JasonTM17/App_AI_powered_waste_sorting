@@ -4828,6 +4828,8 @@ function localChatFailure(role: AuthRole, error: unknown): AiChatResponse {
     available: false,
     provider: "local",
     model: "",
+    answer_source: "local",
+    latency_ms: 0,
     role,
     profile: role === "admin" ? "trash_sorter_admin" : "trash_sorter_user",
     message: detail ? `${base}\n• Chi tiết: ${detail}` : base,

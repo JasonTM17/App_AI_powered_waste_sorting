@@ -182,7 +182,7 @@ export function ChatPanel({
         <span>
           {persona === "admin"
             ? answer
-              ? `${answer.provider} ${answer.model || ""}`.trim()
+              ? chatAnswerStatus(answer)
               : statusText
             : userStatusText(answer, statusText)}
         </span>
@@ -290,6 +290,16 @@ function quotaLabel(answer: AiChatResponse | null) {
     return `Đã dùng hết ${answer.quota_limit} lượt hỏi tháng này`;
   }
   return `Còn ${answer.quota_remaining}/${answer.quota_limit} lượt hỏi tháng này`;
+}
+
+function chatAnswerStatus(answer: AiChatResponse) {
+  const source =
+    answer.answer_source === "local"
+      ? "Phản hồi local"
+      : answer.answer_source === "hybrid"
+        ? "Local + DeepSeek"
+        : `${answer.provider} ${answer.model || ""}`.trim();
+  return answer.latency_ms > 0 ? `${source} • ${Math.round(answer.latency_ms)} ms` : source;
 }
 
 function userStatusText(answer: AiChatResponse | null, fallback: string) {

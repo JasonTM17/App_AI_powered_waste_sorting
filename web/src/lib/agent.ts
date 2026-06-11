@@ -912,6 +912,8 @@ export type AiChatResponse = {
   available: boolean;
   provider: string;
   model: string;
+  answer_source: "local" | "deepseek" | "hybrid";
+  latency_ms: number;
   role: AuthRole;
   profile: string;
   message: string;
