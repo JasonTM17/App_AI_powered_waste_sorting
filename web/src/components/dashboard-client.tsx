@@ -633,7 +633,8 @@ export function DashboardClient() {
       const data = await fetchAgent<AiChatResponse>("/api/user/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message })
+        body: JSON.stringify({ message }),
+        timeoutMs: 45_000
       });
       setUserChat(data);
       setUserChatQuestion("");
@@ -990,7 +991,8 @@ export function DashboardClient() {
       const data = await fetchAgent<AiChatResponse>("/api/admin/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message })
+        body: JSON.stringify({ message }),
+        timeoutMs: 45_000
       });
       setAdminChat(data);
       setAdminChatQuestion("");
@@ -1117,7 +1119,8 @@ export function DashboardClient() {
     try {
       const settingsLike = scope === "settings" || scope === "model" || scope === "audio";
       const operationsLike = scope === "roles" || scope === "devices" || scope === "bin-map" || scope === "alerts";
-      const dataLike = scope === "data" || scope === "training";
+      const dataLike = scope === "data";
+      const trainingLike = scope === "training";
       const statusPath = settingsLike ? "/api/status" : "/api/status?include_devices=false";
       const [statusRes, trainingRes] = await Promise.all([
         fetchAgent<RuntimeStatus>(statusPath),
@@ -1156,6 +1159,20 @@ export function DashboardClient() {
         setSelectedPaths((current) =>
           current.filter((path) => itemRes.rows.some((item) => item.image_path === path))
         );
+      }
+
+      if (trainingLike) {
+        const [classesRes, commonWasteRes, captureSessionRes, learnNowRes] = await Promise.all([
+          fetchAgent<ModelClassesResponse>("/api/model/classes"),
+          fetchAgent<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
+          fetchAgent<CaptureSession>("/api/dataset/capture-session"),
+          fetchAgent<LearnNowStatus>(learnNowPath(), { timeoutMs: 30_000 })
+        ]);
+        setModelClasses(classesRes.classes);
+        setCommonWasteItems(commonWasteRes.items);
+        setCaptureSession(captureSessionRes);
+        setLearnNow(learnNowRes);
+        setManualClass((current) => current || classesRes.classes[0]?.name || "");
       }
 
       if (scope === "history") {
@@ -1226,7 +1243,9 @@ export function DashboardClient() {
       return;
     }
     const pollingIntervalMs =
-      active === "bin-map" || active === "alerts" || active === "roles" || active === "devices" ? 12_000 : 4_000;
+      active === "bin-map" || active === "alerts" || active === "roles" || active === "devices" || active === "training"
+        ? 12_000
+        : 4_000;
     const runRefresh = async () => {
       if (refreshInFlightRef.current) {
         return;
