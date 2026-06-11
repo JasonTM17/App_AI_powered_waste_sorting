@@ -285,6 +285,7 @@ export function DashboardClient() {
   const [manualFiles, setManualFiles] = useState<FileList | null>(null);
   const [manualPhoneFiles, setManualPhoneFiles] = useState<FileList | null>(null);
   const [manualClass, setManualClass] = useState("");
+  const [trainingManualClass, setTrainingManualClass] = useState("");
   const [manualImageUrl, setManualImageUrl] = useState("");
   const [manualSourcePageUrl, setManualSourcePageUrl] = useState("");
   const [manualSourceLicense, setManualSourceLicense] = useState("");
@@ -442,9 +443,9 @@ export function DashboardClient() {
     return `/api/dataset/items?${params.toString()}`;
   }
 
-  function learnNowPath(base = "/api/learn-now/status") {
+  function learnNowPath(base = "/api/learn-now/status", rawClass = manualClass) {
     const params = new URLSearchParams();
-    const className = canonicalClassForLabel(manualClass) || manualClass.trim();
+    const className = canonicalClassForLabel(rawClass) || rawClass.trim();
     if (className) {
       params.set("cls_name", className);
     }
@@ -1166,13 +1167,12 @@ export function DashboardClient() {
           fetchAgent<ModelClassesResponse>("/api/model/classes"),
           fetchAgent<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
           fetchAgent<CaptureSession>("/api/dataset/capture-session"),
-          fetchAgent<LearnNowStatus>(learnNowPath(), { timeoutMs: 30_000 })
+          fetchAgent<LearnNowStatus>(learnNowPath("/api/learn-now/status", trainingManualClass), { timeoutMs: 30_000 })
         ]);
         setModelClasses(classesRes.classes);
         setCommonWasteItems(commonWasteRes.items);
         setCaptureSession(captureSessionRes);
         setLearnNow(learnNowRes);
-        setManualClass((current) => current || classesRes.classes[0]?.name || "");
       }
 
       if (scope === "history") {
@@ -1270,6 +1270,7 @@ export function DashboardClient() {
     datasetTrusted,
     datasetOffset,
     manualClass,
+    trainingManualClass,
     normalizedSearch
   ]);
 
@@ -1414,7 +1415,7 @@ export function DashboardClient() {
   }
 
   async function uploadManualPhoneData() {
-    const resolved = resolveManualClass(manualClass);
+    const resolved = resolveManualClass(trainingManualClass);
     if (!resolved) {
       setNotice("Nhãn chưa nằm trong taxonomy 45 class. Hãy nhập nhãn hợp lệ trước khi chọn/lưu ảnh.");
       return;
@@ -1433,7 +1434,7 @@ export function DashboardClient() {
         method: "POST",
         body: form
       });
-      setManualClass(resolved.className);
+      setTrainingManualClass(resolved.className);
       setManualPhoneFiles(null);
       setDatasetSource("manual_phone_import");
       setDatasetTrusted("untrusted");
@@ -1452,7 +1453,7 @@ export function DashboardClient() {
   }
 
   async function captureCameraSample() {
-    const resolved = resolveManualClass(manualClass);
+    const resolved = resolveManualClass(trainingManualClass);
     if (!resolved) {
       setNotice("Chưa chọn class để ghi frame camera");
       return;
@@ -1468,7 +1469,7 @@ export function DashboardClient() {
           use_latest_detection_box: true
         })
       });
-      setManualClass(resolved.className);
+      setTrainingManualClass(resolved.className);
       setNotice(result.message);
       setDatasetSource("manual_camera_capture");
       setDatasetOffset(0);
@@ -1514,7 +1515,7 @@ export function DashboardClient() {
   }
 
   async function startCaptureSession() {
-    const resolved = resolveManualClass(manualClass);
+    const resolved = resolveManualClass(trainingManualClass);
     if (!resolved) {
       setNotice("Chưa chọn class để bắt đầu phiên chụp");
       return;
@@ -1531,7 +1532,7 @@ export function DashboardClient() {
           holdout_count: 6
         })
       });
-      setManualClass(resolved.className);
+      setTrainingManualClass(resolved.className);
       setCaptureSession(result);
       setNotice("Đã bắt đầu phiên chụp. Xoay hoặc đổi vị trí bút trước mỗi lần chụp.");
     } finally {
@@ -1554,7 +1555,7 @@ export function DashboardClient() {
       setNotice(result.last_message);
       setDatasetSource("manual_camera_capture");
       setDatasetOffset(0);
-      await refreshActive("data");
+      await refreshActive("training");
     } finally {
       setBusy(false);
     }
@@ -1802,19 +1803,19 @@ export function DashboardClient() {
     setBusy(true);
     try {
       const result = await fetchAgent<LearnNowStatus>(
-        learnNowPath("/api/learn-now/refresh-references"),
+        learnNowPath("/api/learn-now/refresh-references", trainingManualClass),
         { method: "POST" }
       );
       setLearnNow(result);
       setNotice("Đã làm mới nhận diện reference cho mẫu đã review.");
-      await refreshActive("data");
+      await refreshActive("training");
     } finally {
       setBusy(false);
     }
   }
 
   async function startLearnNowMicroTrain(profile: "micro" | "strong" = "micro") {
-    const resolved = resolveManualClass(manualClass);
+    const resolved = resolveManualClass(trainingManualClass);
     if (!resolved) {
       setNotice("Chưa chọn class để train nhanh");
       return;
@@ -1826,9 +1827,9 @@ export function DashboardClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cls_name: resolved.className, profile })
       });
-      setManualClass(resolved.className);
+      setTrainingManualClass(resolved.className);
       setNotice(result.message);
-      await refreshActive(active === "training" ? "training" : "data");
+      await refreshActive("training");
     } finally {
       setBusy(false);
     }
@@ -2312,10 +2313,10 @@ export function DashboardClient() {
             classOptions={classOptions}
             commonWasteItems={commonWasteItems}
             learnNow={learnNow}
-            manualClass={manualClass}
+            manualClass={trainingManualClass}
             manualPhoneFileCount={manualPhoneFiles?.length ?? 0}
             training={training}
-            onClassChange={setManualClass}
+            onClassChange={setTrainingManualClass}
             onCaptureCameraSample={() => void captureCameraSample()}
             onCaptureSessionFrame={() => void captureSessionFrame()}
             onImportPhoneData={() => void uploadManualPhoneData()}
