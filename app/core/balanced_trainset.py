@@ -7,6 +7,7 @@ import json
 import random
 import shutil
 from collections import Counter
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -74,6 +75,8 @@ def export_balanced_trainset(
         "generated_cap_ratio": generated_cap_ratio,
         "skipped_small_boxes": 0,
         "skipped_unknown_boxes": 0,
+        "skipped_missing_image": 0,
+        "skipped_copy_error": 0,
         "blocked_labels": blocked_labels,
         "blocked_items": blocked_items,
     }
@@ -88,11 +91,23 @@ def export_balanced_trainset(
         )
         if not lines:
             continue
+        if not item.image_path.is_file():
+            # Source image disappeared between queue scan and export (cleanup race,
+            # broken staging, or partial dataset). Skip rather than write an orphan
+            # label that YOLO will fail to load with FileNotFoundError at train time.
+            stats["skipped_missing_image"] = int(str(stats["skipped_missing_image"])) + 1
+            continue
         image_out = out_dir / "images" / split / item.image_path.name
         label_out = out_dir / "labels" / split / f"{item.image_path.stem}.txt"
         image_out.parent.mkdir(parents=True, exist_ok=True)
         label_out.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(item.image_path, image_out)
+        try:
+            shutil.copy2(item.image_path, image_out)
+        except (FileNotFoundError, shutil.SameFileError, OSError):
+            # Defensive: image was removed between the is_file() check and the copy.
+            # Skip this item rather than abort the whole export.
+            stats["skipped_copy_error"] = int(str(stats["skipped_copy_error"])) + 1
+            continue
         label_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
         stats["images"] = int(str(stats["images"])) + 1
         stats["boxes"] = int(str(stats["boxes"])) + len(lines)
@@ -112,8 +127,13 @@ def _load_items(
 ) -> list[QueueItem]:
     items: list[QueueItem] = []
     for image_path in queue_dir.glob("*.jpg"):
+        if not image_path.exists():
+            continue
+        meta_path = image_path.with_suffix(".json")
+        if not meta_path.exists():
+            continue
         try:
-            meta = json.loads(image_path.with_suffix(".json").read_text(encoding="utf-8"))
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
         except Exception:
             blocked_items["invalid_json"] += 1
             continue
@@ -266,6 +286,11 @@ def _reset_output(out_dir: Path) -> None:
         target = out_dir / name
         if target.exists():
             shutil.rmtree(target)
+    # Stale Ultralytics cache files (.cache) keep pointing at deleted images and
+    # trigger "Image Not Found" on the next train. Always purge them.
+    for cache_file in out_dir.glob("*.cache"):
+        with suppress(OSError):
+            cache_file.unlink()
     out_dir.mkdir(parents=True, exist_ok=True)
 
 
