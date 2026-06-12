@@ -148,3 +148,28 @@ def test_balanced_export_forces_augmented_to_train_split(tmp_path):
     assert stats["images"] == 1
     assert len(list((out / "images" / "train").glob("augmented_pen.jpg"))) == 1
     assert not list((out / "images" / "test").glob("augmented_pen.jpg"))
+
+
+def test_balanced_export_purges_stale_ultralytics_cache(tmp_path):
+    """Stale .cache files must be removed at the start of every export.
+
+    Regression for "Image Not Found" at YOLO train time: a cached label cache
+    references images that no longer exist in the trainset.
+    """
+    out = tmp_path / "fast"
+    out.mkdir()
+    (out / "labels.cache").write_text("stale", encoding="utf-8")
+
+    queue = tmp_path / "queue"
+    queue.mkdir()
+    _write_item(queue, "pen_train", holdout=False)
+
+    export_balanced_trainset(
+        queue,
+        out,
+        ("Pen",),
+        max_images=5,
+        legacy_quota=2,
+    )
+
+    assert not list(out.glob("*.cache"))
