@@ -102,7 +102,7 @@ def build_chat_response(
             generated_at=datetime.now().isoformat(),
             available=True,
             provider="local",
-            model="",
+            model=cfg.model,
             answer_source="local",
             latency_ms=_elapsed_ms(started),
             role=role,

@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from getpass import getpass
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 from app.agent.auth_password_policy import PasswordPolicyError
 from app.agent.auth_service import AuthService
+from app.utils.local_web import apply_local_auth_environment
 
 
 def main() -> int:
@@ -16,6 +23,7 @@ def main() -> int:
     create = sub.add_parser("create", help="Create an account")
     create.add_argument("username")
     create.add_argument("--role", choices=["admin", "user"], required=True)
+    create.add_argument("--display-name", default="", help="Friendly name shown in the web UI")
     create.add_argument("--force-change", action="store_true", help="Require password change at next login")
 
     password = sub.add_parser("set-password", help="Set an account password")
@@ -26,9 +34,14 @@ def main() -> int:
     active.add_argument("username")
     active.add_argument("--active", choices=["true", "false"], required=True)
 
+    display_name = sub.add_parser("set-display-name", help="Set an account display name")
+    display_name.add_argument("username")
+    display_name.add_argument("display_name")
+
     sub.add_parser("list", help="List accounts without sensitive fields")
     args = parser.parse_args()
 
+    apply_local_auth_environment(allow_dev_defaults=True)
     service = AuthService()
     try:
         if args.command == "create":
@@ -36,6 +49,7 @@ def main() -> int:
                 args.username,
                 _read_password(),
                 args.role,
+                display_name=args.display_name,
                 password_default=args.force_change,
             )
             print(f"created {args.role} account: {args.username}")
@@ -56,11 +70,17 @@ def main() -> int:
             raise SystemExit(f"account not found: {args.username}")
         state = "enabled" if enabled else "disabled"
         print(f"{state} account: {args.username}")
+    elif args.command == "set-display-name":
+        if not service.set_display_name(args.username, args.display_name):
+            raise SystemExit(f"account not found: {args.username}")
+        print(f"updated display name for: {args.username}")
     elif args.command == "list":
         for row in service.list_accounts():
             active_text = "active" if int(row["is_active"]) else "disabled"
             default_text = " default-password" if int(row["password_default"]) else ""
-            print(f"{row['username']}\t{row['role']}\t{active_text}{default_text}")
+            display = str(row.get("display_name") or "")
+            display_text = f"\t{display}" if display else ""
+            print(f"{row['username']}\t{row['role']}\t{active_text}{default_text}{display_text}")
     return 0
 
 

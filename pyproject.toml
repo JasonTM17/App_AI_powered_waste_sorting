@@ -69,7 +69,7 @@ warn_unused_ignores = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
-addopts = "-ra --strict-markers --cov=app/core --cov-report=term-missing"
+addopts = "-ra --strict-markers --cov=app --cov-report=term-missing"
 
 [tool.coverage.run]
 source = ["app"]

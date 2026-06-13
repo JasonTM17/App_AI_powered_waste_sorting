@@ -1,4 +1,6 @@
-from app.agent.operations_store import OperationsStore, configured_operations_database_url
+from sqlalchemy import create_engine
+
+from app.agent.operations_store import OperationsStore, configured_operations_database_url, devices
 
 
 def test_operations_database_url_uses_installed_psycopg_driver(monkeypatch):
@@ -76,6 +78,22 @@ def test_operations_store_reinitializes_recreated_sqlite_file(tmp_path):
     try:
         assert store.health()["station_total"] == 10
         assert store.list_bin_map(owner_username="user")["total"] == 2
+    finally:
+        store.close()
+
+
+def test_operations_store_recovers_from_partial_sqlite_schema(tmp_path):
+    db_path = tmp_path / "operations.db"
+    engine = create_engine(f"sqlite:///{db_path}")
+    try:
+        devices.create(engine)
+    finally:
+        engine.dispose()
+
+    store = OperationsStore(db_path)
+    try:
+        assert store.health()["station_total"] == 10
+        assert len(store.list_schedules()) == 10
     finally:
         store.close()
 

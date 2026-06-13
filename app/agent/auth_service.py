@@ -12,6 +12,7 @@ from typing import Literal
 
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 
 from app.agent.auth_crypto import (
     PBKDF2_ITERATIONS,
@@ -42,7 +43,7 @@ _ENGINE_LOCK = Lock()
 _SCHEMA_READINESS = SchemaReadiness()
 _AUTH_SCHEMA_PROBES = (
     (
-        "SELECT id, username, role, password_hash, salt, iterations, is_active, "
+        "SELECT id, username, display_name, role, password_hash, salt, iterations, is_active, "
         "password_default, created_at, updated_at, last_login_at FROM accounts WHERE 1=0"
     ),
     (
@@ -59,6 +60,7 @@ class AuthIdentity:
     role: AuthRole
     username: str
     expires_at: str
+    display_name: str = ""
     password_default: bool = False
 
 
@@ -143,6 +145,7 @@ class AuthService:
             username=clean_username,
             expires_at=iso(expires_at),
             password_default=bool(int(row["password_default"])),
+            display_name=str(row.get("display_name") or ""),
         )
         return LoginResult(token=token, identity=identity)
 
@@ -154,6 +157,7 @@ class AuthService:
         stmt = (
             select(
                 accounts.c.username,
+                accounts.c.display_name,
                 accounts.c.id,
                 accounts.c.role,
                 accounts.c.is_active,
@@ -175,6 +179,7 @@ class AuthService:
             role=_role(row["role"]),
             username=str(row["username"]),
             expires_at=str(row["expires_at"]),
+            display_name=str(row.get("display_name") or ""),
             password_default=bool(int(row["password_default"])),
         )
 
@@ -197,6 +202,7 @@ class AuthService:
         password: str,
         role: AuthRole,
         *,
+        display_name: str = "",
         password_default: bool = False,
         allow_dev_default: bool = False,
     ) -> None:
@@ -206,6 +212,7 @@ class AuthService:
             clean_username,
             password,
             role,
+            display_name=display_name,
             password_default=password_default,
             allow_dev_default=allow_dev_default,
         )
@@ -216,6 +223,7 @@ class AuthService:
         password: str,
         role: AuthRole,
         *,
+        display_name: str = "",
         password_default: bool = False,
         allow_dev_default: bool = False,
     ) -> None:
@@ -232,6 +240,7 @@ class AuthService:
             conn.execute(
                 accounts.insert().values(
                     username=clean_username,
+                    display_name=display_name.strip()[:120],
                     role=role,
                     password_hash=password_hash,
                     salt=salt,
@@ -368,12 +377,24 @@ class AuthService:
                     )
             return changed
 
+    def set_display_name(self, username: str, display_name: str) -> bool:
+        self.ensure_ready()
+        clean_username = username.strip()
+        with self._engine.begin() as conn:
+            result = conn.execute(
+                accounts.update()
+                .where(accounts.c.username == clean_username)
+                .values(display_name=display_name.strip()[:120], updated_at=iso(utc_now()))
+            )
+            return int(result.rowcount or 0) > 0
+
     def list_accounts(self) -> list[dict[str, object]]:
         self.ensure_ready()
         with self._engine.begin() as conn:
             rows = conn.execute(
                 select(
                     accounts.c.username,
+                    accounts.c.display_name,
                     accounts.c.id,
                     accounts.c.role,
                     accounts.c.is_active,
@@ -435,6 +456,7 @@ class AuthService:
                 "admin",
                 "admin123",
                 "admin",
+                display_name="Quản trị EcoSort",
                 password_default=True,
                 allow_dev_default=True,
             )
@@ -442,6 +464,7 @@ class AuthService:
                 "user",
                 "user123",
                 "user",
+                display_name="Thành viên EcoSort",
                 password_default=True,
                 allow_dev_default=True,
             )
@@ -456,6 +479,7 @@ class AuthService:
         password: str,
         role: AuthRole,
         *,
+        display_name: str = "",
         password_default: bool = False,
         allow_dev_default: bool = False,
     ) -> None:
@@ -468,6 +492,7 @@ class AuthService:
                 username,
                 password,
                 role,
+                display_name=display_name,
                 password_default=password_default,
                 allow_dev_default=allow_dev_default,
             )
@@ -478,6 +503,10 @@ class AuthService:
             if "password_default" not in cols:
                 conn.execute(
                     text("ALTER TABLE accounts ADD COLUMN password_default INTEGER DEFAULT 0")
+                )
+            if "display_name" not in cols:
+                conn.execute(
+                    text("ALTER TABLE accounts ADD COLUMN display_name VARCHAR DEFAULT ''")
                 )
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id)"))
@@ -491,7 +520,13 @@ class AuthService:
                 if _auth_seed_requested():
                     self._seed_configured_accounts()
                 return
-            metadata.create_all(self._engine)
+            try:
+                metadata.create_all(self._engine)
+            except OperationalError as exc:
+                if "already exists" not in str(exc).lower():
+                    raise
+                if not _remote_auth_schema_ready(self._engine):
+                    raise
             self._ensure_columns()
             self._seed_configured_accounts()
 
@@ -542,6 +577,8 @@ def account_auth_is_configured() -> bool:
     if configured_auth_database_url():
         return True
     if _auth_seed_requested():
+        return True
+    if os.getenv(AUTH_DB_ENV, "").strip():
         return True
     db_path = configured_auth_db_path()
     if not db_path.exists():

@@ -38,6 +38,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.agent.ai_chat_service import (
     DEFAULT_ADMIN_PROFILE,
+    DEFAULT_DEEPSEEK_MODEL,
     DEFAULT_USER_PROFILE,
     build_chat_response,
     local_chat_intent,
@@ -212,6 +213,7 @@ from app.core.waste_categories import (
     canonical_class_name,
     category_for_class,
     default_class_id_for_name,
+    normalize_mapping_to_three_bins,
 )
 from app.core.web_source_discovery import discover_web_sources
 from app.utils.dataset_import import import_yolo_dataset_to_queue
@@ -313,11 +315,13 @@ def create_app(
             role=identity.role,
             account_id=identity.account_id,
             username=identity.username,
+            display_name=identity.display_name,
             capabilities=AuthContext(
                 role=identity.role,
                 auth_required=True,
                 account_id=identity.account_id,
                 username=identity.username,
+                display_name=identity.display_name,
                 token_source="session",
                 session_expires_at=identity.expires_at,
                 password_default=identity.password_default,
@@ -602,6 +606,7 @@ def create_app(
                 payload.username,
                 payload.password,
                 payload.role,
+                display_name=payload.display_name,
                 password_default=True,
             )
         except PasswordPolicyError as exc:
@@ -1524,11 +1529,16 @@ def create_app(
     async def websocket_live(websocket: WebSocket) -> None:
         auth_header = websocket.headers.get("authorization", "")
         query_token = websocket.query_params.get("token", "")
+        stream_token = websocket.query_params.get("stream_token", "")
         try:
-            context = authenticate_token_values(
-                authorization=auth_header,
-                query_token=query_token,
-            )
+            if stream_token:
+                _require_stream_token(query_token=None, stream_token=stream_token)
+                context = AuthContext(role="admin", auth_required=True, token_source="stream")
+            else:
+                context = authenticate_token_values(
+                    authorization=auth_header,
+                    query_token=query_token,
+                )
         except HTTPException:
             await websocket.close(code=1008)
             return
@@ -1572,6 +1582,7 @@ def _auth_me_response(context: AuthContext) -> AuthMeResponse:
         auth_required=context.auth_required,
         account_id=context.account_id,
         username=context.username,
+        display_name=context.display_name,
         token_source=context.token_source,
         session_expires_at=context.session_expires_at,
         password_default=context.password_default,
@@ -1641,7 +1652,7 @@ def _user_chat_quota_response(quota: ChatQuota) -> AiChatResponse:
         generated_at=datetime.now().isoformat(),
         available=False,
         provider="local",
-        model="",
+        model=DEFAULT_DEEPSEEK_MODEL,
         role="user",
         profile=DEFAULT_USER_PROFILE,
         message=(
@@ -1665,7 +1676,7 @@ def _user_advisor_quota_response(range_days: int, quota: ChatQuota) -> UserAdvis
         generated_at=datetime.now().isoformat(),
         available=False,
         provider="local",
-        model="",
+        model=DEFAULT_DEEPSEEK_MODEL,
         profile=DEFAULT_USER_PROFILE,
         range_days=clean_range,  # type: ignore[arg-type]
         message=(
@@ -1684,6 +1695,7 @@ def _account_to_dto(row: dict[str, object]) -> AccountDTO:
     return AccountDTO(
         id=int(row.get("id") or 0),
         username=str(row.get("username") or ""),
+        display_name=str(row.get("display_name") or ""),
         role=role,  # type: ignore[arg-type]
         is_active=bool(int(row.get("is_active") or 0)),
         password_default=bool(int(row.get("password_default") or 0)),
@@ -2257,12 +2269,14 @@ def _clean_mappings(mappings: list[ClassMapping]) -> list[ClassMapping]:
         if len(command) != 1:
             raise HTTPException(status_code=422, detail="Command UART phải đúng 1 ký tự")
         cleaned.append(
-            mapping.model_copy(
-                update={
-                    "class_name": class_name,
-                    "command": command,
-                    "bin_index": int(mapping.bin_index),
-                }
+            normalize_mapping_to_three_bins(
+                mapping.model_copy(
+                    update={
+                        "class_name": class_name,
+                        "command": command,
+                        "bin_index": int(mapping.bin_index),
+                    }
+                )
             )
         )
     return cleaned

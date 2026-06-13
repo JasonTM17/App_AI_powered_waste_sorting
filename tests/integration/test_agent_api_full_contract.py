@@ -489,9 +489,15 @@ def test_admin_accounts_knowledge_and_chat_contract(tmp_path):
         created = client.post(
             "/api/admin/accounts",
             headers=admin_headers,
-            json={"username": "qa-created-user", "password": "qa-created-pass-123", "role": "user"},
+            json={
+                "username": "qa-created-user",
+                "display_name": "QA Created User",
+                "password": "qa-created-pass-123",
+                "role": "user",
+            },
         )
         assert created.status_code == 200, created.text
+        assert created.json()["display_name"] == "QA Created User"
         reset = client.post(
             "/api/admin/accounts/qa-created-user/reset-password",
             headers=admin_headers,

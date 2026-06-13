@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.core.config import AppConfig, ClassMapping
 
@@ -35,6 +35,7 @@ class AuthMeResponse(BaseModel):
     auth_required: bool = False
     account_id: int | None = None
     username: str | None = None
+    display_name: str = ""
     token_source: str = "dev"
     session_expires_at: str | None = None
     password_default: bool = False
@@ -50,6 +51,7 @@ class AuthLoginResponse(BaseModel):
     role: Literal["admin", "user"]
     account_id: int | None = None
     username: str
+    display_name: str = ""
     capabilities: list[str] = Field(default_factory=list)
     expires_at: str
     password_default: bool = False
@@ -87,6 +89,7 @@ class AudioVoicePackStatusResponse(BaseModel):
 class AccountDTO(BaseModel):
     id: int
     username: str
+    display_name: str = ""
     role: Literal["admin", "user"]
     is_active: bool
     password_default: bool = False
@@ -337,6 +340,7 @@ class AccountCreateRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=80)
     password: str = Field(..., min_length=8, max_length=200)
     role: Literal["admin", "user"]
+    display_name: str = Field(default="", max_length=120)
 
 
 class AccountPasswordResetRequest(BaseModel):
@@ -908,6 +912,18 @@ class HardwareMp3TestRequest(BaseModel):
         "MODE_QUERY",
     ]
     value: int | None = None
+
+    @model_validator(mode="after")
+    def validate_value_for_command(self) -> HardwareMp3TestRequest:
+        if self.command == "VOL":
+            if self.value is None or not 0 <= int(self.value) <= 30:
+                raise ValueError("VOL requires value between 0 and 30")
+        elif self.command in {"PLAY", "PLAYVOL"}:
+            if self.value is None or not 1 <= int(self.value) <= 255:
+                raise ValueError(f"{self.command} requires value between 1 and 255")
+        elif self.value is not None:
+            raise ValueError(f"{self.command} does not accept value")
+        return self
 
 
 class ServoAngleTestRequest(BaseModel):

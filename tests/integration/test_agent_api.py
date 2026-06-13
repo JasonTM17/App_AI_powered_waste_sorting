@@ -41,7 +41,6 @@ def _clear_agent_auth_env(monkeypatch, tmp_path):
     monkeypatch.delenv("DEEPSEEK_BASE_URL", raising=False)
     monkeypatch.delenv("DEEPSEEK_MODEL", raising=False)
     monkeypatch.delenv("DEEPSEEK_TIMEOUT_SECONDS", raising=False)
-    monkeypatch.setenv("TRASH_SORTER_AUTH_DB", str(tmp_path / "auth.db"))
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setattr(runtime_module, "list_serial_ports", lambda: [])
 
@@ -381,6 +380,7 @@ def test_auth_dev_default_accounts_login_logout_and_gate_roles(tmp_path, monkeyp
         admin_body = admin_login.json()
         assert admin_body["role"] == "admin"
         assert admin_body["username"] == "admin"
+        assert admin_body["display_name"] == "Quản trị EcoSort"
         assert admin_body["password_default"] is True
         assert "password_hash" not in json.dumps(admin_body)
         admin_token = admin_body["token"]
@@ -398,6 +398,7 @@ def test_auth_dev_default_accounts_login_logout_and_gate_roles(tmp_path, monkeyp
 
         user_login = client.post("/api/auth/login", json={"username": "user", "password": "user123"})
         assert user_login.status_code == 200
+        assert user_login.json()["display_name"] == "Thành viên EcoSort"
         user_token = user_login.json()["token"]
         assert client.get(
             "/api/user/analytics?range_days=30",
@@ -439,7 +440,7 @@ def test_auth_production_does_not_seed_default_passwords_without_env(tmp_path, m
     try:
         login = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
         assert login.status_code == 503
-        assert client.get("/api/status").status_code == 200
+        assert client.get("/api/status").status_code == 401
     finally:
         runtime.close()
 
@@ -506,14 +507,24 @@ def test_admin_account_management_resets_and_disables_accounts(tmp_path, monkeyp
         created = client.post(
             "/api/admin/accounts",
             headers=headers,
-            json={"username": "worker", "password": "worker-pass-123", "role": "user"},
+            json={
+                "username": "worker",
+                "display_name": "Worker One",
+                "password": "worker-pass-123",
+                "role": "user",
+            },
         )
         assert created.status_code == 200
+        assert created.json()["display_name"] == "Worker One"
         assert created.json()["password_default"] is True
 
         worker_login = client.post("/api/auth/login", json={"username": "worker", "password": "worker-pass-123"})
         assert worker_login.status_code == 200
+        assert worker_login.json()["display_name"] == "Worker One"
         worker_token = worker_login.json()["token"]
+        assert client.get("/api/me", headers={"Authorization": f"Bearer {worker_token}"}).json()[
+            "display_name"
+        ] == "Worker One"
 
         reset = client.post(
             "/api/admin/accounts/worker/reset-password",
@@ -627,6 +638,11 @@ def test_agent_role_tokens_gate_admin_routes(tmp_path, monkeypatch):
         assert client.get("/api/camera/stream?token=user-secret").status_code == 403
         assert client.get("/api/camera/stream?stream_token=invalid-ticket").status_code == 403
         with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(
+            "/ws/live?stream_token=invalid-ticket"
+        ):
+            pass
+        assert exc_info.value.code == 1008
+        with pytest.raises(WebSocketDisconnect) as exc_info, client.websocket_connect(
             "/ws/live?token=user-secret"
         ):
             pass
@@ -650,6 +666,10 @@ def test_agent_role_tokens_gate_admin_routes(tmp_path, monkeypatch):
         assert ticket_body["token"]
         assert "expires_at" in ticket_body
         assert "admin-secret" not in json.dumps(ticket_body)
+        with client.websocket_connect(f"/ws/live?stream_token={ticket_body['token']}") as websocket:
+            live_payload = websocket.receive_json()
+            assert "status" in live_payload
+            assert "detections" in live_payload
         legacy_status = client.get("/api/status?token=legacy-secret")
         assert legacy_status.status_code == 200
     finally:
@@ -868,6 +888,51 @@ def test_hardware_mp3_test_api_is_admin_only_and_uses_runtime_uart(tmp_path, mon
             "message": "ACK:MP3:VOL:30 from COM8",
         }
         assert fake.commands == [("VOL", 30)]
+    finally:
+        runtime.close()
+
+
+def test_hardware_mp3_test_rejects_invalid_value_before_runtime(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRASH_SORTER_ADMIN_TOKEN", "admin-secret")
+    client, runtime = _client(tmp_path)
+
+    class FakeUart:
+        connected = True
+
+        def __init__(self):
+            self.commands: list[tuple[str, int | None]] = []
+
+        def send_mp3_test(self, command: str, value: int | None = None):
+            self.commands.append((command, value))
+            raise AssertionError("runtime should not receive invalid mp3 test payload")
+
+        def close(self):
+            return None
+
+    fake = FakeUart()
+    runtime.cfg.uart.port = "COM8"
+    runtime._uart = fake  # type: ignore[assignment]
+    try:
+        missing = client.post(
+            "/api/hardware/mp3-test",
+            json={"command": "VOL"},
+            headers={"Authorization": "Bearer admin-secret"},
+        )
+        out_of_range = client.post(
+            "/api/hardware/mp3-test",
+            json={"command": "PLAY", "value": 999},
+            headers={"Authorization": "Bearer admin-secret"},
+        )
+        unexpected = client.post(
+            "/api/hardware/mp3-test",
+            json={"command": "RESET", "value": 1},
+            headers={"Authorization": "Bearer admin-secret"},
+        )
+
+        assert missing.status_code == 422
+        assert out_of_range.status_code == 422
+        assert unexpected.status_code == 422
+        assert fake.commands == []
     finally:
         runtime.close()
 
@@ -1132,6 +1197,31 @@ def test_runtime_autoselects_single_usb_uart_port(tmp_path, monkeypatch):
         saved = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
         assert saved["uart"]["port"] == "COM8"
         assert runtime.status(include_devices=False).current_port == "COM8"
+    finally:
+        runtime.close()
+
+
+def test_runtime_uart_autoselect_can_be_disabled_for_safe_e2e(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRASH_SORTER_DISABLE_UART_AUTO_SELECT", "1")
+    monkeypatch.setattr(
+        runtime_module,
+        "list_serial_ports",
+        lambda: [
+            {"device": "COM8", "name": "USB-SERIAL CH340", "hwid": "USB VID:1A86", "is_usb": True},
+        ],
+    )
+
+    class FailingSender:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("UART sender must not be opened")
+
+    monkeypatch.setattr(runtime_module, "ThreadUartSender", FailingSender)
+    runtime = _runtime(tmp_path)
+    try:
+        assert runtime.cfg.uart.port == ""
+        assert runtime.status(include_devices=False).current_port == ""
+        saved = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
+        assert saved["uart"]["port"] == ""
     finally:
         runtime.close()
 
@@ -2756,8 +2846,10 @@ def test_mappings_api_returns_seeded_defaults_and_saves_changes(tmp_path, monkey
         put = client.put("/api/mappings", json=edited)
         assert put.status_code == 200
         saved = put.json()["mappings"]
-        assert saved[0]["command"] == "Z"
-        assert saved[0]["bin_index"] == 9
+        assert saved[0]["command"] in {"O", "R", "I"}
+        assert saved[0]["bin_index"] in {1, 2, 3}
+        assert saved[0]["command"] != "Z"
+        assert saved[0]["bin_index"] != 9
     finally:
         runtime.close()
 

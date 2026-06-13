@@ -24,6 +24,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 
 from app.agent.auth_service import create_database_engine, normalize_database_url
 from app.agent.schema_readiness import SchemaReadiness
@@ -791,7 +792,9 @@ class OperationsStore:
             _SCHEMA_READINESS.reset(init_key)
 
         def _bootstrap() -> None:
-            metadata.create_all(self._engine)
+            _create_tables_if_missing(self._engine)
+            if not _sqlite_schema_ready(self._engine):
+                raise RuntimeError("Operations schema bootstrap did not create all required tables")
             with self._engine.begin() as conn:
                 conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bin_stations_active ON bin_stations(active)"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS idx_bins_station ON bins(station_id)"))
@@ -819,11 +822,20 @@ class OperationsStore:
 
 
 
+def _create_tables_if_missing(engine: Engine) -> None:
+    for table in metadata.sorted_tables:
+        try:
+            table.create(engine, checkfirst=True)
+        except OperationalError as exc:
+            if "already exists" not in str(exc).lower():
+                raise
+
+
 def _sqlite_schema_ready(engine: Engine) -> bool:
     if engine.dialect.name != "sqlite":
         return True
     inspector = inspect(engine)
-    required_tables = ("bin_stations", "bins", "alerts", "collection_schedules")
+    required_tables = tuple(metadata.tables)
     return all(inspector.has_table(table_name) for table_name in required_tables)
 
 

@@ -58,6 +58,7 @@ class AuthContext:
     account_id: int | None = None
     token_source: str = "dev"
     username: str | None = None
+    display_name: str = ""
     session_expires_at: str | None = None
     password_default: bool = False
 
@@ -111,6 +112,7 @@ def authenticate_token_values(
                 account_id=session.account_id,
                 token_source="session",
                 username=session.username,
+                display_name=session.display_name,
                 session_expires_at=session.expires_at,
                 password_default=session.password_default,
             )

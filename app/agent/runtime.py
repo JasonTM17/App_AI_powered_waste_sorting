@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from contextlib import suppress
 from datetime import datetime
@@ -149,6 +150,12 @@ class ThreadUartSender:
             return False
 
     def send(self, track_id, command, conf) -> None:
+        self._send_sort(track_id, command, conf, silent=False)
+
+    def send_silent(self, track_id, command, conf) -> None:
+        self._send_sort(track_id, command, conf, silent=True)
+
+    def _send_sort(self, track_id, command, conf, *, silent: bool) -> None:
         if not self.connected or self._serial is None:
             return
         with self._lock:
@@ -156,7 +163,14 @@ class ThreadUartSender:
             status = "no_ack"
             try:
                 self._drain_responses()
-                self._serial.write(encode_sort(command, conf, protocol=self.protocol))
+                self._serial.write(
+                    encode_sort(
+                        command,
+                        conf,
+                        protocol=self.protocol,
+                        silent=silent,
+                    )
+                )
                 if not self.expects_ack:
                     status = "ok"
                     rtt_ms = int((time.time() - t0) * 1000)
@@ -1073,6 +1087,22 @@ class AgentRuntime:
             model_path = resource_path(self.cfg.model.path)
             model = YOLO(str(model_path))
             names = {int(k): str(v) for k, v in dict(model.names).items()}
+            specialist = self.cfg.model.specialist
+            if specialist.enabled:
+                specialist_path = resource_path(specialist.path)
+                if specialist_path.exists():
+                    specialist_model = YOLO(str(specialist_path))
+                    specialist_names = {
+                        int(k): str(v) for k, v in dict(specialist_model.names).items()
+                    }
+                    wanted = set(specialist.class_thresholds)
+                    names.update(
+                        {
+                            class_id: class_name
+                            for class_id, class_name in specialist_names.items()
+                            if class_name in wanted
+                        }
+                    )
         except Exception as e:
             logger.warning("agent model class scan failed: {}", e)
             names = {idx: mapping.class_name for idx, mapping in enumerate(self.cfg.mappings)}
@@ -1088,6 +1118,7 @@ class AgentRuntime:
             or self.cfg.model.device != cfg.model.device
             or self.cfg.model.input_size != cfg.model.input_size
             or self.cfg.model.half_precision != cfg.model.half_precision
+            or self.cfg.model.specialist != cfg.model.specialist
         )
         if was_running:
             self.stop_camera()
@@ -1798,6 +1829,7 @@ class AgentRuntime:
                 iou=self.cfg.model.iou_threshold,
                 imgsz=self.cfg.model.input_size,
                 half=self.cfg.model.half_precision,
+                specialist=self.cfg.model.specialist,
             )
             self._pipeline = Pipeline(
                 self.cfg,
@@ -1868,6 +1900,10 @@ class AgentRuntime:
 
     def _auto_select_uart_if_blank(self) -> None:
         if self.cfg.uart.port.strip():
+            return
+        if os.environ.get("TRASH_SORTER_DISABLE_UART_AUTO_SELECT") == "1":
+            self._uart_warning = f"{UART_OFF_NO_SEND_TEXT}: auto-select UART disabled."
+            logger.info("agent uart auto-select disabled by environment")
             return
         result = select_single_usb_serial_port(list_serial_ports())
         self._uart_warning = result.message
