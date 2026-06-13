@@ -143,6 +143,7 @@ def main() -> int:
         controller.set_actuation_test_mode(enabled)
         _sync_actuation_test_mode(controller.is_actuation_test_mode_enabled())
 
+    controller.actuation_mode_changed.connect(_sync_actuation_test_mode)
     window.live_page.actuation_test_mode_toggled.connect(_on_actuation_test_mode_request)
 
     def _on_speaker_output_mode_request(mode: str) -> None:
@@ -150,8 +151,12 @@ def main() -> int:
         new_cfg.speaker.output_mode = mode
         controller.update_config(new_cfg)
         _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
-        if controller.cfg.speaker.output_mode == "computer_speaker":
-            controller.test_laptop_voice("warning")
+
+    def _on_speaker_voice_gender_request(gender: str) -> None:
+        new_cfg = controller.cfg.model_copy(deep=True)
+        new_cfg.speaker.voice_gender = gender
+        controller.update_config(new_cfg)
+        _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
 
     window.live_page.speaker_output_mode_changed.connect(_on_speaker_output_mode_request)
 
@@ -231,6 +236,7 @@ def main() -> int:
         window.set_fps(fps)
         guard_status = controller.dispatch_status()
         window.live_page.set_dispatch_status(guard_status)
+        window.live_page.set_auto_sort_state(controller.auto_sort_state())
         warning_text = multi_object_warning_text(
             guard_status,
             controller.cfg.dispatch_guard.multi_class_warning_text,
@@ -333,7 +339,9 @@ def main() -> int:
         page.test_camera_requested.connect(controller.test_camera)
         page.test_uart_requested.connect(controller.test_uart_ping)
         page.test_hardware_requested.connect(controller.test_hardware_command)
-        page.test_voice_requested.connect(controller.test_laptop_voice)
+        page.test_voice_requested.connect(controller.test_audio_event)
+        page.speaker_output_mode_changed.connect(_on_speaker_output_mode_request)
+        page.speaker_voice_gender_changed.connect(_on_speaker_voice_gender_request)
         page.actuation_test_mode_changed.connect(_on_actuation_test_mode_request)
         page.reload_model_requested.connect(controller.reload_model)
         controller.test_uart_result.connect(page.set_uart_test_result)

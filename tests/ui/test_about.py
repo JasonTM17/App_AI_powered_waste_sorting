@@ -14,4 +14,4 @@ def test_about_constructs(qtbot):
 def test_about_no_model(qtbot):
     dlg = AboutDialog(None, 640)
     qtbot.addWidget(dlg)
-    assert dlg is not None
+    assert "Trash Sorter Pro" in dlg.windowTitle()

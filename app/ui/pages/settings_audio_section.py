@@ -6,7 +6,6 @@ from PySide6.QtCore import QSize, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QButtonGroup,
-    QDoubleSpinBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -22,6 +21,7 @@ from app.core.voice_pack import (
     voice_gender_label,
     voice_pack_status,
 )
+from app.ui.widgets.safe_inputs import SafeDoubleSpinBox
 from app.utils.paths import resource_path
 
 
@@ -31,7 +31,9 @@ def _icon(name: str) -> QIcon:
 
 
 class AudioSettingsSection(QWidget):
-    voice_test_requested = Signal(str)
+    voice_test_requested = Signal(str, str, str)
+    output_mode_changed = Signal(str)
+    voice_gender_changed = Signal(str)
 
     def __init__(self, cfg: AppConfig, parent=None):
         super().__init__(parent)
@@ -70,7 +72,7 @@ class AudioSettingsSection(QWidget):
         cooldown_row = QHBoxLayout()
         cooldown_row.setSpacing(10)
         cooldown_row.addWidget(QLabel("Cooldown loa PC"))
-        self.speaker_cooldown = QDoubleSpinBox()
+        self.speaker_cooldown = SafeDoubleSpinBox()
         self.speaker_cooldown.setRange(0.0, 60.0)
         self.speaker_cooldown.setDecimals(1)
         self.speaker_cooldown.setSingleStep(0.5)
@@ -100,7 +102,11 @@ class AudioSettingsSection(QWidget):
             button.setIcon(_icon("speaker"))
             button.setIconSize(QSize(18, 18))
             button.clicked.connect(
-                lambda _checked=False, cmd=command: self.voice_test_requested.emit(cmd)
+                lambda _checked=False, cmd=command: self.voice_test_requested.emit(
+                    cmd,
+                    self.output_mode(),
+                    self.voice_gender(),
+                )
             )
             tests.addWidget(button, index // 2, index % 2)
         layout.addLayout(tests)
@@ -117,6 +123,9 @@ class AudioSettingsSection(QWidget):
         button.setObjectName("segmented")
         button.setIcon(_icon("hardware" if mode == "hardware" else "speaker"))
         button.setIconSize(QSize(18, 18))
+        button.clicked.connect(
+            lambda _checked=False: self.output_mode_changed.emit(self.output_mode())
+        )
         self._group.addButton(button, 1 if mode == "computer_speaker" else 0)
         return button
 
@@ -126,6 +135,9 @@ class AudioSettingsSection(QWidget):
         button.setObjectName("segmented")
         button.setIcon(_icon("speaker"))
         button.setIconSize(QSize(18, 18))
+        button.clicked.connect(
+            lambda _checked=False: self.voice_gender_changed.emit(self.voice_gender())
+        )
         self._gender_group.addButton(button, 1 if gender == "male" else 0)
         return button
 
@@ -154,15 +166,15 @@ class AudioSettingsSection(QWidget):
         self.speaker_cooldown.setEnabled(laptop_enabled)
         self.female_voice_button.setEnabled(True)
         self.male_voice_button.setEnabled(True)
-        self.status_label.setText(self._voice_status_text())
+        status_text = self._voice_status_text()
+        self.status_label.setText(status_text)
+        self.status_label.setVisible(bool(status_text))
 
     def _voice_status_text(self) -> str:
         status = voice_pack_status(self.voice_gender())
-        ready = sum(1 for ok in status.values() if ok)
-        total = len(status)
         missing = [name for name, ok in status.items() if not ok]
-        label = voice_gender_label(self.voice_gender()).capitalize()
         if not missing:
-            return f"Loa laptop {label}: sẵn sàng ({ready}/{total} file)."
+            return ""
+        label = voice_gender_label(self.voice_gender()).capitalize()
         missing_labels = [AUDIO_EVENT_LABELS.get(name, name) for name in missing]
-        return f"Loa laptop {label}: thiếu {len(missing)} file: {', '.join(missing_labels)}."
+        return f"{label}: thiếu file âm thanh: {', '.join(missing_labels)}."

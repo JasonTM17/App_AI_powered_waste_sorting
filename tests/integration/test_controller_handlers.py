@@ -150,8 +150,8 @@ class _SpeakerSpy:
         self.commands.append(command)
         return True
 
-    def preview_event(self, event_key):
-        self.events.append(event_key)
+    def preview_event(self, event_key, *, voice_gender=None):
+        self.events.append((event_key, voice_gender))
         return True
 
 
@@ -285,6 +285,33 @@ def test_uart_blank_port_retries_then_auto_selects_usb_port(tmp_path, monkeypatc
     assert saved["uart"]["port"] == "COM8"
 
 
+def test_uart_autoselect_env_guard_prevents_desktop_worker_start(tmp_path, monkeypatch):
+    _FakeUartWorker.instances.clear()
+    monkeypatch.setenv("TRASH_SORTER_DISABLE_UART_AUTO_SELECT", "1")
+    monkeypatch.setattr(
+        serial_enum,
+        "list_serial_ports",
+        lambda: [
+            {"device": "COM8", "name": "USB-SERIAL CH340", "hwid": "USB VID:PID=1A86:7523", "is_usb": True}
+        ],
+    )
+    monkeypatch.setattr(controller_module, "UartWorker", _FakeUartWorker)
+    cfg = AppConfig()
+    cfg.uart.port = ""
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    spy = _PipelineSpy()
+    controller._pipeline = spy
+    scheduled: list[bool] = []
+    controller._schedule_uart_retry = lambda: scheduled.append(True)  # type: ignore[method-assign]
+
+    controller._start_uart_if_configured()
+
+    assert _FakeUartWorker.instances == []
+    assert scheduled == []
+    assert spy.uart is None
+    assert controller.cfg.uart.port == ""
+
+
 def test_controller_start_schedules_model_load_without_blocking(tmp_path, monkeypatch):
     _FakeModelLoadWorker.instances.clear()
     monkeypatch.setattr(serial_enum, "list_serial_ports", lambda: [])
@@ -386,9 +413,14 @@ def test_update_config_starts_usb_uart_and_updates_pipeline(tmp_path, monkeypatc
 
 def test_actuation_test_mode_controls_pipeline_dispatch(tmp_path):
     cfg = AppConfig()
+    cfg.roi.enabled = True
+    cfg.roi.width = 640
+    cfg.roi.height = 480
     controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
     spy = _PipelineSpy()
     controller._pipeline = spy
+    controller.is_camera_running = lambda: True  # type: ignore[method-assign]
+    controller.is_uart_connected = lambda: True  # type: ignore[method-assign]
 
     controller.set_actuation_test_mode(True)
 
@@ -419,9 +451,50 @@ def test_laptop_voice_warning_previews_warning_audio(tmp_path):
         controller.stop()
 
     assert speaker.warning_calls == 0
-    assert speaker.events == ["multi_object_warning"]
+    assert speaker.events == [("multi_object_warning", "female")]
     assert speaker.commands == []
     assert results and results[0][0] is True
+
+
+def test_hardware_audio_event_uses_audio_only_uart_command(tmp_path):
+    class _AudioUart:
+        is_connected = True
+
+        def __init__(self):
+            self.sent = []
+
+        def isRunning(self):  # noqa: N802
+            return True
+
+        def send_audio_test(self, track_id, track):
+            self.sent.append((track_id, track))
+
+    cfg = AppConfig()
+    cfg.uart.port = "COM8"
+    cfg.speaker.output_mode = "hardware"
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    uart = _AudioUart()
+    controller._uart = uart  # type: ignore[assignment]
+
+    controller.test_audio_event("sort_R", "hardware", "female")
+
+    assert uart.sent == [(-2, 4)]
+    assert controller._pending_uart_tests[-2][:3] == ("AUDIO:4", "AUDIO:4\n", "COM8")
+
+
+def test_auto_sort_rejects_enable_until_camera_uart_and_roi_are_ready(tmp_path):
+    cfg = AppConfig()
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    spy = _PipelineSpy()
+    controller._pipeline = spy
+    results = []
+    controller.test_uart_result.connect(lambda ok, msg: results.append((ok, msg)))
+
+    controller.set_actuation_test_mode(True)
+
+    assert controller.is_actuation_test_mode_enabled() is False
+    assert spy.dispatch_enabled is False
+    assert results and results[-1][0] is False
 
 
 def test_capture_reviewed_camera_sample_writes_trainable_item(tmp_path, monkeypatch):
@@ -516,6 +589,7 @@ def test_start_learn_now_candidate_training_uses_reviewed_textile_samples(tmp_pa
     assert calls == [("Textile", "micro")]
     assert results and results[0][0] is True
     assert statuses
+    controller.stop()
 
 
 def test_start_learn_now_candidate_training_blocks_when_actuation_enabled(tmp_path, monkeypatch):
@@ -536,3 +610,29 @@ def test_start_learn_now_candidate_training_blocks_when_actuation_enabled(tmp_pa
     assert results
     assert results[0][0] is False
     assert "Arduino" in results[0][1]
+
+
+def test_learn_now_status_worker_discards_stale_class_result(tmp_path, monkeypatch, qtbot):
+    import time
+
+    cfg = AppConfig()
+    cfg.capture.output_dir = str(tmp_path / "dataset")
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    calls: list[str] = []
+    statuses: list[object] = []
+
+    def fake_status(_queue_dir, class_name, _catalog_path):
+        calls.append(class_name)
+        time.sleep(0.08 if class_name == "Pen" else 0.01)
+        return {"selected": {"class_name": class_name}}
+
+    monkeypatch.setattr(controller_module, "build_selected_learn_now_status", fake_status)
+    controller.learn_now_status_changed.connect(statuses.append)
+
+    controller.refresh_learn_now_status("Pen")
+    controller.refresh_learn_now_status("Textile")
+    qtbot.waitUntil(lambda: bool(statuses), timeout=2000)
+    controller.stop()
+
+    assert calls == ["Pen", "Textile"]
+    assert statuses == [{"selected": {"class_name": "Textile"}}]

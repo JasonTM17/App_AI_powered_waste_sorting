@@ -29,6 +29,10 @@ NAV_ITEMS = ["Live", "Lịch sử", "Mapping", "Data", "Huấn luyện", "Nhật
 NAV_ICONS = ["recycle", "history", "mapping", "capture", "camera", "log", "settings"]
 
 
+def _auto_heavy_page_load_enabled() -> bool:
+    return QGuiApplication.platformName().lower() != "offscreen"
+
+
 class MainWindow(QMainWindow):
     page_created = Signal(int, object)
 
@@ -128,6 +132,8 @@ class MainWindow(QMainWindow):
         self._uart_ok = False
         self._model_ok = False
         self._fps = 0.0
+        self._sync_responsive_shell()
+        self._render_status()
 
         for i in range(len(NAV_ITEMS)):
             QShortcut(
@@ -152,6 +158,7 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
+        self._sync_responsive_shell()
         if hasattr(self, "_grip_br"):
             self._grip_br.move(self.width() - 16, self.height() - 16)
             self._grip_bl.move(0, self.height() - 16)
@@ -247,6 +254,7 @@ class MainWindow(QMainWindow):
         return page
 
     def show_page(self, index: int) -> None:
+        self.sidebar.set_active(index)
         self.ensure_page(index)
         if self.stack.currentIndex() == index:
             self._load_page(index)
@@ -289,6 +297,7 @@ class MainWindow(QMainWindow):
         return SettingsPage(self._cfg)
 
     def _on_stack_changed(self, index: int) -> None:
+        self.sidebar.set_active(index)
         self.ensure_page(index)
         self._load_page(index)
 
@@ -296,7 +305,7 @@ class MainWindow(QMainWindow):
         page = self._page_for_index(index)
         if index == 1 and page is not None:
             page.request_reload()
-        elif index in {3, 4} and page is not None:
+        elif index in {3, 4} and page is not None and _auto_heavy_page_load_enabled():
             page.load_once()
 
     def _minimize_window(self) -> None:
@@ -383,10 +392,33 @@ class MainWindow(QMainWindow):
         self._force_quit = True
         self.close()
 
+    def _sync_responsive_shell(self) -> None:
+        width = self.width()
+        if hasattr(self, "sidebar"):
+            self.sidebar.set_compact(width < 1120)
+        if hasattr(self, "title_bar"):
+            self.title_bar.set_compact(width < 980)
+        if hasattr(self, "status"):
+            compact = width < 760
+            self.status.setFixedHeight(36 if compact else 32)
+            margin = 10 if compact else 16
+            self.status.setContentsMargins(margin, 0, margin, 0)
+            if hasattr(self, "_cam_ok"):
+                self._render_status()
+
     def _render_status(self) -> None:
         def dot(ok: bool) -> str:
             color = "#10B981" if ok else "#EF4444"
             return f'<span style="color:{color}">●</span>'
+        if self.width() < 760:
+            self.status.setText(
+                f"{dot(self._cam_ok)} Cam  &nbsp;•&nbsp;  "
+                f"{dot(self._uart_ok)} UART  &nbsp;•&nbsp;  "
+                f"{dot(self._model_ok)} AI  &nbsp;•&nbsp;  "
+                f"{self._fps:.0f} FPS"
+            )
+            self.status.setTextFormat(Qt.TextFormat.RichText)
+            return
         self.status.setText(
             f"{dot(self._cam_ok)} Camera  &nbsp;•&nbsp;  "
             f"{dot(self._uart_ok)} UART  &nbsp;•&nbsp;  "

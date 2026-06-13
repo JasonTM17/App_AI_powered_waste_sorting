@@ -34,3 +34,28 @@ def test_titlebar_camera_button_emits_toggle(qtbot):
         bar.btn_camera.click()
 
     assert blocker.args == [True]
+
+
+def test_titlebar_compact_keeps_actions_accessible(qtbot):
+    bar = TitleBar(title="X")
+    qtbot.addWidget(bar)
+
+    bar.set_compact(True)
+
+    assert bar.btn_web.text() == ""
+    assert bar.btn_camera.text() == ""
+    assert bar.btn_web.toolTip() == "Mở Web"
+    assert bar.btn_camera.toolTip() == "Bật camera"
+    assert bar.btn_web.maximumWidth() == 44
+    assert bar.btn_camera.maximumWidth() == 44
+
+    with qtbot.waitSignal(bar.web_requested, timeout=500):
+        bar.btn_web.click()
+
+    bar.set_camera_on(True)
+    assert bar.btn_camera.text() == ""
+    assert bar.btn_camera.toolTip() == "Tắt camera"
+
+    bar.set_compact(False)
+    assert bar.btn_web.text() == "Mở Web"
+    assert bar.btn_camera.text() == "Tắt camera"

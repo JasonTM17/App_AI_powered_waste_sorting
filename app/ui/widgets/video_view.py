@@ -22,7 +22,7 @@ class VideoView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setMinimumSize(640, 360)
+        self.setMinimumSize(420, 260)
         self._pixmap: QPixmap | None = None
         self._scaled: QPixmap | None = None
         self._scaled_for_size = (0, 0)

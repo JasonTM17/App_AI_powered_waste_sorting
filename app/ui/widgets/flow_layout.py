@@ -64,7 +64,7 @@ class FlowLayout(QLayout):
     def minimumSize(self):  # noqa: N802
         size = QSize()
         for item in self._item_list:
-            size = size.expandedTo(item.minimumSize())
+            size = size.expandedTo(self._bounded_item_size(item))
         margins = self.contentsMargins()
         size += QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
         return size
@@ -78,20 +78,31 @@ class FlowLayout(QLayout):
         for item in self._item_list:
             space_x = spacing
             space_y = self.verticalSpacing()
-            next_x = x + item.sizeHint().width() + space_x
+            item_size = self._bounded_item_size(item)
+            next_x = x + item_size.width() + space_x
             if next_x - space_x > rect.right() and line_height > 0:
                 x = rect.x()
                 y = y + line_height + space_y
-                next_x = x + item.sizeHint().width() + space_x
+                next_x = x + item_size.width() + space_x
                 line_height = 0
 
             if not test_only:
-                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+                item.setGeometry(QRect(QPoint(x, y), item_size))
 
             x = next_x
-            line_height = max(line_height, item.sizeHint().height())
+            line_height = max(line_height, item_size.height())
 
         return y + line_height - rect.y()
+
+    @staticmethod
+    def _bounded_item_size(item) -> QSize:
+        size = item.sizeHint().expandedTo(item.minimumSize())
+        maximum = item.maximumSize()
+        if maximum.width() >= 0:
+            size.setWidth(min(size.width(), maximum.width()))
+        if maximum.height() >= 0:
+            size.setHeight(min(size.height(), maximum.height()))
+        return size
 
     def smartSpacing(self, pm):  # noqa: N802
         parent = self.parent()

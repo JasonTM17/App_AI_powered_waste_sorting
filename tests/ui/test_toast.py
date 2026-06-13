@@ -18,4 +18,4 @@ def test_toast_invalid_level_falls_back(qtbot):
     parent = QWidget()
     qtbot.addWidget(parent)
     t = Toast(parent, "Hi", level="unknown")
-    assert t is not None
+    assert t.objectName() == "toast"

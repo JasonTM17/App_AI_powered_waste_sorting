@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -28,6 +27,7 @@ from app.core.waste_categories import (
     category_for_class,
     category_for_command,
 )
+from app.ui.widgets.safe_inputs import SafeSpinBox
 
 _DEFAULT_DOT = "#64748B"
 
@@ -150,7 +150,7 @@ class MappingRow(QWidget):
         layout.addWidget(self.cmd_edit)
 
         layout.addWidget(QLabel("Bin"))
-        self.bin_spin = QSpinBox()
+        self.bin_spin = SafeSpinBox()
         self.bin_spin.setRange(1, 9)
         self.bin_spin.setValue(mapping.bin_index)
         self.bin_spin.setFixedWidth(58)

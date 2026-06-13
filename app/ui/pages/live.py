@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import time
+
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
+    QAbstractScrollArea,
+    QBoxLayout,
     QButtonGroup,
     QFrame,
     QHBoxLayout,
@@ -19,10 +23,15 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.events import Detection
-from app.core.voice_pack import normalize_voice_gender, voice_gender_label, voice_pack_status
+from app.core.voice_pack import normalize_voice_gender, voice_pack_status
 from app.ui.widgets.stat_card import StatCard
 from app.ui.widgets.video_view import VideoView
 from app.utils.paths import resource_path
+
+LIVE_CONTROL_SIZE = QSize(176, 56)
+SPEAKER_BUTTON_SIZE = QSize(182, 48)
+DETECTION_COALESCE_SECONDS = 1.0
+DETECTION_STREAM_LIMIT = 50
 
 
 def _icon(name: str) -> QIcon:
@@ -33,6 +42,24 @@ def _icon(name: str) -> QIcon:
 def _set_button_icon(button: QPushButton, name: str) -> None:
     button.setIcon(_icon(name))
     button.setIconSize(QSize(18, 18))
+
+
+def _mark_live_action_button(button: QPushButton) -> None:
+    button.setProperty("liveAction", True)
+    button.setFixedSize(LIVE_CONTROL_SIZE)
+    button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+
+
+def _dispatch_pill_style(*, color: str, border: str, background: str) -> str:
+    return (
+        "padding: 0;"
+        "border-radius: 8px;"
+        "font-size: 14px;"
+        "font-weight: 700;"
+        f"color: {color};"
+        f"border: 1px solid {border};"
+        f"background: {background};"
+    )
 
 
 class LivePage(QWidget):
@@ -50,8 +77,10 @@ class LivePage(QWidget):
         self._uart_protocol = ""
         self._actuation_test_mode = False
         self._dispatch_status = ""
+        self._auto_sort_state = "WAITING_EMPTY"
         self._speaker_output_mode = "hardware"
         self._speaker_voice_gender = "female"
+        self._detection_rows: dict[str, tuple[QListWidgetItem, float, int]] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 24)
@@ -69,28 +98,31 @@ class LivePage(QWidget):
 
         from app.ui.widgets.flow_layout import FlowLayout
         controls = FlowLayout(margin=0, h_spacing=12, v_spacing=12)
+        self._controls_layout = controls
 
         self.btn_camera = QPushButton("Bật camera")
         self.btn_camera.setObjectName("primary")
         self.btn_camera.setCheckable(True)
-        self.btn_camera.setMinimumWidth(128)
-        self.btn_camera.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        _mark_live_action_button(self.btn_camera)
         _set_button_icon(self.btn_camera, "play")
         self.btn_camera.clicked.connect(self._toggle_camera)
 
-        self.btn_actuation = QPushButton("Bật gửi Arduino")
+        self.btn_actuation = QPushButton("Bật phân loại tự động")
         self.btn_actuation.setObjectName("secondary")
         self.btn_actuation.setCheckable(True)
-        self.btn_actuation.setMinimumWidth(150)
-        self.btn_actuation.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        _mark_live_action_button(self.btn_actuation)
         self.btn_actuation.setToolTip(
-            "Bật công tắc này mới cho phép app gửi lệnh phân loại xuống Arduino."
+            "Bật một lần để app tự nhận diện, đổ rác và phát âm thanh cho từng vật."
         )
         _set_button_icon(self.btn_actuation, "hardware")
         self.btn_actuation.clicked.connect(self._toggle_actuation_test_mode)
 
         self.dispatch_mode_label = QLabel("")
-        self.dispatch_mode_label.setMinimumWidth(150)
+        self.dispatch_mode_label.setFixedSize(LIVE_CONTROL_SIZE)
+        self.dispatch_mode_label.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Fixed,
+        )
         self.dispatch_mode_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.dispatch_mode_label.setToolTip(
             "Trạng thái gửi lệnh phân loại xuống Arduino khi AI nhận diện rác."
@@ -99,16 +131,14 @@ class LivePage(QWidget):
         self.btn_pause = QPushButton("Tạm dừng")
         self.btn_pause.setObjectName("secondary")
         self.btn_pause.setEnabled(False)
-        self.btn_pause.setMinimumWidth(96)
-        self.btn_pause.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        _mark_live_action_button(self.btn_pause)
         _set_button_icon(self.btn_pause, "pause")
         self.btn_pause.clicked.connect(self._toggle_pause)
 
         self.btn_snap = QPushButton("Chụp ảnh")
         self.btn_snap.setObjectName("secondary")
         self.btn_snap.setEnabled(False)
-        self.btn_snap.setMinimumWidth(112)
-        self.btn_snap.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        _mark_live_action_button(self.btn_snap)
         _set_button_icon(self.btn_snap, "snapshot")
         self.btn_snap.clicked.connect(self.snapshot_requested.emit)
 
@@ -138,6 +168,7 @@ class LivePage(QWidget):
         self.btn_hw_speaker = QPushButton("Loa phần cứng")
         self.btn_hw_speaker.setCheckable(True)
         self.btn_hw_speaker.setObjectName("segmented")
+        self.btn_hw_speaker.setFixedSize(SPEAKER_BUTTON_SIZE)
         self.btn_hw_speaker.setIcon(_icon("hardware"))
         self.btn_hw_speaker.setIconSize(QSize(18, 18))
         self.btn_hw_speaker.clicked.connect(
@@ -146,6 +177,7 @@ class LivePage(QWidget):
         self.btn_pc_speaker = QPushButton("Loa laptop")
         self.btn_pc_speaker.setCheckable(True)
         self.btn_pc_speaker.setObjectName("segmented")
+        self.btn_pc_speaker.setFixedSize(SPEAKER_BUTTON_SIZE)
         self.btn_pc_speaker.setIcon(_icon("speaker"))
         self.btn_pc_speaker.setIconSize(QSize(18, 18))
         self.btn_pc_speaker.clicked.connect(
@@ -158,6 +190,7 @@ class LivePage(QWidget):
         self.speaker_status = QLabel("")
         self.speaker_status.setObjectName("muted")
         self.speaker_status.setWordWrap(True)
+        self.speaker_status.setVisible(False)
         speaker_layout.addWidget(self.speaker_status, 1)
         root.addWidget(speaker_bar)
 
@@ -167,11 +200,14 @@ class LivePage(QWidget):
         self.warning.setVisible(False)
         root.addWidget(self.warning)
 
-        body = QHBoxLayout()
+        body = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self._body_layout = body
         body.setSpacing(16)
 
         video_card = QFrame()
         video_card.setObjectName("card")
+        video_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._video_card = video_card
         video_layout = QVBoxLayout(video_card)
         video_layout.setContentsMargins(16, 14, 16, 16)
         video_layout.setSpacing(12)
@@ -180,7 +216,7 @@ class LivePage(QWidget):
         video_layout.addWidget(video_title)
 
         video_container = QWidget()
-        video_container.setMinimumHeight(360)
+        video_container.setMinimumHeight(320)
         self._video_stack = QStackedLayout(video_container)
         self._video_stack.setStackingMode(QStackedLayout.StackingMode.StackOne)
 
@@ -201,6 +237,9 @@ class LivePage(QWidget):
 
         stream_card = QFrame()
         stream_card.setObjectName("card")
+        stream_card.setMinimumWidth(220)
+        stream_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self._stream_card = stream_card
         stream_layout = QVBoxLayout(stream_card)
         stream_layout.setContentsMargins(16, 14, 16, 16)
         stream_layout.setSpacing(12)
@@ -208,7 +247,12 @@ class LivePage(QWidget):
         stream_title.setObjectName("mono")
         stream_layout.addWidget(stream_title)
         self.stream = QListWidget()
-        self.stream.setMinimumWidth(260)
+        self.stream.setMinimumWidth(0)
+        self.stream.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.stream.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
+        self.stream.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        self.stream.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self.stream.setWordWrap(True)
         stream_layout.addWidget(self.stream, 1)
         body.addWidget(stream_card, 1)
 
@@ -234,6 +278,20 @@ class LivePage(QWidget):
         root.addLayout(cards)
         self.set_speaker_output_mode("hardware")
         self.set_actuation_test_mode(False)
+        self._sync_responsive_body()
+
+    def resizeEvent(self, event):  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_responsive_body()
+
+    def _sync_responsive_body(self) -> None:
+        if not hasattr(self, "_body_layout"):
+            return
+        narrow = self.width() < 820
+        direction = QBoxLayout.Direction.TopToBottom if narrow else QBoxLayout.Direction.LeftToRight
+        if self._body_layout.direction() != direction:
+            self._body_layout.setDirection(direction)
+        self._stream_card.setMaximumHeight(260 if narrow else 16777215)
 
     def _toggle_camera(self) -> None:
         self._cam_on = not self._cam_on
@@ -278,27 +336,25 @@ class LivePage(QWidget):
         self.btn_pc_speaker.setChecked(normalized == "computer_speaker")
         self.btn_hw_speaker.blockSignals(False)
         self.btn_pc_speaker.blockSignals(False)
-        self.speaker_status.setText(self._speaker_status_text())
+        self._refresh_speaker_status()
         if emit:
             self.speaker_output_mode_changed.emit(normalized)
 
     def set_speaker_voice_gender(self, gender: str) -> None:
         self._speaker_voice_gender = normalize_voice_gender(gender)
-        self.speaker_status.setText(self._speaker_status_text())
+        self._refresh_speaker_status()
+
+    def _refresh_speaker_status(self) -> None:
+        text = self._speaker_status_text()
+        self.speaker_status.setText(text)
+        self.speaker_status.setVisible(bool(text))
 
     def _speaker_status_text(self) -> str:
         status = voice_pack_status(self._speaker_voice_gender)
-        ready = sum(1 for ok in status.values() if ok)
-        total = len(status)
         missing = [name for name, ok in status.items() if not ok]
-        label = voice_gender_label(self._speaker_voice_gender)
-        if self._speaker_output_mode == "computer_speaker":
-            if not missing:
-                return f"Loa laptop {label}: sẵn sàng ({ready}/{total} file)."
-            return f"Loa laptop {label}: thiếu {len(missing)} file: {', '.join(missing)}."
-        if not missing:
-            return f"Loa phần cứng đang ưu tiên. Loa laptop {label} sẵn sàng ({ready}/{total} file)."
-        return f"Loa phần cứng đang ưu tiên. Loa laptop {label} thiếu {len(missing)} file: {', '.join(missing)}."
+        if self._speaker_output_mode != "computer_speaker" or not missing:
+            return ""
+        return f"Thiếu {len(missing)} file âm thanh cho loa laptop."
 
     def _toggle_actuation_test_mode(self, checked: bool) -> None:
         self.set_actuation_test_mode(bool(checked), emit=True)
@@ -312,7 +368,7 @@ class LivePage(QWidget):
         self.btn_actuation.blockSignals(True)
         self.btn_actuation.setChecked(self._actuation_test_mode)
         self.btn_actuation.setText(
-            "Dừng gửi Arduino" if self._actuation_test_mode else "Bật gửi Arduino"
+            "Dừng tự động" if self._actuation_test_mode else "Bật phân loại tự động"
         )
         self.btn_actuation.setObjectName("danger" if self._actuation_test_mode else "secondary")
         _set_button_icon(self.btn_actuation, "hardware")
@@ -327,11 +383,28 @@ class LivePage(QWidget):
         self._dispatch_status = str(status or "").strip()
         self._sync_dispatch_mode_label()
 
+    def set_auto_sort_state(self, state: str) -> None:
+        normalized = str(state or "").strip().upper()
+        if normalized not in {"READY", "DETECTING", "SORTING", "RETURNING", "WAITING_EMPTY"}:
+            normalized = "WAITING_EMPTY"
+        self._auto_sort_state = normalized
+        self._sync_dispatch_mode_label()
+
     def _sync_dispatch_mode_label(self) -> None:
         if self._actuation_test_mode:
             if self._uart_ok:
-                self.dispatch_mode_label.setText("Gửi xuống Arduino")
-                detail = "Đã bật gửi lệnh; ROI, mapping và guard vẫn quyết định từng lần gửi."
+                state_labels = {
+                    "READY": "Sẵn sàng",
+                    "DETECTING": "Đang nhận diện",
+                    "SORTING": "Đang đổ rác",
+                    "RETURNING": "Đang về HOME",
+                    "WAITING_EMPTY": "Chờ khay trống",
+                }
+                self.dispatch_mode_label.setText(state_labels[self._auto_sort_state])
+                detail = (
+                    "Phân loại tự động đang bật; mỗi vật hợp lệ chỉ tạo một lệnh đổ "
+                    "và phải lấy khỏi khay trước lượt kế tiếp."
+                )
                 if self._uart_protocol == "plain_group":
                     detail += " Format: huuco / voco / taiche."
                 elif self._uart_protocol == "sort_line":
@@ -340,17 +413,21 @@ class LivePage(QWidget):
                 self.dispatch_mode_label.setText("Chờ UART")
                 detail = "Đã bật gửi nhưng chưa thấy Arduino/COM; app chưa gửi được lệnh thật."
             self.dispatch_mode_label.setStyleSheet(
-                "padding: 6px 10px; border-radius: 6px;"
-                " color: #FBBF24; border: 1px solid rgba(251,191,36,0.42);"
-                " background: rgba(251,191,36,0.10); font-weight: 700;"
+                _dispatch_pill_style(
+                    color="#FBBF24",
+                    border="rgba(251,191,36,0.42)",
+                    background="rgba(251,191,36,0.10)",
+                )
             )
         else:
             self.dispatch_mode_label.setText("Chỉ nhận diện")
-            detail = "Không gửi lệnh xuống Arduino. Bật gửi Arduino chỉ khi đã kiểm tra ROI và mapping."
+            detail = "Không gửi lệnh xuống Arduino. Bật tự động sau khi camera, ROI và UART đã sẵn sàng."
             self.dispatch_mode_label.setStyleSheet(
-                "padding: 6px 10px; border-radius: 6px;"
-                " color: #67E8F9; border: 1px solid rgba(103,232,249,0.32);"
-                " background: rgba(103,232,249,0.08); font-weight: 700;"
+                _dispatch_pill_style(
+                    color="#67E8F9",
+                    border="rgba(103,232,249,0.32)",
+                    background="rgba(103,232,249,0.08)",
+                )
             )
         if self._dispatch_status:
             detail = f"{detail} Trạng thái guard: {self._dispatch_status}."
@@ -374,12 +451,49 @@ class LivePage(QWidget):
         self.video.set_detections(detections)
 
     def append_detection(self, cls_name: str, conf: float, ts: str, detail: str = "") -> None:
-        suffix = f"\n    {detail}" if detail else ""
-        item = QListWidgetItem(f"*  {cls_name:<10} {conf:.2f}    {ts}{suffix}")
+        now = time.monotonic()
+        key = self._detection_key(cls_name, detail)
+        recent = self._detection_rows.get(key)
+        if recent is not None:
+            item, last_seen, observations = recent
+            if now - last_seen <= DETECTION_COALESCE_SECONDS and self.stream.row(item) >= 0:
+                observations += 1
+                text = self._detection_text(cls_name, conf, ts, detail, observations)
+                item.setText(text)
+                item.setToolTip(text)
+                self.stream.takeItem(self.stream.row(item))
+                self.stream.insertItem(0, item)
+                self._detection_rows[key] = (item, now, observations)
+                return
+
+        text = self._detection_text(cls_name, conf, ts, detail, 1)
+        item = QListWidgetItem(text)
+        item.setToolTip(text)
         item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.stream.insertItem(0, item)
-        while self.stream.count() > 50:
-            self.stream.takeItem(self.stream.count() - 1)
+        self._detection_rows[key] = (item, now, 1)
+        while self.stream.count() > DETECTION_STREAM_LIMIT:
+            removed = self.stream.takeItem(self.stream.count() - 1)
+            stale_keys = [row_key for row_key, row in self._detection_rows.items() if row[0] is removed]
+            for row_key in stale_keys:
+                self._detection_rows.pop(row_key, None)
+
+    @staticmethod
+    def _detection_key(cls_name: str, detail: str) -> str:
+        stable_detail = " ".join(str(detail or "").split()).casefold()
+        return f"{str(cls_name).strip().casefold()}|{stable_detail}"
+
+    @staticmethod
+    def _detection_text(
+        cls_name: str,
+        conf: float,
+        ts: str,
+        detail: str,
+        observations: int,
+    ) -> str:
+        count = f"  [x{observations}]" if observations > 1 else ""
+        suffix = f"\n    {detail}" if detail else ""
+        return f"*  {cls_name:<10} {conf:.2f}    {ts}{count}{suffix}"
 
     def set_fps(self, fps: float) -> None:
         if not self._cam_on:

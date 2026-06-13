@@ -8,10 +8,9 @@ from pathlib import Path
 from typing import ClassVar
 
 import pyqtgraph as pg
-from PySide6.QtCore import QAbstractTableModel, Qt, QTimer, Signal
+from PySide6.QtCore import QAbstractTableModel, QEvent, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
-    QDateEdit,
+    QApplication,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -24,12 +23,15 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.history import HistoryService
+from app.ui.widgets.flow_layout import FlowLayout
+from app.ui.widgets.safe_inputs import SafeComboBox, SafeDateEdit
 
 pg.setConfigOption("background", "#060E20")
 pg.setConfigOption("foreground", "#BBCABF")
 
 MAX_BAR_CLASSES = 6
 BAR_AXIS_LABEL_CHARS = 12
+HISTORY_FILTER_HEIGHT = 40
 
 
 class HistoryTableModel(QAbstractTableModel):
@@ -97,6 +99,17 @@ def _section_card() -> QFrame:
     return f
 
 
+def _filter_group(label_text: str, control: QWidget) -> QWidget:
+    group = QWidget()
+    layout = QHBoxLayout(group)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(8)
+    label = QLabel(label_text)
+    layout.addWidget(label)
+    layout.addWidget(control)
+    return group
+
+
 class HistoryPage(QWidget):
     refresh_requested = Signal()
 
@@ -119,27 +132,22 @@ class HistoryPage(QWidget):
         title.setObjectName("h1")
         outer.addWidget(title)
 
-        # filter row: 2-row grid so it wraps on narrow widths
-        from PySide6.QtWidgets import QGridLayout
-
         filter_card = QFrame()
         filter_card.setObjectName("toolbar")
-        filter_grid = QGridLayout(filter_card)
-        filter_grid.setContentsMargins(16, 12, 16, 12)
-        filter_grid.setHorizontalSpacing(12)
-        filter_grid.setVerticalSpacing(8)
-        self.date_from = QDateEdit()
+        filter_layout = FlowLayout(filter_card, margin=0, h_spacing=12, v_spacing=8)
+        filter_layout.setContentsMargins(16, 12, 16, 12)
+        self.date_from = SafeDateEdit()
         self.date_from.setCalendarPopup(True)
+        self.date_from.setDisplayFormat("dd/MM/yyyy")
         self.date_from.setDate(_recent_start_qdate())
-        self.date_to = QDateEdit()
+        self.date_to = SafeDateEdit()
         self.date_to.setCalendarPopup(True)
+        self.date_to.setDisplayFormat("dd/MM/yyyy")
         self.date_to.setDate(_today_qdate())
-        self.cls_filter = QComboBox()
+        self.cls_filter = SafeComboBox()
         self.cls_filter.addItem("Tất cả lớp", "")
-        self.cls_filter.setMinimumWidth(160)
-        self.ack_filter = QComboBox()
+        self.ack_filter = SafeComboBox()
         self.ack_filter.addItems(["Tất cả", "ok", "no_ack", "error", "pending"])
-        self.ack_filter.setMinimumWidth(120)
         self.btn_refresh = QPushButton("Refresh")
         self.btn_refresh.setObjectName("secondary")
         self.btn_refresh.clicked.connect(lambda: self.request_reload())
@@ -149,18 +157,23 @@ class HistoryPage(QWidget):
         self.refresh_status = QLabel("Đang cập nhật...")
         self.refresh_status.setObjectName("muted")
         self.refresh_status.setVisible(False)
-        filter_grid.addWidget(QLabel("Từ ngày"), 0, 0)
-        filter_grid.addWidget(self.date_from, 0, 1)
-        filter_grid.addWidget(QLabel("Đến ngày"), 0, 2)
-        filter_grid.addWidget(self.date_to, 0, 3)
-        filter_grid.addWidget(QLabel("Lớp"), 0, 4)
-        filter_grid.addWidget(self.cls_filter, 0, 5)
-        filter_grid.addWidget(QLabel("ACK"), 0, 6)
-        filter_grid.addWidget(self.ack_filter, 0, 7)
-        filter_grid.addWidget(self.btn_refresh, 0, 8)
-        filter_grid.addWidget(self.btn_export, 0, 9)
-        filter_grid.addWidget(self.refresh_status, 1, 0, 1, 10)
-        filter_grid.setColumnStretch(10, 1)
+        for widget, width in (
+            (self.date_from, 160),
+            (self.date_to, 160),
+            (self.cls_filter, 260),
+            (self.ack_filter, 150),
+            (self.btn_refresh, 112),
+            (self.btn_export, 128),
+        ):
+            widget.setFixedHeight(HISTORY_FILTER_HEIGHT)
+            widget.setMinimumWidth(width)
+        filter_layout.addWidget(_filter_group("Từ ngày", self.date_from))
+        filter_layout.addWidget(_filter_group("Đến ngày", self.date_to))
+        filter_layout.addWidget(_filter_group("Lớp", self.cls_filter))
+        filter_layout.addWidget(_filter_group("ACK", self.ack_filter))
+        filter_layout.addWidget(self.btn_refresh)
+        filter_layout.addWidget(self.btn_export)
+        filter_layout.addWidget(self.refresh_status)
         outer.addWidget(filter_card)
         self.date_from.dateChanged.connect(lambda *_args: self.request_reload())
         self.date_to.dateChanged.connect(lambda *_args: self.request_reload())
@@ -177,8 +190,6 @@ class HistoryPage(QWidget):
         bar_layout.addWidget(QLabel("Phân bố theo lớp"))
         self.bar_plot = pg.PlotWidget()
         self.bar_plot.setMinimumHeight(220)
-        self.bar_plot.setBackground("#060E20")
-        self.bar_plot.showGrid(x=False, y=True, alpha=0.12)
         bar_layout.addWidget(self.bar_plot)
         charts.addWidget(bar_card, 1)
 
@@ -188,10 +199,9 @@ class HistoryPage(QWidget):
         area_layout.addWidget(QLabel("Theo giờ trong ngày (hôm nay)"))
         self.area_plot = pg.PlotWidget()
         self.area_plot.setMinimumHeight(220)
-        self.area_plot.setBackground("#060E20")
-        self.area_plot.showGrid(x=True, y=True, alpha=0.12)
         area_layout.addWidget(self.area_plot)
         charts.addWidget(area_card, 1)
+        self._apply_chart_theme()
 
         outer.addLayout(charts)
 
@@ -215,6 +225,21 @@ class HistoryPage(QWidget):
         outer.addWidget(table_card, 1)
 
         QTimer.singleShot(0, self.request_reload)
+
+    def changeEvent(self, event):  # noqa: N802
+        super().changeEvent(event)
+        if event.type() not in {
+            QEvent.Type.StyleChange,
+            QEvent.Type.PaletteChange,
+            QEvent.Type.ApplicationPaletteChange,
+        }:
+            return
+        if not hasattr(self, "bar_plot"):
+            return
+        self._apply_chart_theme()
+        self._bar_signature = None
+        self._area_signature = None
+        self.request_reload()
 
     def request_reload(self) -> None:
         """Debounce UI refresh requests from filters or image actions."""
@@ -299,7 +324,8 @@ class HistoryPage(QWidget):
             return
         x = list(range(len(items)))
         ys = [v for _, v in items]
-        bg = pg.BarGraphItem(x=x, height=ys, width=0.6, brush="#4EDEA3")
+        colors = _chart_palette()
+        bg = pg.BarGraphItem(x=x, height=ys, width=0.6, brush=colors["bar"])
         self.bar_plot.addItem(bg)
         ax = self.bar_plot.getAxis("bottom")
         ax.setStyle(tickTextOffset=8, autoExpandTextSpace=False, tickTextHeight=40)
@@ -314,10 +340,25 @@ class HistoryPage(QWidget):
             return
         self._area_signature = signature
         self.area_plot.clear()
+        colors = _chart_palette()
         curve = self.area_plot.plot(
-            xs, ys, pen=pg.mkPen("#4CD7F6", width=2), fillLevel=0, brush=(3, 181, 211, 45)
+            xs,
+            ys,
+            pen=pg.mkPen(colors["line"], width=2),
+            fillLevel=0,
+            brush=colors["area_fill"],
         )
         _ = curve
+
+    def _apply_chart_theme(self) -> None:
+        colors = _chart_palette()
+        for plot, show_x_grid in ((self.bar_plot, False), (self.area_plot, True)):
+            plot.setBackground(colors["plot_bg"])
+            plot.showGrid(x=show_x_grid, y=True, alpha=colors["grid_alpha"])
+            for axis_name in ("left", "bottom"):
+                axis = plot.getAxis(axis_name)
+                axis.setPen(pg.mkPen(colors["axis"]))
+                axis.setTextPen(pg.mkPen(colors["text"]))
 
     def _open_detail(self, index) -> None:
         from app.ui.widgets.detail_dialog import DetectionDetailDialog
@@ -334,8 +375,7 @@ class HistoryPage(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "Export CSV", "history.csv", "CSV (*.csv)")
         if not path:
             return
-        n = self.history.export_csv(Path(path))
-        print(f"exported {n} rows to {path}")
+        self.history.export_csv(Path(path))
 
 
 def _recent_start_qdate(days: int = 30):
@@ -381,3 +421,27 @@ def _short_axis_label(label: str) -> str:
     if len(clean) <= BAR_AXIS_LABEL_CHARS:
         return clean
     return clean[: BAR_AXIS_LABEL_CHARS - 3].rstrip() + "..."
+
+
+def _chart_palette() -> dict[str, object]:
+    app = QApplication.instance()
+    theme = app.property("trashSorterTheme") if app is not None else "dark"
+    if str(theme).strip().lower() == "light":
+        return {
+            "plot_bg": "#F8FAFC",
+            "axis": "#94A3B8",
+            "text": "#334155",
+            "grid_alpha": 0.20,
+            "bar": "#10B981",
+            "line": "#0891B2",
+            "area_fill": (8, 145, 178, 42),
+        }
+    return {
+        "plot_bg": "#060E20",
+        "axis": "#BBCABF",
+        "text": "#DAE2FD",
+        "grid_alpha": 0.12,
+        "bar": "#4EDEA3",
+        "line": "#4CD7F6",
+        "area_fill": (3, 181, 211, 45),
+    }

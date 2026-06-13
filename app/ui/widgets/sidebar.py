@@ -18,22 +18,29 @@ def _icon(name: str, theme: str) -> QIcon:
 
 class Sidebar(QWidget):
     page_changed = Signal(int)
+    FULL_WIDTH = 240
+    COMPACT_WIDTH = 76
 
     def __init__(self, items, icons=None, parent=None, theme: str = "dark"):
         super().__init__(parent)
         self._theme = theme
+        self._items: list[str] = [str(item) for item in items]
         self._icon_names: list[str | None] = list(icons or [None] * len(items))
+        self._compact = False
         self.setObjectName("sidebar")
-        self.setFixedWidth(240)
+        self.setFixedWidth(self.FULL_WIDTH)
         layout = QVBoxLayout(self)
+        self._layout = layout
         layout.setContentsMargins(16, 22, 16, 18)
         layout.setSpacing(8)
 
         brand = QWidget()
+        self._brand = brand
         brand_row = QHBoxLayout(brand)
         brand_row.setContentsMargins(0, 0, 0, 14)
         brand_row.setSpacing(10)
         logo = QLabel()
+        self._logo = logo
         logo_path = brand_mark_path()
         if logo_path.exists():
             logo.setPixmap(QIcon(str(logo_path)).pixmap(QSize(30, 30)))
@@ -42,6 +49,7 @@ class Sidebar(QWidget):
         brand_row.addWidget(logo)
 
         brand_text = QWidget()
+        self._brand_text = brand_text
         brand_text_layout = QVBoxLayout(brand_text)
         brand_text_layout.setContentsMargins(0, 0, 0, 0)
         brand_text_layout.setSpacing(0)
@@ -58,10 +66,11 @@ class Sidebar(QWidget):
         self._group.setExclusive(True)
         self._buttons: list[QPushButton] = []
 
-        for idx, (label, icon_name) in enumerate(zip(items, self._icon_names, strict=False)):
+        for idx, (label, icon_name) in enumerate(zip(self._items, self._icon_names, strict=False)):
             btn = QPushButton(label)
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setToolTip(label)
             if icon_name:
                 btn.setIcon(_icon(icon_name, self._theme))
                 btn.setIconSize(QSize(20, 20))
@@ -77,6 +86,27 @@ class Sidebar(QWidget):
     def set_active(self, index: int) -> None:
         if 0 <= index < len(self._buttons):
             self._buttons[index].setChecked(True)
+
+    def set_compact(self, compact: bool) -> None:
+        compact = bool(compact)
+        if self._compact == compact:
+            return
+        self._compact = compact
+        self.setFixedWidth(self.COMPACT_WIDTH if compact else self.FULL_WIDTH)
+        if compact:
+            self._layout.setContentsMargins(10, 18, 10, 16)
+            self._brand_text.setVisible(False)
+        else:
+            self._layout.setContentsMargins(16, 22, 16, 18)
+            self._brand_text.setVisible(True)
+        for button, label in zip(self._buttons, self._items, strict=False):
+            button.setText("" if compact else label)
+            button.setToolTip(label)
+            button.setIconSize(QSize(22 if compact else 20, 22 if compact else 20))
+            button.setMinimumHeight(44 if compact else 38)
+            button.setProperty("compact", compact)
+            button.style().unpolish(button)
+            button.style().polish(button)
 
     def set_theme(self, theme: str) -> None:
         self._theme = theme

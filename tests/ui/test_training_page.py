@@ -1,4 +1,5 @@
 import os
+import time
 from pathlib import Path
 
 import cv2
@@ -6,8 +7,10 @@ import numpy as np
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QFileDialog, QPushButton
 
+import app.ui.pages.training as training_module
 from app.core.config import AppConfig, ClassMapping
 from app.ui.pages.training import TrainingPage
 
@@ -22,6 +25,32 @@ def _set_label(page: TrainingPage, value: str) -> None:
     page.class_select.setCurrentText(value)
     if page.class_select.lineEdit() is not None:
         page.class_select.lineEdit().setText(value)
+
+
+def test_training_page_defaults_to_pen_and_enables_manual_actions(tmp_path, qtbot):
+    page = TrainingPage(_config_for_dataset(tmp_path / "dataset"))
+    qtbot.addWidget(page)
+
+    assert page.selected_class_name() == "Pen"
+    assert page.btn_add_phone.isEnabled() is True
+    assert page.btn_capture_pending.isEnabled() is True
+    assert page.btn_annotate.isEnabled() is True
+    assert page.btn_learn_refresh.isEnabled() is True
+    assert page.btn_train_micro.isEnabled() is False
+    assert page.btn_train_strong.isEnabled() is False
+
+
+def test_training_page_disables_manual_actions_for_invalid_label(tmp_path, qtbot):
+    page = TrainingPage(_config_for_dataset(tmp_path / "dataset"))
+    qtbot.addWidget(page)
+
+    _set_label(page, "not-a-canonical-class")
+
+    assert page.btn_add_phone.isEnabled() is False
+    assert page.btn_capture_pending.isEnabled() is False
+    assert page.btn_annotate.isEnabled() is False
+    assert page.btn_learn_refresh.isEnabled() is False
+    assert "not-a-canonical-class" in page.label_status.text()
 
 
 def test_training_page_maps_vietnamese_label_to_textile(tmp_path, qtbot):
@@ -149,3 +178,45 @@ def test_training_page_training_running_disables_train_and_enables_stop(tmp_path
     assert page.btn_train_strong.isEnabled() is False
     assert page.btn_stop_training.isEnabled() is True
     assert "learn-now-micro-textile" in page.training_status.text()
+
+
+def test_training_page_reload_returns_before_slow_worker_finishes(tmp_path, qtbot, monkeypatch):
+    class DeferredWorker(QThread):
+        metadata_ready = Signal(int, object)
+        thumbnails_ready = Signal(int, object)
+        failed = Signal(int, str)
+
+        def __init__(self, request_id, *_args):
+            super().__init__()
+            self.request_id = request_id
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr(training_module, "_TrainingDataWorker", DeferredWorker)
+    page = TrainingPage(_config_for_dataset(tmp_path / "dataset"))
+    qtbot.addWidget(page)
+
+    started = time.perf_counter()
+    page.reload()
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 0.3
+    assert "Đang tải mẫu Pen" in page.stats.text()
+
+
+def test_training_page_ignores_metadata_from_stale_class_request(tmp_path, qtbot):
+    page = TrainingPage(_config_for_dataset(tmp_path / "dataset"))
+    qtbot.addWidget(page)
+    page._load_request_id = 2
+    page.stats.setText("current request")
+    stale_payload = {
+        "rows": [{"image_path": "old.jpg", "selected_cls_name": "Pen"}],
+        "total": 1,
+        "counts": {},
+    }
+
+    page._on_training_metadata_ready(1, stale_payload)
+
+    assert page.grid.count() == 0
+    assert page.stats.text() == "current request"

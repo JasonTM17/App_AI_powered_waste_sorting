@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -15,7 +14,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QSlider,
-    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -31,6 +29,7 @@ from app.core.hardware_profile import (
     SERVO_WAIT_POSITIONS,
 )
 from app.ui.pages.settings_audio_section import AudioSettingsSection
+from app.ui.widgets.safe_inputs import SafeComboBox, SafeSpinBox
 from app.utils.camera_source import normalize_camera_source
 from app.utils.paths import resource_path
 
@@ -43,6 +42,10 @@ def _icon(name: str) -> QIcon:
 def _button_icon(button: QPushButton, name: str) -> None:
     button.setIcon(_icon(name))
     button.setIconSize(QSize(18, 18))
+
+
+def _auto_hardware_scan_enabled() -> bool:
+    return QGuiApplication.platformName().lower() != "offscreen"
 
 
 class _CameraScan(QThread):
@@ -151,6 +154,8 @@ def _section(title: str) -> tuple[QFrame, QFormLayout]:
     layout.addWidget(h)
     form = QFormLayout()
     form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+    form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+    form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
     form.setHorizontalSpacing(18)
     form.setVerticalSpacing(12)
     layout.addLayout(form)
@@ -162,7 +167,9 @@ class SettingsPage(QWidget):
     test_camera_requested = Signal(str)
     test_uart_requested = Signal(str, int)
     test_hardware_requested = Signal(str, int, str)
-    test_voice_requested = Signal(str)
+    test_voice_requested = Signal(str, str, str)
+    speaker_output_mode_changed = Signal(str)
+    speaker_voice_gender_changed = Signal(str)
     actuation_test_mode_changed = Signal(bool)
     reload_model_requested = Signal(str)
 
@@ -185,7 +192,7 @@ class SettingsPage(QWidget):
 
         # camera
         cam_box, cam_form = _section("Camera")
-        self.cam_source = QComboBox()
+        self.cam_source = SafeComboBox()
         self.cam_source.setEditable(False)
         initial_source = self._cfg.camera.source.strip()
         if normalize_camera_source(initial_source) == "0":
@@ -196,15 +203,15 @@ class SettingsPage(QWidget):
         self.cam_hint = QLabel("Bấm Scan để tìm camera USB đang cắm vào máy.")
         self.cam_hint.setWordWrap(True)
         self.cam_hint.setObjectName("muted")
-        self.cam_w = QSpinBox()
+        self.cam_w = SafeSpinBox()
         self.cam_w.setRange(160, 7680)
         self.cam_w.setValue(self._cfg.camera.width)
-        self.cam_h = QSpinBox()
+        self.cam_h = SafeSpinBox()
         self.cam_h.setRange(120, 4320)
         self.cam_h.setValue(self._cfg.camera.height)
         self.cam_mirror = QCheckBox("Lật ngang")
         self.cam_mirror.setChecked(self._cfg.camera.mirror)
-        self.cam_rotation = QComboBox()
+        self.cam_rotation = SafeComboBox()
         for label, value in [
             ("0 độ - mốc ban đầu", 0),
             ("90 độ phải", 90),
@@ -245,16 +252,16 @@ class SettingsPage(QWidget):
         roi_box, roi_form = _section("ROI vùng khay")
         self.roi_enabled = QCheckBox("Bật ROI cho lệnh dò từ camera")
         self.roi_enabled.setChecked(self._cfg.roi.enabled)
-        self.roi_x = QSpinBox()
+        self.roi_x = SafeSpinBox()
         self.roi_x.setRange(0, 7680)
         self.roi_x.setValue(self._cfg.roi.x)
-        self.roi_y = QSpinBox()
+        self.roi_y = SafeSpinBox()
         self.roi_y.setRange(0, 4320)
         self.roi_y.setValue(self._cfg.roi.y)
-        self.roi_w = QSpinBox()
+        self.roi_w = SafeSpinBox()
         self.roi_w.setRange(0, 7680)
         self.roi_w.setValue(self._cfg.roi.width)
-        self.roi_h = QSpinBox()
+        self.roi_h = SafeSpinBox()
         self.roi_h.setRange(0, 4320)
         self.roi_h.setValue(self._cfg.roi.height)
         self.roi_hint = QLabel(
@@ -282,7 +289,7 @@ class SettingsPage(QWidget):
         path_row.addWidget(btn_browse)
         path_w = QWidget()
         path_w.setLayout(path_row)
-        self.mdl_device = QComboBox()
+        self.mdl_device = SafeComboBox()
         self.mdl_device.addItems(["auto", "cpu", "cuda"])
         self.mdl_device.setCurrentText(self._cfg.model.device)
         self.mdl_conf = QSlider(Qt.Orientation.Horizontal)
@@ -299,7 +306,7 @@ class SettingsPage(QWidget):
         self.mdl_iou = QSlider(Qt.Orientation.Horizontal)
         self.mdl_iou.setRange(0, 100)
         self.mdl_iou.setValue(int(self._cfg.model.iou_threshold * 100))
-        self.mdl_imgsz = QComboBox()
+        self.mdl_imgsz = SafeComboBox()
         self.mdl_imgsz.addItems(["320", "480", "640", "800", "960"])
         self.mdl_imgsz.setCurrentText(str(self._cfg.model.input_size))
         mdl_form.addRow("File", path_w)
@@ -316,7 +323,7 @@ class SettingsPage(QWidget):
 
         # uart
         uart_box, uart_form = _section("UART")
-        self.uart_port = QComboBox()
+        self.uart_port = SafeComboBox()
         self.uart_port.setEditable(False)
         if self._cfg.uart.port.strip():
             self.uart_port.addItem(self._cfg.uart.port, self._cfg.uart.port)
@@ -326,16 +333,16 @@ class SettingsPage(QWidget):
         self.uart_hint = QLabel("Ưu tiên cổng USB/Arduino. Bluetooth COM sẽ không được chọn tự động.")
         self.uart_hint.setWordWrap(True)
         self.uart_hint.setObjectName("muted")
-        self.uart_baud = QComboBox()
+        self.uart_baud = SafeComboBox()
         self.uart_baud.addItems(["9600", "19200", "38400", "57600", "115200"])
         self.uart_baud.setCurrentText(str(self._cfg.uart.baud))
         self.uart_auto = QCheckBox("Tự kết nối lại")
         self.uart_auto.setChecked(self._cfg.uart.auto_reconnect)
-        self.uart_timeout = QSpinBox()
+        self.uart_timeout = SafeSpinBox()
         self.uart_timeout.setRange(50, 5000)
         self.uart_timeout.setSuffix(" ms")
         self.uart_timeout.setValue(self._cfg.uart.ack_timeout_ms)
-        self.uart_protocol = QComboBox()
+        self.uart_protocol = SafeComboBox()
         self.uart_protocol.addItem("Block: hữu cơ / vô cơ / tái chế", "plain_group")
         self.uart_protocol.addItem("Firmware: SORT:O/R/I", "sort_line")
         idx_protocol = self.uart_protocol.findData(self._cfg.uart.protocol)
@@ -369,7 +376,8 @@ class SettingsPage(QWidget):
         outer.addWidget(uart_box)
         self._port_scan: _PortScan | None = None
         # populate port list immediately on first show so user sees real ports
-        QTimer.singleShot(0, self._scan_ports)
+        if _auto_hardware_scan_enabled():
+            QTimer.singleShot(0, self._scan_ports)
 
         hw_box, hw_form = _section("Mapping phần cứng")
         hw_form.addRow("Profile", QLabel(PROFILE_ID))
@@ -415,8 +423,10 @@ class SettingsPage(QWidget):
         self.uart_test_result.setWordWrap(True)
         self.uart_test_result.setObjectName("muted")
         hw_form.addRow("Kết quả", self.uart_test_result)
-        self.actuation_mode = QCheckBox("Bật chế độ test cơ cấu")
-        self.actuation_mode_hint = QLabel("Đang tắt. Bật trước khi đưa mẫu rác vào camera để theo dõi luồng dò.")
+        self.actuation_mode = QCheckBox("Bật phân loại tự động")
+        self.actuation_mode_hint = QLabel(
+            "Đang tắt. Bật camera và chờ UART sẵn sàng trước khi bật tự động."
+        )
         self.actuation_mode_hint.setWordWrap(True)
         self.actuation_mode_hint.setObjectName("muted")
         self.actuation_mode.toggled.connect(self._on_actuation_mode_toggled)
@@ -427,16 +437,18 @@ class SettingsPage(QWidget):
         audio_box, audio_form = _section("Âm thanh")
         self.audio_section = AudioSettingsSection(self._cfg)
         self.audio_section.voice_test_requested.connect(self.test_voice_requested.emit)
+        self.audio_section.output_mode_changed.connect(self.speaker_output_mode_changed.emit)
+        self.audio_section.voice_gender_changed.connect(self.speaker_voice_gender_changed.emit)
         self.speaker_cooldown = self.audio_section.speaker_cooldown
         audio_form.addRow(self.audio_section)
         outer.addWidget(audio_box)
 
         # app
         app_box, app_form = _section("Ứng dụng")
-        self.theme_select = QComboBox()
+        self.theme_select = SafeComboBox()
         self.theme_select.addItems(["dark", "light"])
         self.theme_select.setCurrentText(self._cfg.theme)
-        self.lang_select = QComboBox()
+        self.lang_select = SafeComboBox()
         self.lang_select.addItems(["vi", "en"])
         self.lang_select.setCurrentText(self._cfg.language)
         self.tray_check = QCheckBox("Minimize ra system tray")
@@ -467,7 +479,7 @@ class SettingsPage(QWidget):
 
     def showEvent(self, event):  # noqa: N802
         super().showEvent(event)
-        if not self._camera_scan_started:
+        if _auto_hardware_scan_enabled() and not self._camera_scan_started:
             self._camera_scan_started = True
             QTimer.singleShot(0, self._scan_cameras)
 
@@ -640,10 +652,10 @@ class SettingsPage(QWidget):
 
     def _set_actuation_mode_hint(self, enabled: bool) -> None:
         text = (
-            "Đang bật. Đặt lần lượt Organic, Plastic bottle/Paper, "
-            "Disposable tableware/Ceramic để xem class -> thùng -> payload -> ACK."
+            "Đang bật. Mỗi vật hợp lệ trong ROI sẽ tự nhận diện, phát âm thanh, "
+            "đổ đúng ngăn và chờ khay trống trước lượt tiếp theo."
             if enabled
-            else "Đang tắt. Bật trước khi đưa mẫu rác vào camera để theo dõi luồng dò."
+            else "Đang tắt. Bật camera và chờ UART sẵn sàng trước khi bật tự động."
         )
         self.actuation_mode_hint.setText(text)
 

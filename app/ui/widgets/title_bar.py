@@ -28,6 +28,7 @@ class TitleBar(QWidget):
         self.setFixedHeight(64)
         self._drag_offset: QPoint | None = None
         self._cam_on = False
+        self._compact = False
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(24, 0, 0, 0)
@@ -52,6 +53,7 @@ class TitleBar(QWidget):
         self.btn_web.setIconSize(QSize(18, 18))
         self.btn_web.setObjectName("titlebar-secondary")
         self.btn_web.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_web.setToolTip("Mở Web")
         self.btn_web.setFixedHeight(36)
         self.btn_web.setMinimumWidth(112)
         self.btn_web.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -63,6 +65,7 @@ class TitleBar(QWidget):
         self.btn_camera.setIconSize(QSize(18, 18))
         self.btn_camera.setObjectName("titlebar-cta")
         self.btn_camera.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_camera.setToolTip("Bật camera")
         self.btn_camera.setFixedHeight(36)
         self.btn_camera.setMinimumWidth(132)
         self.btn_camera.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -91,13 +94,32 @@ class TitleBar(QWidget):
 
     def set_camera_on(self, on: bool, emit: bool = False) -> None:
         self._cam_on = on
-        self.btn_camera.setText("Tắt camera" if on else "Bật camera")
         self.btn_camera.setIcon(_icon("stop" if on else "play"))
         self.btn_camera.setProperty("active", on)
+        self._sync_action_buttons()
         self.btn_camera.style().unpolish(self.btn_camera)
         self.btn_camera.style().polish(self.btn_camera)
         if emit:
             self.camera_toggled.emit(on)
+
+    def set_compact(self, compact: bool) -> None:
+        """Use icon-only primary actions when the window has limited width."""
+        compact = bool(compact)
+        if self._compact == compact:
+            return
+        self._compact = compact
+        self._sync_action_buttons()
+
+    def _sync_action_buttons(self) -> None:
+        camera_label = "Tắt camera" if self._cam_on else "Bật camera"
+        self.btn_web.setText("" if self._compact else "Mở Web")
+        self.btn_camera.setText("" if self._compact else camera_label)
+        self.btn_web.setToolTip("Mở Web")
+        self.btn_camera.setToolTip(camera_label)
+        self.btn_web.setMinimumWidth(44 if self._compact else 112)
+        self.btn_camera.setMinimumWidth(44 if self._compact else 132)
+        self.btn_web.setMaximumWidth(44 if self._compact else 16777215)
+        self.btn_camera.setMaximumWidth(44 if self._compact else 16777215)
 
     def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton and self.window() is not None:

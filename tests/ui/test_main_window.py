@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QGuiApplication, QIcon
-from PySide6.QtWidgets import QLabel, QPushButton
+from PySide6.QtWidgets import QAbstractScrollArea, QLabel, QPushButton, QSizePolicy
 
 from app.core.config import AppConfig
 from app.core.history import HistoryService
@@ -90,6 +90,31 @@ def test_main_window_exposes_manual_training_sidebar_when_config_ready(qtbot):
     assert type(window.capture_page) is not type(window.training_page)
 
 
+def test_training_sidebar_button_opens_manual_training_page(qtbot):
+    window = MainWindow(cfg=AppConfig())
+    qtbot.addWidget(window)
+
+    window.sidebar._buttons[4].click()
+
+    assert window.stack.currentIndex() == 4
+    assert isinstance(window.training_page, TrainingPage)
+    assert window.sidebar._buttons[4].isChecked() is True
+
+
+def test_main_window_keeps_sidebar_active_when_stack_changes(qtbot):
+    window = MainWindow(cfg=AppConfig())
+    qtbot.addWidget(window)
+
+    window.stack.setCurrentIndex(3)
+
+    assert window.sidebar._buttons[3].isChecked() is True
+
+    window.show_page(1)
+
+    assert window.stack.currentIndex() == 1
+    assert window.sidebar._buttons[1].isChecked() is True
+
+
 def test_main_window_lazily_loads_data_and_training_pages(monkeypatch, qtbot):
     calls: list[str] = []
 
@@ -103,6 +128,7 @@ def test_main_window_lazily_loads_data_and_training_pages(monkeypatch, qtbot):
 
     monkeypatch.setattr(CapturePage, "reload", fake_capture_reload)
     monkeypatch.setattr(TrainingPage, "reload", fake_training_reload)
+    monkeypatch.setattr("app.ui.main_window._auto_heavy_page_load_enabled", lambda: True)
 
     window = MainWindow(cfg=AppConfig())
     qtbot.addWidget(window)
@@ -153,6 +179,48 @@ def test_sidebar_icons_are_visible_on_dark_theme(qtbot):
                     visible_pixels += 1
 
         assert visible_pixels > 8, button.text()
+
+
+def test_main_window_compacts_shell_on_laptop_width(qtbot):
+    window = MainWindow(cfg=AppConfig())
+    qtbot.addWidget(window)
+
+    window.resize(900, 700)
+    window._sync_responsive_shell()
+
+    assert window.sidebar.width() == 76
+    assert window.title_bar.btn_web.text() == ""
+    assert window.title_bar.btn_camera.text() == ""
+
+    window.resize(1280, 760)
+    window._sync_responsive_shell()
+
+    assert window.sidebar.width() == 240
+    assert window.title_bar.btn_web.text() == "Mở Web"
+    assert window.title_bar.btn_camera.text() == "Bật camera"
+
+
+def test_live_detection_stream_does_not_expand_desktop_shell(qtbot):
+    window = MainWindow(cfg=AppConfig())
+    qtbot.addWidget(window)
+    window.resize(900, 700)
+    window.show()
+    qtbot.waitExposed(window)
+
+    detail = (
+        "TEST OFF; inorganic; bin 2; payload voco; ACK only one object is allowed "
+        "inside the tray, and this deliberately long message must not widen the shell."
+    )
+    for _ in range(12):
+        window.live_page.append_detection("Pen", 0.65, "09:17:09", detail)
+
+    assert window.live_page.stream.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert (
+        window.live_page.stream.sizeAdjustPolicy()
+        == QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored
+    )
+    assert window.live_page.stream.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Ignored
+    assert window.title_bar.btn_close.geometry().right() <= window.title_bar.width()
 
 
 def test_main_window_clamps_restored_window_to_available_screen(qtbot):

@@ -2,7 +2,9 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
+from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QPushButton
 
 from app.core.config import AppConfig
 from app.ui.pages.settings import SettingsPage
@@ -104,13 +106,44 @@ def test_settings_audio_output_defaults_to_hardware(qtbot):
     assert page.audio_section.hardware_button.isChecked() is True
     assert page.audio_section.hardware_button.text() == "Loa phần cứng"
     assert page.audio_section.computer_button.text() == "Loa laptop"
-    assert "Loa laptop" in page.audio_section.status_label.text()
+    assert page.audio_section.status_label.text() == ""
+    assert page.audio_section.status_label.isHidden()
     assert out.speaker.output_mode == "hardware"
     assert out.speaker.enabled is False
     assert out.speaker.voice_gender == "female"
     assert not page.audio_section.speaker_cooldown.isEnabled()
     assert page.audio_section.female_voice_button.isEnabled()
     assert page.audio_section.male_voice_button.isEnabled()
+
+
+def test_settings_numeric_inputs_ignore_wheel_and_hide_step_buttons(qtbot):
+    page = SettingsPage(AppConfig())
+    qtbot.addWidget(page)
+    starting_baud = page.uart_baud.currentText()
+    starting_timeout = page.uart_timeout.value()
+
+    def send_wheel(widget):
+        event = QWheelEvent(
+            QPointF(10, 10),
+            QPointF(10, 10),
+            QPoint(),
+            QPoint(0, 120),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            Qt.ScrollPhase.ScrollUpdate,
+            False,
+        )
+        QApplication.sendEvent(widget, event)
+
+    send_wheel(page.uart_baud)
+    send_wheel(page.uart_timeout)
+
+    assert page.uart_baud.currentText() == starting_baud
+    assert page.uart_timeout.value() == starting_timeout
+    assert (
+        page.uart_timeout.buttonSymbols()
+        == QAbstractSpinBox.ButtonSymbols.NoButtons
+    )
 
 
 def test_settings_collect_saves_computer_speaker_output(qtbot):
@@ -138,12 +171,14 @@ def test_settings_voice_test_buttons_emit_requested_command(qtbot):
     page = SettingsPage(cfg)
     qtbot.addWidget(page)
     captured = []
-    page.test_voice_requested.connect(lambda command: captured.append(command))
+    page.test_voice_requested.connect(
+        lambda command, mode, gender: captured.append((command, mode, gender))
+    )
     button = next(btn for btn in page.audio_section.findChildren(QPushButton) if btn.text() == "Test hữu cơ")
 
     button.click()
 
-    assert captured == ["sort_O"]
+    assert captured == [("sort_O", "hardware", "female")]
 
 
 def test_settings_voice_test_buttons_cover_all_audio_events(qtbot):
@@ -151,7 +186,9 @@ def test_settings_voice_test_buttons_cover_all_audio_events(qtbot):
     page = SettingsPage(cfg)
     qtbot.addWidget(page)
     captured = []
-    page.test_voice_requested.connect(lambda command: captured.append(command))
+    page.test_voice_requested.connect(
+        lambda command, mode, gender: captured.append((command, mode, gender))
+    )
     labels = {
         "Test khởi động": "startup",
         "Test hữu cơ": "sort_O",
@@ -166,7 +203,22 @@ def test_settings_voice_test_buttons_cover_all_audio_events(qtbot):
     buttons = {btn.text(): btn for btn in page.audio_section.findChildren(QPushButton)}
     for label, event_key in labels.items():
         buttons[label].click()
-        assert captured[-1] == event_key
+        assert captured[-1] == (event_key, "hardware", "female")
+
+
+def test_settings_audio_selection_emits_runtime_sync_signals(qtbot):
+    page = SettingsPage(AppConfig())
+    qtbot.addWidget(page)
+    modes = []
+    genders = []
+    page.speaker_output_mode_changed.connect(modes.append)
+    page.speaker_voice_gender_changed.connect(genders.append)
+
+    page.audio_section.computer_button.click()
+    page.audio_section.male_voice_button.click()
+
+    assert modes == ["computer_speaker"]
+    assert genders == ["male"]
 
 
 def test_settings_hardware_test_button_emits_command(qtbot):

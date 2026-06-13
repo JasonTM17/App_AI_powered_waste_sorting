@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import Counter
+from contextlib import suppress
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QComboBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import AppConfig
+from app.core.dataset_catalog import DatasetCatalog
 from app.core.dataset_trust import DatasetTrustState, classify_dataset_item
 from app.core.waste_categories import (
     TRAINING_CLASS_ORDER_45,
@@ -31,9 +33,165 @@ from app.core.waste_categories import (
     default_class_id_for_name,
 )
 from app.ui.pages.capture import _fit_button_to_text, _resolve_queue_dir, _safe_mtime_ns
+from app.ui.widgets.flow_layout import FlowLayout
+from app.ui.widgets.safe_inputs import SafeComboBox
+from app.utils.logging import logger
 from app.utils.paths import dataset_db_path
 
-TRAINING_GRID_LIMIT = 120
+TRAINING_GRID_LIMIT = 80
+THUMBNAIL_BATCH_SIZE = 10
+
+
+class _TrainingDataWorker(QThread):
+    metadata_ready = Signal(int, object)
+    thumbnails_ready = Signal(int, object)
+    failed = Signal(int, str)
+
+    def __init__(
+        self,
+        request_id: int,
+        catalog_path: Path,
+        queue_dir: Path,
+        class_name: str,
+    ) -> None:
+        super().__init__()
+        self._request_id = request_id
+        self._catalog_path = catalog_path
+        self._queue_dir = queue_dir
+        self._class_name = class_name
+
+    def run(self) -> None:
+        started = time.perf_counter()
+        try:
+            payload = self._load_catalog_payload()
+            self.metadata_ready.emit(self._request_id, payload)
+            logger.info(
+                "training catalog ready class={} rows={} total={} elapsed_ms={:.0f}",
+                self._class_name,
+                len(payload["rows"]),
+                payload["total"],
+                (time.perf_counter() - started) * 1000,
+            )
+            self._decode_thumbnails(payload["rows"])
+            self._repair_catalog_if_needed(payload)
+        except Exception as exc:
+            logger.exception("training data load failed class={}", self._class_name)
+            self.failed.emit(self._request_id, str(exc))
+
+    def _load_catalog_payload(self) -> dict[str, object]:
+        catalog = DatasetCatalog(self._catalog_path)
+        try:
+            rows, total = catalog.list_items_for_box_class(
+                self._class_name,
+                limit=TRAINING_GRID_LIMIT,
+            )
+            counts = catalog.count_trust_states_for_box_class(self._class_name)
+            catalog_total = catalog.count_total()
+        finally:
+            catalog.close()
+        for row in rows:
+            row["selected_cls_name"] = self._class_name
+        if catalog_total > 0:
+            return {
+                "rows": rows,
+                "total": total,
+                "counts": counts,
+                "source": "catalog",
+                "catalog_total": catalog_total,
+            }
+
+        rows, total, counts = self._fallback_scan()
+        return {
+            "rows": rows,
+            "total": total,
+            "counts": counts,
+            "source": "fallback",
+            "catalog_total": catalog_total,
+        }
+
+    def _repair_catalog_if_needed(self, payload: dict[str, object]) -> None:
+        if self.isInterruptionRequested() or not self._queue_dir.exists():
+            return
+        queue_total = sum(1 for _ in self._queue_dir.glob("*.jpg"))
+        catalog_total = int(payload.get("catalog_total") or 0)
+        if queue_total == catalog_total:
+            return
+        logger.warning(
+            "training catalog mismatch queue={} catalog={}; re-indexing in background",
+            queue_total,
+            catalog_total,
+        )
+        catalog = DatasetCatalog(self._catalog_path)
+        try:
+            catalog.index_queue(self._queue_dir)
+        finally:
+            catalog.close()
+        if self.isInterruptionRequested():
+            return
+        refreshed = self._load_catalog_payload()
+        self.metadata_ready.emit(self._request_id, refreshed)
+        self._decode_thumbnails(refreshed["rows"])
+
+    def _fallback_scan(self) -> tuple[list[dict[str, object]], int, dict[str, int]]:
+        rows: list[dict[str, object]] = []
+        counts: Counter[str] = Counter()
+        total = 0
+        if not self._queue_dir.exists():
+            return rows, total, dict(counts)
+        for image_path in sorted(
+            self._queue_dir.glob("*.jpg"),
+            key=_safe_mtime_ns,
+            reverse=True,
+        ):
+            if self.isInterruptionRequested():
+                break
+            meta = _read_meta(image_path)
+            if not _meta_has_class(meta, self._class_name):
+                continue
+            total += 1
+            decision = classify_dataset_item(meta)
+            counts[decision.state.value] += 1
+            if len(rows) < TRAINING_GRID_LIMIT:
+                rows.append(
+                    {
+                        "image_path": str(image_path.resolve()),
+                        "source": str(meta.get("source") or "unknown"),
+                        "trust_state": decision.state.value,
+                        "cls_name": self._class_name,
+                    }
+                )
+        return rows, total, dict(counts)
+
+    def _decode_thumbnails(self, rows: list[dict[str, object]]) -> None:
+        batch: list[tuple[str, QImage]] = []
+        started = time.perf_counter()
+        decoded = 0
+        for row in rows:
+            if self.isInterruptionRequested():
+                break
+            path = str(row.get("image_path") or "")
+            image = QImage(path)
+            if image.isNull():
+                continue
+            image = image.scaled(
+                160,
+                120,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.FastTransformation,
+            )
+            batch.append((path, image))
+            decoded += 1
+            if len(batch) >= THUMBNAIL_BATCH_SIZE:
+                self.thumbnails_ready.emit(self._request_id, batch)
+                batch = []
+        if batch:
+            self.thumbnails_ready.emit(self._request_id, batch)
+        logger.info(
+            "training thumbnails decoded class={} count={} elapsed_ms={:.0f}",
+            self._class_name,
+            decoded,
+            (time.perf_counter() - started) * 1000,
+        )
 
 
 class TrainingPage(QWidget):
@@ -57,6 +215,13 @@ class TrainingPage(QWidget):
         self._training_status: dict[str, object] = {}
         self._icon_cache: dict[str, tuple[int, QIcon]] = {}
         self._loaded = False
+        self._load_request_id = 0
+        self._load_workers: list[_TrainingDataWorker] = []
+        self._grid_items: dict[str, QListWidgetItem] = {}
+        self._reload_timer = QTimer(self)
+        self._reload_timer.setSingleShot(True)
+        self._reload_timer.setInterval(160)
+        self._reload_timer.timeout.connect(self.reload)
         self._training_timer = QTimer(self)
         self._training_timer.setInterval(2500)
         self._training_timer.timeout.connect(self.training_status_requested.emit)
@@ -74,14 +239,13 @@ class TrainingPage(QWidget):
         flow = QVBoxLayout(flow_card)
         flow.setContentsMargins(20, 16, 20, 16)
         flow.setSpacing(12)
-        label_row = QHBoxLayout()
-        label_row.setSpacing(10)
+        label_row = FlowLayout(margin=0, h_spacing=10, v_spacing=10)
         flow.addLayout(label_row)
 
         label_title = QLabel("Nhãn")
         label_title.setObjectName("sectionTitle")
         label_row.addWidget(label_title)
-        self.class_select = QComboBox()
+        self.class_select = SafeComboBox()
         self.class_select.setEditable(True)
         self.class_select.setMinimumWidth(260)
         self.class_select.addItem("")
@@ -96,10 +260,9 @@ class TrainingPage(QWidget):
         self.label_status = QLabel("Nhập nhãn hợp lệ trước khi thêm ảnh hoặc chụp camera.")
         self.label_status.setObjectName("muted")
         self.label_status.setWordWrap(True)
-        label_row.addWidget(self.label_status, 1)
+        label_row.addWidget(self.label_status)
 
-        action_row = QHBoxLayout()
-        action_row.setSpacing(10)
+        action_row = FlowLayout(margin=0, h_spacing=10, v_spacing=10)
         flow.addLayout(action_row)
         self.btn_add_phone = QPushButton("Thêm ảnh thủ công")
         self.btn_add_phone.setObjectName("secondary")
@@ -124,7 +287,6 @@ class TrainingPage(QWidget):
         _fit_button_to_text(self.btn_open_web, 140)
         self.btn_open_web.clicked.connect(self.open_web_requested.emit)
         action_row.addWidget(self.btn_open_web)
-        action_row.addStretch()
         outer.addWidget(flow_card)
 
         train_card = QFrame()
@@ -160,8 +322,7 @@ class TrainingPage(QWidget):
         self.candidate_path.setWordWrap(True)
         train.addWidget(self.candidate_path)
 
-        train_actions = QHBoxLayout()
-        train_actions.setSpacing(10)
+        train_actions = FlowLayout(margin=0, h_spacing=10, v_spacing=10)
         self.btn_learn_refresh = QPushButton("Làm mới reference")
         self.btn_learn_refresh.setObjectName("secondary")
         _fit_button_to_text(self.btn_learn_refresh, 145)
@@ -191,7 +352,6 @@ class TrainingPage(QWidget):
         _fit_button_to_text(self.btn_load_candidate, 170)
         self.btn_load_candidate.clicked.connect(self._request_candidate_load)
         train_actions.addWidget(self.btn_load_candidate)
-        train_actions.addStretch()
         train.addLayout(train_actions)
         outer.addWidget(train_card)
 
@@ -214,6 +374,9 @@ class TrainingPage(QWidget):
         )
         outer.addWidget(self.grid, 1)
 
+        pen_idx = self.class_select.findText("Pen")
+        if pen_idx >= 0:
+            self.class_select.setCurrentIndex(pen_idx)
         self._on_label_changed()
 
     def _class_options(self) -> list[str]:
@@ -270,20 +433,40 @@ class TrainingPage(QWidget):
             self.reload()
 
     def reload(self) -> None:
+        started = time.perf_counter()
         self._loaded = True
+        for previous in self._load_workers:
+            previous.requestInterruption()
+        self._load_request_id += 1
+        request_id = self._load_request_id
         self.grid.clear()
+        self._grid_items.clear()
         raw, canonical, cls_id = self._label_target()
         if not raw or cls_id is None:
             self.stats.setText("Nhập nhãn hợp lệ để xem mẫu huấn luyện của class đó.")
             return
         qdir = self._queue_dir()
-        files = self._selected_class_files(qdir, canonical) if qdir.exists() else []
-        for image_path in files[:TRAINING_GRID_LIMIT]:
-            item = QListWidgetItem(self._icon_for_image(image_path), self._label_for_image(image_path))
-            item.setData(Qt.ItemDataRole.UserRole, str(image_path))
-            self.grid.addItem(item)
-        self._update_local_stats(qdir, canonical, len(files))
+        self.stats.setText(f"Đang tải mẫu {canonical} từ catalog...")
+        worker = _TrainingDataWorker(
+            request_id,
+            self._catalog_path,
+            qdir,
+            canonical,
+        )
+        worker.metadata_ready.connect(self._on_training_metadata_ready)
+        worker.thumbnails_ready.connect(self._on_training_thumbnails_ready)
+        worker.failed.connect(self._on_training_load_failed)
+        worker.finished.connect(lambda worker=worker: self._forget_load_worker(worker))
+        worker.finished.connect(worker.deleteLater)
+        self._load_workers.append(worker)
+        worker.start()
         self._request_learn_status()
+        logger.info(
+            "training page scheduled class={} request={} elapsed_ms={:.1f}",
+            canonical,
+            request_id,
+            (time.perf_counter() - started) * 1000,
+        )
 
     def _valid_label(self) -> bool:
         _raw, canonical, cls_id = self._label_target()
@@ -307,6 +490,65 @@ class TrainingPage(QWidget):
         ):
             button.setEnabled(valid)
         self._update_train_panel()
+        if self._loaded:
+            self._load_request_id += 1
+            self.stats.setText(f"Đang chuẩn bị tải mẫu {canonical or raw}...")
+            self._reload_timer.start()
+
+    def _on_training_metadata_ready(self, request_id: int, payload: object) -> None:
+        if request_id != self._load_request_id or not isinstance(payload, dict):
+            return
+        rows = payload.get("rows")
+        rows = rows if isinstance(rows, list) else []
+        self.grid.clear()
+        self._grid_items.clear()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            path = str(row.get("image_path") or "")
+            item = QListWidgetItem(self._label_for_catalog_row(row))
+            item.setData(Qt.ItemDataRole.UserRole, path)
+            self.grid.addItem(item)
+            self._grid_items[path] = item
+        raw, canonical, _cls_id = self._label_target()
+        class_name = canonical or raw
+        total = int(payload.get("total") or 0)
+        counts = payload.get("counts")
+        counts = counts if isinstance(counts, dict) else {}
+        excluded = int(counts.get(DatasetTrustState.EXCLUDED.value, 0)) + int(
+            counts.get(DatasetTrustState.QUARANTINE.value, 0)
+        )
+        self.stats.setText(
+            f"{class_name}: {total} ảnh trong queue. "
+            f"Đã duyệt/trainable: {int(counts.get(DatasetTrustState.TRAINABLE.value, 0))}, "
+            f"cần duyệt: {int(counts.get(DatasetTrustState.NEEDS_REVIEW.value, 0))}, "
+            f"holdout: {int(counts.get(DatasetTrustState.HOLDOUT.value, 0))}, "
+            f"bị loại/cách ly: {excluded}."
+        )
+
+    def _on_training_thumbnails_ready(self, request_id: int, batch: object) -> None:
+        if request_id != self._load_request_id or not isinstance(batch, list):
+            return
+        for path, image in batch:
+            item = self._grid_items.get(str(path))
+            if item is not None and isinstance(image, QImage):
+                item.setIcon(QIcon(QPixmap.fromImage(image)))
+
+    def _on_training_load_failed(self, request_id: int, message: str) -> None:
+        if request_id == self._load_request_id:
+            self.stats.setText(f"Không tải được dữ liệu huấn luyện: {message}")
+
+    def _forget_load_worker(self, worker: _TrainingDataWorker) -> None:
+        with suppress(ValueError):
+            self._load_workers.remove(worker)
+
+    @staticmethod
+    def _label_for_catalog_row(row: dict[str, object]) -> str:
+        class_name = str(row.get("selected_cls_name") or row.get("cls_name") or "?")
+        trust_state = str(row.get("trust_state") or "")
+        source = str(row.get("source") or "unknown").replace("_", " ")
+        status = trust_state.replace("_", " ")
+        return f"{status}: {class_name}\n{source}" if status else f"{class_name}\n{source}"
 
     def _add_phone_images(self) -> None:
         _raw, canonical, cls_id = self._label_target()
@@ -473,7 +715,7 @@ class TrainingPage(QWidget):
             160,
             120,
             Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
+            Qt.TransformationMode.FastTransformation,
         )
         icon = QIcon(pix)
         self._icon_cache[key] = (mtime_ns, icon)

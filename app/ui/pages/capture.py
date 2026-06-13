@@ -14,7 +14,6 @@ from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
-    QComboBox,
     QFileDialog,
     QFrame,
     QLabel,
@@ -45,10 +44,11 @@ from app.core.waste_categories import (
     canonical_class_name,
     default_class_id_for_name,
 )
+from app.ui.widgets.safe_inputs import SafeComboBox
 from app.utils.dataset_import import import_yolo_dataset_to_queue, label_map_for_preset
 from app.utils.paths import dataset_db_path, resource_path
 
-DISPLAY_LIMIT = 200
+DISPLAY_LIMIT = 120
 
 class CapturePage(QWidget):
     mode_changed = Signal(str)
@@ -118,7 +118,7 @@ class CapturePage(QWidget):
         self.rb_manual.toggled.connect(lambda v: v and self.mode_changed.emit("manual"))
         self.rb_auto.toggled.connect(lambda v: v and self.mode_changed.emit("auto_low_conf"))
 
-        self.class_select = QComboBox()
+        self.class_select = SafeComboBox()
         self.class_select.setMinimumWidth(220)
         for _cls_id, name in self._class_options():
             self.class_select.addItem(name)
@@ -136,7 +136,7 @@ class CapturePage(QWidget):
         btn_capture_camera.clicked.connect(self._capture_camera_sample)
         action_row.addWidget(btn_capture_camera)
 
-        self.hard_negative_reason_select = QComboBox()
+        self.hard_negative_reason_select = SafeComboBox()
         self.hard_negative_reason_select.setMinimumWidth(170)
         for reason in HARD_NEGATIVE_REASONS:
             self.hard_negative_reason_select.addItem(HARD_NEGATIVE_REASON_LABELS[reason], reason)
@@ -203,16 +203,16 @@ class CapturePage(QWidget):
         btn_export.clicked.connect(self._export)
         catalog_row.addWidget(btn_export)
 
-        self.filter_source = QComboBox()
+        self.filter_source = SafeComboBox()
         self.filter_source.addItem("Tất cả nguồn", "")
-        self.filter_trust = QComboBox()
+        self.filter_trust = SafeComboBox()
         self.filter_trust.addItem("Tất cả trạng thái", "")
         self.filter_trust.addItem("Trainable", "trainable")
         self.filter_trust.addItem("Cần duyệt", "needs_review")
         self.filter_trust.addItem("Hard negative", "hard_negative")
         self.filter_trust.addItem("Holdout", "holdout")
         self.filter_trust.addItem("Không train", "excluded")
-        self.filter_class = QComboBox()
+        self.filter_class = SafeComboBox()
         self.filter_class.addItem("Tất cả nhãn", "")
 
         filter_row.addWidget(QLabel("Lọc:"))
@@ -650,7 +650,7 @@ class CapturePage(QWidget):
             160,
             120,
             Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
+            Qt.TransformationMode.FastTransformation,
         )
         icon = QIcon(pix)
         self._icon_cache[key] = (mtime_ns, icon)
