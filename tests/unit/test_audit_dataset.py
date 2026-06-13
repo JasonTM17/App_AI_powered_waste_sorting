@@ -8,6 +8,7 @@ from scripts import audit_dataset
 from scripts.audit_dataset import (
     _build_blocked_reason_report,
     _build_hard_negative_report,
+    _build_trainset_integrity_report,
     _read_yolo_data_yaml,
     _training_class_alignment,
 )
@@ -56,6 +57,40 @@ def test_training_class_alignment_blocks_catalog_drift(tmp_path):
     assert alignment["promotable_class_contract"] is False
     assert alignment["catalog_classes_not_in_training_order"] == ["Mystery class"]
     assert alignment["catalog_classes_not_in_trainset"] == ["Mystery class"]
+
+
+def test_trainset_integrity_reports_cross_split_duplicates_and_route_boxes(tmp_path):
+    data_yaml = tmp_path / "data.yaml"
+    _write_training_order_yaml(data_yaml)
+    paper_id = TRAINING_CLASS_ORDER_45.index("Paper")
+    for split in ("train", "valid"):
+        image_dir = tmp_path / "images" / split
+        label_dir = tmp_path / "labels" / split
+        image_dir.mkdir(parents=True)
+        label_dir.mkdir(parents=True)
+        image_path = image_dir / f"same_{split}.jpg"
+        Image.new("RGB", (100, 80), (220, 220, 220)).save(image_path)
+        (label_dir / f"same_{split}.txt").write_text(
+            f"{paper_id} 0.5 0.5 0.4 0.4\n",
+            encoding="utf-8",
+        )
+    missing_dir = tmp_path / "images" / "test"
+    missing_dir.mkdir(parents=True)
+    Image.new("RGB", (100, 80), (10, 10, 10)).save(missing_dir / "missing_label.jpg")
+    bad_label_dir = tmp_path / "labels" / "test"
+    bad_label_dir.mkdir(parents=True)
+    (bad_label_dir / "bad.txt").write_text("999 2 2 2 2\n", encoding="utf-8")
+
+    summary = _read_yolo_data_yaml(data_yaml)
+    report = _build_trainset_integrity_report(data_yaml, summary)
+
+    assert report["image_total"] == 3
+    assert report["duplicate_image_groups"] == 1
+    assert report["cross_split_duplicate_groups"] == 1
+    assert report["missing_label_files"] == 1
+    assert report["route_boxes"]["I"] == 2
+    assert report["split_route_boxes"]["train"]["I"] == 1
+    assert report["split_route_boxes"]["valid"]["I"] == 1
 
 
 def _write_item(queue, stem, meta=None):

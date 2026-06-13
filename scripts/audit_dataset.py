@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import json
 import sys
 from collections import Counter, defaultdict
@@ -30,6 +31,7 @@ from app.core.source_quality_report import build_source_quality_report  # noqa: 
 from app.core.waste_categories import (  # noqa: E402
     TRAINING_CLASS_ORDER_45,
     canonical_class_name,
+    category_for_class,
 )
 from app.utils.paths import dataset_db_path  # noqa: E402
 
@@ -85,6 +87,7 @@ def main() -> int:
     trainset = _read_yolo_data_yaml(args.trainset_data)
     trainset["alignment"] = _training_class_alignment(trainable_classes, trainset)
     trainset["catalog_alignment"] = _training_class_alignment(classes, trainset)
+    trainset["integrity"] = _build_trainset_integrity_report(args.trainset_data, trainset)
     report = {
         "queue_dir": str(args.queue.resolve()),
         "catalog_path": str(args.db.resolve()),
@@ -167,6 +170,18 @@ def main() -> int:
             print("  errors:")
             for error in trainset["errors"]:
                 print(f"    {error}")
+        integrity = trainset["integrity"]
+        if integrity["exists"]:
+            print("  integrity:")
+            print(f"    images: {integrity['image_total']}")
+            print(f"    labels: {integrity['label_total']}")
+            print(f"    duplicate image groups: {integrity['duplicate_image_groups']}")
+            print(
+                "    cross-split duplicate groups: "
+                f"{integrity['cross_split_duplicate_groups']}"
+            )
+            print(f"    missing label files: {integrity['missing_label_files']}")
+            print(f"    invalid label lines: {integrity['invalid_label_lines']}")
     strict_failed = args.strict_trainset and not trainset["alignment"]["promotable_class_contract"]
     return 1 if strict_failed else 0
 
@@ -486,6 +501,140 @@ def _read_yolo_data_yaml(yaml_path: Path) -> dict[str, Any]:
     if summary["nc"] and summary["nc"] != len(names):
         summary["errors"].append(f"nc={summary['nc']} but parsed {len(names)} names")
     return summary
+
+
+def _build_trainset_integrity_report(
+    yaml_path: Path,
+    trainset_summary: dict[str, Any],
+) -> dict[str, Any]:
+    root = yaml_path.parent
+    names = {
+        int(cls_id): str(name)
+        for cls_id, name in (trainset_summary.get("names") or {}).items()
+    }
+    report: dict[str, Any] = {
+        "root": str(root.resolve()),
+        "exists": yaml_path.exists() and root.exists(),
+        "image_total": 0,
+        "label_total": 0,
+        "split_images": {"train": 0, "valid": 0, "test": 0},
+        "split_labels": {"train": 0, "valid": 0, "test": 0},
+        "missing_label_files": 0,
+        "invalid_label_lines": 0,
+        "route_boxes": {"O": 0, "R": 0, "I": 0},
+        "split_route_boxes": {
+            "train": {"O": 0, "R": 0, "I": 0},
+            "valid": {"O": 0, "R": 0, "I": 0},
+            "test": {"O": 0, "R": 0, "I": 0},
+        },
+        "duplicate_image_groups": 0,
+        "duplicate_image_files": 0,
+        "cross_split_duplicate_groups": 0,
+        "cross_split_duplicate_files": 0,
+        "duplicate_examples": [],
+        "invalid_label_examples": [],
+    }
+    if not report["exists"]:
+        return report
+
+    by_hash: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for split in ("train", "valid", "test"):
+        image_dir = root / "images" / split
+        label_dir = root / "labels" / split
+        image_paths = [
+            path
+            for ext in ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.webp")
+            for path in image_dir.glob(ext)
+        ]
+        for image_path in sorted(image_paths):
+            report["image_total"] += 1
+            report["split_images"][split] += 1
+            image_hash = _sha256_file(image_path)
+            by_hash[image_hash].append(
+                {
+                    "split": split,
+                    "path": str(image_path.relative_to(root)),
+                }
+            )
+            label_path = label_dir / f"{image_path.stem}.txt"
+            if not label_path.exists():
+                report["missing_label_files"] += 1
+                continue
+            report["label_total"] += 1
+            report["split_labels"][split] += 1
+            _scan_yolo_label_file(label_path, split, names, report, root)
+
+    duplicate_groups = [items for items in by_hash.values() if len(items) > 1]
+    cross_split_groups = [
+        items for items in duplicate_groups if len({item["split"] for item in items}) > 1
+    ]
+    report["duplicate_image_groups"] = len(duplicate_groups)
+    report["duplicate_image_files"] = sum(len(items) for items in duplicate_groups)
+    report["cross_split_duplicate_groups"] = len(cross_split_groups)
+    report["cross_split_duplicate_files"] = sum(len(items) for items in cross_split_groups)
+    report["duplicate_examples"] = cross_split_groups[:20]
+    return report
+
+
+def _scan_yolo_label_file(
+    label_path: Path,
+    split: str,
+    names: dict[int, str],
+    report: dict[str, Any],
+    root: Path,
+) -> None:
+    try:
+        lines = label_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        report["invalid_label_lines"] += 1
+        _append_invalid_label_example(report, root, label_path, "read_error")
+        return
+    for line_no, raw_line in enumerate(lines, start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) != 5:
+            report["invalid_label_lines"] += 1
+            _append_invalid_label_example(report, root, label_path, f"line_{line_no}:shape")
+            continue
+        try:
+            cls_id = int(parts[0])
+            cx, cy, width, height = (float(value) for value in parts[1:])
+        except ValueError:
+            report["invalid_label_lines"] += 1
+            _append_invalid_label_example(report, root, label_path, f"line_{line_no}:parse")
+            continue
+        if cls_id not in names or not (0 <= cx <= 1 and 0 <= cy <= 1) or not (0 < width <= 1 and 0 < height <= 1):
+            report["invalid_label_lines"] += 1
+            _append_invalid_label_example(report, root, label_path, f"line_{line_no}:range")
+            continue
+        route = category_for_class(names[cls_id]).code
+        report["route_boxes"][route] += 1
+        report["split_route_boxes"][split][route] += 1
+
+
+def _append_invalid_label_example(
+    report: dict[str, Any],
+    root: Path,
+    label_path: Path,
+    reason: str,
+) -> None:
+    if len(report["invalid_label_examples"]) >= 20:
+        return
+    try:
+        rel_path = str(label_path.relative_to(root))
+    except ValueError:
+        rel_path = str(label_path)
+    report["invalid_label_examples"].append({"path": rel_path, "reason": reason})
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _parse_inline_names(value: str, errors: list[str]) -> dict[int, str]:
