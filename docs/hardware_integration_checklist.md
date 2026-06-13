@@ -151,8 +151,9 @@ Before using camera-driven actuation with real waste, confirm all items below:
    so the dispatch guard can arm.
 4. Place one representative item at a time inside the ROI:
    - Huu co: `Organic`.
-   - Tai che: `Plastic bottle` or `Paper`.
-   - Vo co: `Disposable tableware`, `Ceramic`, or `Unknown object` fallback
+   - Tai che: `Plastic bottle`, `Paper`, `Disposable tableware`, dirty nylon,
+     milk-tea cups, instant-noodle cups, and foam/styrofoam packaging.
+   - Vo co: `Ceramic`, `Pen`, `Battery`, `Toothbrush`, or `Unknown object` fallback
      for a pen while the production model still lacks `Pen`.
 5. Confirm UI chain:
    - detected class;
