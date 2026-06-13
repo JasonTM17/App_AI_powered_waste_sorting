@@ -82,14 +82,6 @@ class AdminLoginDialog(QDialog):
         form.addRow("Mật khẩu", password_row)
         root.addWidget(form_box)
 
-        auth_status = QLabel(
-            "Xác thực: PostgreSQL. Dùng mật khẩu tài khoản Admin, "
-            "không dùng mật khẩu kết nối cơ sở dữ liệu."
-        )
-        auth_status.setObjectName("muted")
-        auth_status.setWordWrap(True)
-        root.addWidget(auth_status)
-
         self.message = QLabel("")
         self.message.setObjectName("error")
         self.message.setWordWrap(True)
