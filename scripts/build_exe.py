@@ -10,6 +10,7 @@ import PyInstaller.__main__
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
+PYINSTALLER_BUILD = BUILD / "pyinstaller"
 APP_NAME = "TrashSorterPro"
 
 
@@ -68,11 +69,15 @@ def main() -> int:
             print(f"warn: could not remove {d} (probably locked): {e}")
             print("      proceeding — PyInstaller will overwrite reachable files")
 
+    PYINSTALLER_BUILD.mkdir(parents=True, exist_ok=True)
     args = [
         "--name", APP_NAME,
         "--noconsole",
         "--noconfirm",
         "--clean",
+        "--distpath", str(DIST),
+        "--workpath", str(PYINSTALLER_BUILD),
+        "--specpath", str(PYINSTALLER_BUILD),
     ]
     for d in _datas():
         args.extend(["--add-data", d])
@@ -84,8 +89,7 @@ def main() -> int:
     _repair_bundled_ssl_dlls()
     print(f"\n[OK] Build complete: {DIST / APP_NAME}")
 
-    # Drop shortcuts at project root + Desktop so user doesn't have to
-    # dig into dist/TrashSorterPro/ to launch the app.
+    # Keep generated shortcuts out of the source root.
     try:
         from scripts.make_shortcuts import main as _make_shortcuts
         _make_shortcuts()

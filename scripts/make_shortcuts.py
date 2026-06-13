@@ -1,7 +1,7 @@
 """Create Windows .lnk shortcuts to TrashSorterPro.exe.
 
-Drops two shortcuts so the user doesn't have to dig into dist/:
-  - <project_root>/Trash Sorter Pro.lnk
+Drops two shortcuts so the user doesn't have to dig into the app folder:
+  - <project_root>/dist/Trash Sorter Pro.lnk
   - <Desktop>/Trash Sorter Pro.lnk
 
 Pure-PowerShell underneath so we don't need pywin32 in the build env.
@@ -48,6 +48,10 @@ def _make_lnk(target: Path, link: Path, icon: Path | None) -> None:
     )
 
 
+def _shortcut_targets() -> list[Path]:
+    return [ROOT / "dist" / NAME, _desktop_dir() / NAME]
+
+
 def main() -> int:
     if os.name != "nt":
         print("not Windows; skipping shortcut creation")
@@ -55,8 +59,7 @@ def main() -> int:
     if not EXE.exists():
         print(f"exe not found at {EXE} — build first")
         return 1
-    targets = [ROOT / NAME, _desktop_dir() / NAME]
-    for link in targets:
+    for link in _shortcut_targets():
         try:
             link.parent.mkdir(parents=True, exist_ok=True)
             _make_lnk(EXE, link, ICON if ICON.exists() else None)
