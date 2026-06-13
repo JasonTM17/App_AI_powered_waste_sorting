@@ -51,10 +51,10 @@ Open Serial Monitor at `9600`, newline:
 4. `MP3:ONLINE` -> `MP3RX:*` proving the TF card/board replied.
 5. `MP3:TF` -> `MP3TX:7E 03 35 01 EF` and `ACK:MP3:TF`.
 6. `MP3:VOL:30` -> `MP3TX:7E 03 31 1E EF` and `ACK:MP3:VOL:30`.
-7. `AUDIO:1` through `AUDIO:7` -> `MP3TX:7E 04 41 00 <track> EF`, `ACK:AUDIO:<track>`, and real sound from the red board.
-8. `huuco` -> track 2, D6=90/D7=180, wait 2000ms, return wait, `ACK:O`.
-9. `taiche` -> track 3, D6=145/D7=180, wait 2000ms, return wait, `ACK:I`.
-10. `voco` -> track 4, D6=90/D7=0, wait 2000ms, return wait, `ACK:R`.
+7. `AUDIO:1` through `AUDIO:8` -> `MP3TX:7E 04 41 00 <track> EF`, `ACK:AUDIO:<track>`, and real sound from the red board.
+8. `huuco` -> track 2, D6=90/D7=180, hold 1800ms, smooth return, `ACK:O`.
+9. `taiche` -> track 3, D6=145/D7=180, hold 1800ms, smooth return, `ACK:I`.
+10. `voco` -> track 4, D6=90/D7=0, hold 1800ms, smooth return, `ACK:R`.
 11. `HOME:90:85`, `HOME:90:83`, `HOME:90:87`, `HOME:88:85`, `HOME:92:85` -> choose the upright tray candidate.
 12. `SORTTEST:R:90:0`, `145:180`, `180:180`, `0:180`, `180:0`, `0:0`, `45:180`, `180:45` -> choose the Vo co direction that fully dumps toward the indicated bin.
 13. Trigger D10/D11/D12 sensors and confirm `PROX:O/I/R` plus tracks 5/6/7 without servo movement.
@@ -69,6 +69,32 @@ Close Serial Monitor before app tests.
 - `voco` via app command `R` returned `ACK:R` and emitted `AUDIO:R:4:sort`.
 - `taiche` via app command `I` returned `ACK:I` and emitted
   `AUDIO:I:3:sort`.
+
+2026-06-13 post-flash evidence from COM8:
+
+- Current firmware compiled and uploaded as `arduino:avr:uno`.
+- Hardware audio-only tracks `2`, `4`, `3`, and warning track `8` returned
+  `MP3RX:*` plus their matching `ACK:AUDIO:<track>`.
+- Servo motion now uses 2-degree steps at 10ms intervals, including the return
+  to HOME, then settles for 250ms and detaches to reduce post-sort vibration.
+- Measured full-cycle ACK times: `O=3500ms`, `R=3390ms`, `I=3500ms`, all below
+  the desktop `4500ms` timeout.
+- Evidence: `audit/hardware/uart-audio-only-post-flash-20260613.json` and
+  `audit/hardware/uart-servo-smooth-final-20260613.json`.
+
+## Evidence Handling Policy
+
+- Keep raw screenshots, generated JSON reports, and one-off camera captures
+  local under `audit/` unless a reviewer explicitly asks for a specific
+  artifact.
+- When sharing evidence in Git, summarize the run in this checklist or a
+  curated report under `reports/`; do not commit raw local DBs, device configs,
+  session tokens, `.env*`, or screenshots that expose private account data.
+- A hardware acceptance note should include date, COM port, firmware profile,
+  commands tested, measured ACK times, observed audio track numbers, and whether
+  the desktop/web UI showed the same route payloads.
+- A failed run should record the first failing command and the observed board
+  reply. Avoid hiding flaky hardware behavior behind a passing later rerun.
 
 ## App Manual Hardware Test
 
@@ -100,6 +126,21 @@ If any two routes look identical, inspect both D6 and D7 because the production 
 - D6=45/90/145 with D7=180.
 
 If changing D6 does not visibly change the path, check the D6 signal wire, D6 servo power, servo horn mounting, common GND, and mechanical linkage. If changing D6 works but the selected angles are too close, choose three distinct pairs from the sweep and update `firmware/arduino_servo/arduino_servo.ino` plus `app/core/hardware_profile.py`.
+
+## Production Acceptance Gate
+
+Before using camera-driven actuation with real waste, confirm all items below:
+
+- Exactly one external USB camera is selected; laptop webcams remain disabled.
+- Exactly one eligible USB/Arduino/CH340 serial port is selected or auto-saved.
+- `PING` returns `PONG` from the same port used by the app.
+- Manual `O`, `R`, and `I` tests each return the matching `ACK:<cmd>` within
+  the configured desktop timeout.
+- OPEN-SMART startup/sort/warning/proximity tracks play from the hardware board,
+  and laptop MP3 preview remains servo-safe.
+- Actuation Test Mode is enabled only for supervised camera-to-servo testing.
+- ROI, stable-frame guard, cooldown, empty-tray re-arm, and busy/ACK handling
+  are visible in Live status before placing real objects into the tray.
 
 ## Camera To Actuator E2E
 

@@ -12,7 +12,18 @@
     "conf_threshold": 0.4,
     "iou_threshold": 0.45,
     "input_size": 640,
-    "half_precision": false
+    "half_precision": false,
+    "specialist": {
+      "enabled": true,
+      "path": "models/new-class-specialist.pt",
+      "class_thresholds": {
+        "Pen": 0.15,
+        "Battery": 0.3,
+        "Toothbrush": 0.25
+      },
+      "nms_iou": 0.7,
+      "overlap_iou": 0.5
+    }
   },
   "uart": {
     "port": "",
@@ -246,8 +257,8 @@
     },
     {
       "class_name": "Disposable tableware",
-      "command": "R",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
@@ -414,8 +425,8 @@
     },
     {
       "class_name": "Foam food box",
-      "command": "R",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
@@ -498,14 +509,14 @@
     },
     {
       "class_name": "Instant noodle cup",
-      "command": "R",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
       "class_name": "Styrofoam cup",
-      "command": "R",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     }
   ],

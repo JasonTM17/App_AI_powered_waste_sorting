@@ -75,6 +75,79 @@ def test_export_queue_removes_stale_images_labels_and_caches(tmp_path):
     assert not stale_cache.exists()
 
 
+def test_export_queue_keeps_duplicate_image_hashes_in_same_split(tmp_path):
+    queue = tmp_path / "queue"
+    out = tmp_path / "out"
+    queue.mkdir()
+    for name, split in (("dup_a", "train"), ("dup_b", "test")):
+        image_path = queue / f"{name}.jpg"
+        Image.new("RGB", (100, 100), "white").save(image_path)
+        image_path.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "source": "manual_import",
+                    "split": split,
+                    "split_lock": True,
+                    "original_file": f"{name}.jpg",
+                    "boxes": [
+                        {"cls_id": 18, "cls_name": "Paper", "xyxy": [10, 10, 50, 50]},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    stats = _export_queue(
+        queue,
+        out,
+        {18: "Paper"},
+        train_ratio=1.0,
+        valid_ratio=0.0,
+    )
+
+    assert stats["images"] == 2
+    assert stats["duplicate_image_groups"] == 1
+    assert stats["duplicate_image_files"] == 2
+    assert stats["split_locked_groups"] == 1
+    assert stats["splits"] == {"train": 0, "valid": 0, "test": 2}
+    assert not (out / "labels" / "train" / "dup_a.txt").exists()
+    assert (out / "labels" / "test" / "dup_a.txt").exists()
+    assert (out / "labels" / "test" / "dup_b.txt").exists()
+
+
+def test_export_queue_skips_invalid_bbox_without_exporting_empty_image(tmp_path):
+    queue = tmp_path / "queue"
+    out = tmp_path / "out"
+    queue.mkdir()
+    image_path = queue / "bad_bbox.jpg"
+    Image.new("RGB", (100, 100), "white").save(image_path)
+    image_path.with_suffix(".json").write_text(
+        json.dumps(
+            {
+                "source": "manual_import",
+                "boxes": [
+                    {"cls_id": 18, "cls_name": "Paper", "xyxy": [50, 50, 10, 80]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    stats = _export_queue(
+        queue,
+        out,
+        {18: "Paper"},
+        train_ratio=1.0,
+        valid_ratio=0.0,
+    )
+
+    assert stats["images"] == 0
+    assert stats["boxes"] == 0
+    assert stats["skipped_invalid_bbox"] == 1
+    assert stats["skipped_empty_after_filter"] == 1
+    assert not (out / "labels" / "train" / "bad_bbox.txt").exists()
+
+
 def test_export_queue_remaps_known_name_to_model_class_id(tmp_path):
     queue = tmp_path / "queue"
     out = tmp_path / "out"

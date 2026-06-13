@@ -22,6 +22,9 @@ class FakeSerial:
         if data.startswith(b"SORT:"):
             cmd = data.decode().split(":")[1]
             self._rx.append(f"ACK:{cmd}\n".encode())
+        if data.startswith(b"SORTSILENT:"):
+            cmd = data.decode().strip().split(":")[1]
+            self._rx.append(f"ACK:{cmd}\n".encode())
         if data == b"PING\n":
             self._rx.append(b"PONG\n")
         return len(data)
@@ -121,6 +124,28 @@ def test_plain_group_sends_block_command_and_waits_for_ack(monkeypatch, qtbot):
     w.wait(2000)
     assert instances[0]._tx == [b"PING\n", b"PROFILE\n", b"voco\n"]
     assert acks and acks[0] == (3, "R", "ok")
+
+
+def test_plain_group_silent_sort_sends_audio_free_command(monkeypatch, qtbot):
+    instances = []
+
+    def factory(port, baud, timeout=0.1):
+        s = FakeSerial(port, baud, timeout)
+        instances.append(s)
+        return s
+
+    monkeypatch.setattr("app.core.uart.serial.Serial", factory)
+    acks = []
+    w = UartWorker(port="COM_FAKE", baud=9600, ack_timeout_ms=200, protocol="plain_group")
+    w.ack_received.connect(lambda tid, c, st, rtt: acks.append((tid, c, st)))
+    w.start()
+    _wait(lambda: w.is_connected, 2.0)
+    w.send_silent(track_id=4, command="I", conf=0.8)
+    _wait(lambda: len(acks) >= 1, 2.0)
+    w.stop()
+    w.wait(2000)
+    assert instances[0]._tx == [b"PING\n", b"PROFILE\n", b"SORTSILENT:I\n"]
+    assert acks and acks[0] == (4, "I", "ok")
 
 
 def test_audio_only_test_sends_track_and_emits_ack(monkeypatch, qtbot):

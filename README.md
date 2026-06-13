@@ -69,15 +69,36 @@ python -m uv run python scripts/manage_auth_accounts.py create viewer --role use
 
 Quick account notes:
 
-- `admin` / `admin-pass-123` - current local admin account after password change
-- `user` / `user-pass-123` - current local user account after password change
-- `admin` / `admin123` - initial local dev default admin before forced password change
-- `user` / `user123` - initial local dev default user before forced password change
-- `owner` - bootstrap/admin account for production-style setup, set password locally
-- `viewer` - bootstrap/user account for production-style setup, set password locally
+- `admin` / `admin123` - initial local dev default admin before forced password change.
+- `user` / `user123` - initial local dev default user before forced password change.
+- `owner` - bootstrap/admin account for production-style setup; set password locally.
+- `viewer` - bootstrap/user account for production-style setup; set password locally.
+- Member demo usernames: `nguyen-son`, `ngoc-quyen`, `gia-kiet`, `minh-huy`,
+  and `hong-thuy`.
 
-Passwords for non-default accounts are intentionally not stored in this repo.
-Reset or rotate them locally with `scripts/manage_auth_accounts.py set-password <username>`.
+Do not commit rotated local passwords, generated auth DBs, `.env*`, or real
+PostgreSQL URLs. Keep production credentials in the operator password manager
+and set them through environment variables on the target machine.
+
+Seed or refresh the five member accounts locally with:
+
+```powershell
+python -m uv run python scripts/seed_member_accounts.py
+```
+
+The script generates one-time temporary passwords, prints them to the terminal,
+updates display names, and revokes old sessions for accounts it refreshes. Save
+the generated values outside the repo, then rotate them with:
+
+```powershell
+python -m uv run python scripts/manage_auth_accounts.py set-password <username>
+```
+
+Set or repair display names without changing passwords:
+
+```powershell
+python -m uv run python scripts/manage_auth_accounts.py set-display-name nguyen-son "Nguyen Son"
+```
 
 Auth configuration:
 
@@ -409,7 +430,9 @@ The current real hardware profile follows the user-provided block diagram and re
 - Sensor events only play tracks `5/6/7` and publish `PROX:*`; they do not move D6/D7 or create a sorting history row.
 - This profile does not use HC-SR04 fullness sensors because D6/D7 are servo pins.
 - If UART config is blank and exactly one USB/Arduino/CH340 port is found, the app auto-selects and saves it.
-- UART ACK timeout defaults to `4500ms` because firmware returns `ACK:<cmd>` after the 2000ms servo hold and return-to-wait movement.
+- UART ACK timeout defaults to `4500ms`. Firmware holds the dump angle for
+  `1800ms`, returns to HOME in 2-degree/10ms steps, settles for `250ms`, then
+  detaches the servos. Measured O/R/I ACK times remain below `3500ms`.
 - Admin desktop/web can test each bin and see payload, port, ACK/no ACK, and elapsed time.
 - Admin web also has raw D6/D7 calibration tests for replaying candidate positions before locking a production angle.
 - If UART is off, UI shows `UART OFF, khong gui xuong phan cung`.

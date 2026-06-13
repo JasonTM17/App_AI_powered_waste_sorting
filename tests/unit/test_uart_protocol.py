@@ -27,8 +27,14 @@ def test_encode_plain_group_for_block_firmware():
 
 
 def test_encode_silent_sort_uses_audio_free_firmware_command():
-    assert encode_sort("O", 0.92, protocol="plain_group", silent=True) == b"SORTSILENT:O\n"
-    assert encode_sort("R", 0.92, protocol="sort_line", silent=True) == b"SORTSILENT:R\n"
+    assert (
+        encode_sort("O", 0.92, protocol="plain_group", silent=True)
+        == b"SORTSILENT:O\n"
+    )
+    assert (
+        encode_sort("R", 0.92, protocol="sort_line", silent=True)
+        == b"SORTSILENT:R\n"
+    )
 
 
 def test_expected_ack_command_for_plain_group_payloads_matches_app_commands():

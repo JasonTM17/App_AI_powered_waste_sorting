@@ -17,6 +17,7 @@
  *   huuco   -> track 2, D6=90,  D7=180, then wait position
  *   voco    -> track 4, D6=90,  D7=0,   then wait position
  *   taiche  -> track 3, D6=145, D7=180, then wait position
+ *   SORTSILENT:<O|R|I> -> same servo route without hardware audio
  *
  * Sensor audio:
  *   D10 LOW -> track 5
@@ -50,13 +51,15 @@ const uint8_t SENSOR_VOCO_PIN = 12;
 const int SERVO_A_WAIT_DEFAULT = 90;
 const int SERVO_B_WAIT_DEFAULT = 85;
 const uint8_t DEFAULT_VOLUME = 30;
-const unsigned long SORT_HOLD_MS = 2000;
+const unsigned long SORT_HOLD_MS = 1800;
 const unsigned long SENSOR_AUDIO_COOLDOWN_MS = 2000;
 const unsigned long CALIBRATION_HOLD_MS = 1800;
 const unsigned long PRE_SORT_HOME_SETTLE_MS = 0;
-const unsigned long RETURN_SETTLE_MS = 1500;
+const unsigned long RETURN_SETTLE_MS = 250;
 const unsigned long MP3_RESPONSE_WINDOW_MS = 260;
-const unsigned long SERVO_ATTACH_SETTLE_MS = 180;
+const unsigned long SERVO_ATTACH_SETTLE_MS = 100;
+const int SERVO_MOVE_STEP_DEGREES = 2;
+const unsigned long SERVO_MOVE_STEP_MS = 10;
 const bool SERVO_DETACH_WHEN_IDLE = true;
 
 Servo servoA;
@@ -64,6 +67,8 @@ Servo servoB;
 
 int servoAWait = SERVO_A_WAIT_DEFAULT;
 int servoBWait = SERVO_B_WAIT_DEFAULT;
+int servoACurrent = SERVO_A_WAIT_DEFAULT;
+int servoBCurrent = SERVO_B_WAIT_DEFAULT;
 bool servosAttached = false;
 
 struct SensorRuntime {
@@ -264,8 +269,8 @@ void ensure_servos_attached() {
   }
   // Cache the home angle before attach so serial reset/startup does not make
   // the servos hunt from an undefined pulse width.
-  servoA.write(servoAWait);
-  servoB.write(servoBWait);
+  servoA.write(servoACurrent);
+  servoB.write(servoBCurrent);
   servoA.attach(SERVO_A_PIN);
   servoB.attach(SERVO_B_PIN);
   servosAttached = true;
@@ -282,10 +287,26 @@ void idle_servos() {
   servosAttached = false;
 }
 
-void move_to_wait() {
+void move_servos_smooth(int servoATarget, int servoBTarget) {
   ensure_servos_attached();
-  servoA.write(servoAWait);
-  servoB.write(servoBWait);
+  int startA = servoACurrent;
+  int startB = servoBCurrent;
+  int maxDelta = max(abs(servoATarget - startA), abs(servoBTarget - startB));
+  int steps = max(1, (maxDelta + SERVO_MOVE_STEP_DEGREES - 1) / SERVO_MOVE_STEP_DEGREES);
+
+  for (int step = 1; step <= steps; step++) {
+    int nextA = startA + ((servoATarget - startA) * step) / steps;
+    int nextB = startB + ((servoBTarget - startB) * step) / steps;
+    servoA.write(nextA);
+    servoB.write(nextB);
+    servoACurrent = nextA;
+    servoBCurrent = nextB;
+    delay_with_sensor_polling(SERVO_MOVE_STEP_MS);
+  }
+}
+
+void move_to_wait() {
+  move_servos_smooth(servoAWait, servoBWait);
 }
 
 bool is_uint_string(const String &value) {
@@ -354,7 +375,7 @@ void flush_pending_sensor_audio() {
   }
 }
 
-void run_sort(char cmd) {
+void run_sort(char cmd, bool playAudio) {
   if (sortInProgress) {
     Serial.print(F("NACK:"));
     Serial.print(cmd);
@@ -376,9 +397,10 @@ void run_sort(char cmd) {
 
   move_to_wait();
   delay_with_sensor_polling(PRE_SORT_HOME_SETTLE_MS);
-  play_track_logged(track, cmd, "sort");
-  servoA.write(servoAValue);
-  servoB.write(servoBValue);
+  if (playAudio) {
+    play_track_logged(track, cmd, "sort");
+  }
+  move_servos_smooth(servoAValue, servoBValue);
   delay_with_sensor_polling(SORT_HOLD_MS);
   move_to_wait();
   delay(RETURN_SETTLE_MS);
@@ -396,9 +418,7 @@ void run_angle_test(int servoAValue, int servoBValue) {
     return;
   }
 
-  ensure_servos_attached();
-  servoA.write(servoAValue);
-  servoB.write(servoBValue);
+  move_servos_smooth(servoAValue, servoBValue);
   delay(CALIBRATION_HOLD_MS);
   move_to_wait();
   delay(RETURN_SETTLE_MS);
@@ -433,8 +453,7 @@ void run_sort_angle_test(char cmd, int servoAValue, int servoBValue) {
   play_track_logged(track, cmd, "sorttest");
   move_to_wait();
   delay_with_sensor_polling(PRE_SORT_HOME_SETTLE_MS);
-  servoA.write(servoAValue);
-  servoB.write(servoBValue);
+  move_servos_smooth(servoAValue, servoBValue);
   delay_with_sensor_polling(SORT_HOLD_MS);
   move_to_wait();
   delay(RETURN_SETTLE_MS);
@@ -695,7 +714,17 @@ void handle_line(String line) {
 
   char plainCmd = plain_to_cmd(line);
   if (plainCmd != '\0') {
-    run_sort(plainCmd);
+    run_sort(plainCmd, true);
+    return;
+  }
+
+  if (line.startsWith("SORTSILENT:")) {
+    String cmdText = line.substring(11);
+    if (cmdText.length() != 1) {
+      Serial.println(F("NACK:SORTSILENT:bad_cmd"));
+      return;
+    }
+    run_sort(cmdText.charAt(0), false);
     return;
   }
 
@@ -712,7 +741,7 @@ void handle_line(String line) {
       Serial.println(F(":bad_cmd"));
       return;
     }
-    run_sort(cmdText.charAt(0));
+    run_sort(cmdText.charAt(0), true);
     return;
   }
 

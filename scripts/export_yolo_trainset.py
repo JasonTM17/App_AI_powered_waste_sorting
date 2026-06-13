@@ -237,6 +237,8 @@ def _assign_group_splits(
 
 
 def _split_group_key(image_path: Path, meta: dict[str, Any], image_hash: str) -> str:
+    if image_hash:
+        return f"sha256:{image_hash}"
     for key in (
         "capture_session_id",
         "source_path",

@@ -13,8 +13,8 @@ Selected profile: `LEGACY_2_SERVO_OPENSMART`.
   - Servo B: `D7`.
 - Servos are not attached during firmware startup. They attach only for
   `huuco`/`voco`/`taiche`, `HOME`, `ANGLE`, and `SORTTEST`. After a sort they
-  now hold the wait/home position long enough for the post to fully return to
-  HOME, then detach at idle to stop HOME-position jitter.
+  move to the dump angle and back to HOME in small interpolated steps. At HOME
+  they settle briefly, then detach at idle to stop post-sort hunting/jitter.
 - Proximity sensors, active LOW, audio only:
   - Huu co: `D10`, audio track `5`.
   - Tai che: `D11`, audio track `6`.
@@ -68,10 +68,10 @@ Open Serial Monitor at `9600` baud, line ending `Newline`.
 
 The firmware logs `MP3TX:<hex>` before each MP3 command and best-effort `MP3RX:<hex>` if the red board replies. Proximity sensors send `PROX:O`, `PROX:I`, or `PROX:R` and play tracks `5/6/7`. Track `8` is reserved for the app multi-object warning. They are edge-triggered with cooldown, do not call sort logic, and do not move D6/D7. If a sensor fires while sorting, prox audio is queued until the servo returns home.
 
-The firmware keeps `SERVO_DETACH_WHEN_IDLE=true` with a longer
-`RETURN_SETTLE_MS`. Startup still avoids servo jitter because setup does not
-attach the servos, post-sort HOME has enough time to finish, and idle detach
-stops HOME-position buzzing.
+The firmware keeps `SERVO_DETACH_WHEN_IDLE=true`. Motion uses 2-degree steps
+at 10 ms intervals, including the return to HOME. The dump angle is held for
+1.8 seconds, HOME settles for 250 ms, then idle detach stops post-sort buzzing.
+This keeps the full cycle below the desktop's 4.5-second ACK timeout.
 
 App `plain_group` mode keeps command meaning aligned end-to-end: app `R` sends `voco\n` and expects firmware `ACK:R`; app `I` sends `taiche\n` and expects firmware `ACK:I`.
 

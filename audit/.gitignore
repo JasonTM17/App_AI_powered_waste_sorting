@@ -1,0 +1,10 @@
+# Audit outputs are local-only. They may contain dev credentials in sanitized
+# form, route screenshots with admin data, and per-route findings. Do NOT
+# commit them. To re-share a finding, copy it into reports/audit-findings-*.md.
+
+# Per-route JSON findings
+output/
+
+# Per-route screenshots
+screenshots/*.png
+!screenshots/.gitkeep

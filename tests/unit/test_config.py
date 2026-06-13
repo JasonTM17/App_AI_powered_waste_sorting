@@ -30,6 +30,17 @@ def _default_dict():
             "iou_threshold": 0.45,
             "input_size": 640,
             "half_precision": False,
+            "specialist": {
+                "enabled": True,
+                "path": "models/new-class-specialist.pt",
+                "class_thresholds": {
+                    "Pen": 0.15,
+                    "Battery": 0.3,
+                    "Toothbrush": 0.25,
+                },
+                "nms_iou": 0.7,
+                "overlap_iou": 0.5,
+            },
         },
         "uart": {
             "port": "",
@@ -63,6 +74,7 @@ def _default_dict():
         "three_bin_classifier": {
             "enabled": False,
             "model_path": "models/three_bin_classifier.pt",
+            "mode": "unknown_only",
             "min_confidence": 0.72,
             "min_margin": 0.12,
             "unknown_only": True,
@@ -81,6 +93,8 @@ def test_app_config_parses_default_dict():
     assert c.camera.source == ""
     assert c.camera.rotation == 0
     assert c.model.conf_threshold == 0.4
+    assert c.model.specialist.enabled is True
+    assert c.model.specialist.class_thresholds["Pen"] == 0.15
     assert c.uart.port == ""
     assert c.uart.protocol == "plain_group"
     assert c.speaker.enabled is False
@@ -109,6 +123,7 @@ def test_app_config_parses_default_dict():
     assert c.manual_reference_recognition.min_correction_area_ratio == 0.25
     assert c.three_bin_classifier.enabled is False
     assert c.three_bin_classifier.model_path == "models/three_bin_classifier.pt"
+    assert c.three_bin_classifier.mode == "unknown_only"
     assert c.three_bin_classifier.min_confidence == 0.72
     assert c.three_bin_classifier.min_margin == 0.12
     assert c.three_bin_classifier.unknown_only is True
@@ -118,6 +133,13 @@ def test_app_config_parses_default_dict():
 def test_conf_threshold_out_of_range_rejected():
     d = _default_dict()
     d["model"]["conf_threshold"] = 1.5
+    with pytest.raises(ValidationError):
+        AppConfig.model_validate(d)
+
+
+def test_specialist_threshold_out_of_range_rejected():
+    d = _default_dict()
+    d["model"]["specialist"]["class_thresholds"]["Pen"] = 1.5
     with pytest.raises(ValidationError):
         AppConfig.model_validate(d)
 
@@ -355,14 +377,14 @@ def test_load_config_repairs_known_class_semantic_mappings(tmp_path: Path):
     assert (
         by_name["Disposable tableware"].command,
         by_name["Disposable tableware"].bin_index,
-    ) == ("R", 2)
+    ) == ("I", 3)
     assert (by_name["Organic"].command, by_name["Organic"].bin_index) == ("O", 1)
     assert (by_name["Pen"].command, by_name["Pen"].bin_index) == ("R", 2)
 
     saved = json.loads(cfg_path.read_text(encoding="utf-8"))
     saved_by_name = {mapping["class_name"]: mapping for mapping in saved["mappings"]}
     assert saved_by_name["Paper"]["command"] == "I"
-    assert saved_by_name["Disposable tableware"]["command"] == "R"
+    assert saved_by_name["Disposable tableware"]["command"] == "I"
 
 
 def test_merge_missing_mappings_keeps_user_edits():
