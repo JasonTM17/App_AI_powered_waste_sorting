@@ -63,7 +63,13 @@ def authenticate_desktop_admin(
         return DesktopAuthResult(False, f"Đăng nhập thất bại: {exc}")
     if result is None:
         _log_login_timing(started, clean_username, "invalid")
-        return DesktopAuthResult(False, "Sai tài khoản hoặc mật khẩu.")
+        message = "Sai tài khoản hoặc mật khẩu."
+        if str(getattr(service, "database_url", "") or "").strip():
+            message = (
+                "PostgreSQL đã kết nối, nhưng tài khoản hoặc mật khẩu Admin không khớp. "
+                "Hãy dùng mật khẩu tài khoản trong hệ thống, không dùng mật khẩu kết nối DB."
+            )
+        return DesktopAuthResult(False, message)
     if result.identity.role != "admin":
         service.revoke_session(result.token)
         _log_login_timing(started, clean_username, "non_admin")

@@ -215,6 +215,17 @@ QLineEdit:disabled, QTextEdit:disabled, QSpinBox:disabled, QComboBox:disabled, Q
 }
 QLineEdit::placeholder, QTextEdit::placeholder { color: #94A3B8; }
 
+QToolButton#passwordVisibility {
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  border-radius: 7px;
+}
+QToolButton#passwordVisibility:hover {
+  background: #ECFDF5;
+  border-color: #10B981;
+}
+QToolButton#passwordVisibility:checked { border-color: #0891B2; }
+
 QComboBox::drop-down, QDateEdit::drop-down {
   border: none;
   width: 24px;

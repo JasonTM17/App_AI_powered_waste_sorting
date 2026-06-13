@@ -2,20 +2,25 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QDialog,
     QFormLayout,
     QFrame,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QToolButton,
     QVBoxLayout,
+    QWidget,
 )
 
 from app.agent.auth_service import AuthIdentity
 from app.ui.brand_assets import brand_icon
 from app.ui.desktop_auth import DesktopAuthResult, authenticate_desktop_admin
+from app.utils.paths import resource_path
 
 
 class AdminLoginDialog(QDialog):
@@ -57,8 +62,33 @@ class AdminLoginDialog(QDialog):
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.EchoMode.Password)
         self.password.returnPressed.connect(self._submit)
-        form.addRow("Mật khẩu", self.password)
+
+        password_row = QWidget()
+        password_layout = QHBoxLayout(password_row)
+        password_layout.setContentsMargins(0, 0, 0, 0)
+        password_layout.setSpacing(8)
+        password_layout.addWidget(self.password, 1)
+
+        self.btn_toggle_password = QToolButton()
+        self.btn_toggle_password.setObjectName("passwordVisibility")
+        self.btn_toggle_password.setAccessibleName("Hiện mật khẩu")
+        self.btn_toggle_password.setToolTip("Hiện mật khẩu")
+        self.btn_toggle_password.setCheckable(True)
+        self.btn_toggle_password.setFixedSize(42, 40)
+        self.btn_toggle_password.setIconSize(QSize(20, 20))
+        self.btn_toggle_password.clicked.connect(self._toggle_password_visibility)
+        self._update_password_visibility_icon()
+        password_layout.addWidget(self.btn_toggle_password)
+        form.addRow("Mật khẩu", password_row)
         root.addWidget(form_box)
+
+        auth_status = QLabel(
+            "Xác thực: PostgreSQL. Dùng mật khẩu tài khoản Admin, "
+            "không dùng mật khẩu kết nối cơ sở dữ liệu."
+        )
+        auth_status.setObjectName("muted")
+        auth_status.setWordWrap(True)
+        root.addWidget(auth_status)
 
         self.message = QLabel("")
         self.message.setObjectName("error")
@@ -72,6 +102,20 @@ class AdminLoginDialog(QDialog):
         root.addWidget(self.btn_login, alignment=Qt.AlignmentFlag.AlignRight)
         self.username.setFocus()
 
+    def _toggle_password_visibility(self, visible: bool) -> None:
+        echo_mode = QLineEdit.EchoMode.Normal if visible else QLineEdit.EchoMode.Password
+        self.password.setEchoMode(echo_mode)
+        self._update_password_visibility_icon()
+
+    def _update_password_visibility_icon(self) -> None:
+        visible = self.btn_toggle_password.isChecked()
+        icon_name = "eye-off.svg" if visible else "eye.svg"
+        action = "Ẩn mật khẩu" if visible else "Hiện mật khẩu"
+        icon_path = resource_path(f"app/ui/resources/icons/{icon_name}")
+        self.btn_toggle_password.setIcon(QIcon(str(icon_path)))
+        self.btn_toggle_password.setAccessibleName(action)
+        self.btn_toggle_password.setToolTip(action)
+
     def _submit(self) -> None:
         if self._worker is not None and self._worker.isRunning():
             return
@@ -80,6 +124,7 @@ class AdminLoginDialog(QDialog):
         self.btn_login.setText("Đang đăng nhập...")
         self.username.setEnabled(False)
         self.password.setEnabled(False)
+        self.btn_toggle_password.setEnabled(False)
         self._accept_after_worker_finished = False
         worker = _LoginWorker(
             self.username.text(),
@@ -95,6 +140,7 @@ class AdminLoginDialog(QDialog):
         self.btn_login.setText("Đăng nhập")
         self.username.setEnabled(True)
         self.password.setEnabled(True)
+        self.btn_toggle_password.setEnabled(True)
         if not result.ok:
             self.message.setText(result.message)
             self.message.setVisible(True)

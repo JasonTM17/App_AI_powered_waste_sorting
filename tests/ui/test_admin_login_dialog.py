@@ -1,7 +1,7 @@
 from typing import ClassVar
 
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QDialog
+from PySide6.QtWidgets import QDialog, QLineEdit
 
 import app.ui.widgets.admin_login_dialog as login_dialog_module
 from app.agent.auth_service import AuthIdentity
@@ -73,3 +73,20 @@ def test_admin_login_waits_for_worker_finished_before_accepting(qtbot, monkeypat
     assert dialog.result() == QDialog.DialogCode.Accepted
     assert dialog._worker is None
     assert worker.deleted is True
+
+
+def test_admin_login_password_visibility_toggle(qtbot):
+    dialog = AdminLoginDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.password.echoMode() == QLineEdit.EchoMode.Password
+    assert dialog.btn_toggle_password.toolTip() == "Hiện mật khẩu"
+
+    dialog.btn_toggle_password.click()
+
+    assert dialog.password.echoMode() == QLineEdit.EchoMode.Normal
+    assert dialog.btn_toggle_password.toolTip() == "Ẩn mật khẩu"
+
+    dialog.btn_toggle_password.click()
+
+    assert dialog.password.echoMode() == QLineEdit.EchoMode.Password
