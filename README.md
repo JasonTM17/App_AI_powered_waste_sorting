@@ -440,7 +440,7 @@ The current real hardware profile follows the user-provided block diagram and re
 |---|---|---|---:|---|---:|
 | Huu co | O | `huuco\n` | 1 | D6=90, D7=180 | track 2 |
 | Vo co | R | `voco\n` | 2 | D6=90, D7=0 | track 4 |
-| Tai che | I | `taiche\n` | 3 | D6=145, D7=180 | track 3 |
+| Tai che | I | `taiche\n` | 3 | D6=160, D7=180 | track 3 |
 
 - Wait/upright position after every dump: D6=90, D7=85.
 - Audio output defaults to the OPEN-SMART hardware speaker. Admin can switch

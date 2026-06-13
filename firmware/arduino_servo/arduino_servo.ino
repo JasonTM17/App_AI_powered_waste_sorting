@@ -16,7 +16,7 @@
  * PC commands:
  *   huuco   -> track 2, D6=90,  D7=180, then wait position
  *   voco    -> track 4, D6=90,  D7=0,   then wait position
- *   taiche  -> track 3, D6=145, D7=180, then wait position
+ *   taiche  -> track 3, D6=160, D7=180, then wait position
  *   SORTSILENT:<O|R|I> -> same servo route without hardware audio
  *
  * Sensor audio:
@@ -354,7 +354,7 @@ void servo_position_for_cmd(char cmd, int &servoAValue, int &servoBValue) {
       servoBValue = 0;
       return;
     case 'I':
-      servoAValue = 145;
+      servoAValue = 160;
       servoBValue = 180;
       return;
     default:

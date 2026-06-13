@@ -30,7 +30,7 @@ Selected profile: `LEGACY_2_SERVO_OPENSMART`.
 | Wait/upright after dump | 90 | 85 |
 | Huu co `O` | 90 | 180 |
 | Firmware `voco` / app `R` Vo co | 90 | 0 |
-| Firmware `taiche` / app `I` Tai che | 145 | 180 |
+| Firmware `taiche` / app `I` Tai che | 160 | 180 |
 
 ## Protocol
 
@@ -65,7 +65,7 @@ Open Serial Monitor at `9600` baud, line ending `Newline`.
 | `HOME:90:85` | set temporary home/upright candidate and return `ACK:HOME:90:85` |
 | `ANGLE:90:180` | raw Huu co angle test, then `ACK:ANGLE:90:180` |
 | `ANGLE:90:0` | raw firmware Vo co angle test, then `ACK:ANGLE:90:0` |
-| `ANGLE:145:180` | raw firmware Tai che angle test, then `ACK:ANGLE:145:180` |
+| `ANGLE:160:180` | raw firmware Tai che angle test, then `ACK:ANGLE:160:180` |
 | `SORTTEST:R:90:0` | play app Vo co track, test candidate dump angle, return home, then `ACK:SORTTEST:R:90:0` |
 | `HOME` | attach servos, return to wait position, wait for settle, detach, then `ACK:HOME` |
 

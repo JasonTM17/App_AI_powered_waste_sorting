@@ -58,7 +58,7 @@ def test_hardware_profile_routes_are_exact():
             "payload_line": "taiche\\n",
             "bin_index": 3,
             "servo_pin": "D6/D7",
-            "servo_positions": {"D6": 145, "D7": 180},
+            "servo_positions": {"D6": 160, "D7": 180},
             "gd5800_track": 3,
         },
     ]

@@ -23,7 +23,7 @@ Servo positions:
 | Wait | 90 | 85 |
 | Huu co `O` | 90 | 180 |
 | Firmware `voco` / app `R` Vo co | 90 | 0 |
-| Firmware `taiche` / app `I` Tai che | 145 | 180 |
+| Firmware `taiche` / app `I` Tai che | 160 | 180 |
 
 Sorting audio:
 
@@ -53,7 +53,7 @@ Open Serial Monitor at `9600`, newline:
 6. `MP3:VOL:30` -> `MP3TX:7E 03 31 1E EF` and `ACK:MP3:VOL:30`.
 7. `AUDIO:1` through `AUDIO:8` -> `MP3TX:7E 04 41 00 <track> EF`, `ACK:AUDIO:<track>`, and real sound from the red board.
 8. `huuco` -> track 2, D6=90/D7=180, hold 1800ms, smooth return, `ACK:O`.
-9. `taiche` -> track 3, D6=145/D7=180, hold 1800ms, smooth return, `ACK:I`.
+9. `taiche` -> track 3, D6=160/D7=180, hold 1800ms, smooth return, `ACK:I`.
 10. `voco` -> track 4, D6=90/D7=0, hold 1800ms, smooth return, `ACK:R`.
 11. `HOME:90:85`, `HOME:90:83`, `HOME:90:87`, `HOME:88:85`, `HOME:92:85` -> choose the upright tray candidate.
 12. `SORTTEST:R:90:0`, `145:180`, `180:180`, `0:180`, `180:0`, `0:0`, `45:180`, `180:45` -> choose the Vo co direction that fully dumps toward the indicated bin.
@@ -117,7 +117,7 @@ The app/firmware sends three route pairs:
 
 - Huu co: D6=90, D7=180.
 - Vo co: D6=90, D7=0.
-- Tai che: D6=145, D7=180.
+- Tai che: D6=160, D7=180.
 
 If any two routes look identical, inspect both D6 and D7 because the production angles now use different D7 endpoints for Huu co and Vo co. Run the 3x3 raw sweep:
 

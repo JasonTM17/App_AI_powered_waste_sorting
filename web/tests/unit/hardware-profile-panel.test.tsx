@@ -47,7 +47,7 @@ const profile: HardwareProfile = {
       serial_payload: "taiche",
       bin_index: 3,
       servo_pin: "D6/D7",
-      servo_positions: { D6: 145, D7: 180 },
+      servo_positions: { D6: 160, D7: 180 },
       gd5800_track: 3
     }
   ],

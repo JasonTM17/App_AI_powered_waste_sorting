@@ -65,7 +65,7 @@ INORGANIC_REPLAY_CANDIDATES: tuple[dict[str, object], ...] = (
 ROUTES: tuple[HardwareRoute, ...] = (
     HardwareRoute("O", "Huu co", "huuco", 1, "D6/D7", {"D6": 90, "D7": 180}, 2),
     HardwareRoute("R", "Vo co", "voco", 2, "D6/D7", {"D6": 90, "D7": 0}, 4),
-    HardwareRoute("I", "Tai che", "taiche", 3, "D6/D7", {"D6": 145, "D7": 180}, 3),
+    HardwareRoute("I", "Tai che", "taiche", 3, "D6/D7", {"D6": 160, "D7": 180}, 3),
 )
 
 SENSOR_PINS: tuple[BinSensorPins, ...] = ()
