@@ -9,6 +9,11 @@ powershell -ExecutionPolicy Bypass -File scripts/clean_workspace.ps1
 powershell -ExecutionPolicy Bypass -File scripts/clean_workspace.ps1 -Apply
 ```
 
+Dữ liệu tải từ Kaggle được giữ local tại `.local/kagglehub-cache` và không commit lên Git.
+Đây là ảnh nguồn để huấn luyện/đánh giá, không phải thành phần app cần khi nhận diện.
+Runtime dùng các model đã huấn luyện trong `models/`. Có thể đổi vị trí cache bằng
+`TRASH_SORTER_KAGGLE_CACHE` hoặc tham số `--cache-root` của script Kaggle.
+
 Ứng dụng phân loại rác dùng YOLO, camera USB, UART và dashboard web local. Dự án có hai giao diện chạy song song:
 
 - Desktop PySide6 để vận hành trực tiếp trên máy phân loại.
