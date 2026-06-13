@@ -8,6 +8,66 @@ $ErrorActionPreference = "Stop"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 $WebRoot = Join-Path $Root "web"
 
+function Assert-CommandAvailable {
+  param(
+    [string]$Name,
+    [string]$InstallHint
+  )
+  if ($null -eq (Get-Command $Name -ErrorAction SilentlyContinue)) {
+    throw "Required command '$Name' was not found. $InstallHint"
+  }
+}
+
+function Initialize-PythonEnvironment {
+  $venvPython = Join-Path $Root ".venv\Scripts\python.exe"
+  if (Test-Path $venvPython) {
+    return $venvPython
+  }
+
+  Assert-CommandAvailable "python" "Install Python 3.10-3.12, then install uv with: python -m pip install uv"
+  Write-Host "Python environment is missing; running uv sync --frozen..."
+  & python -m uv sync --frozen
+  if ($LASTEXITCODE -ne 0 -or -not (Test-Path $venvPython)) {
+    throw "Python setup failed. Run 'python -m uv sync --frozen' from $Root and review the error."
+  }
+  return $venvPython
+}
+
+function Initialize-WebEnvironment {
+  $nextCommand = Join-Path $WebRoot "node_modules\.bin\next.cmd"
+  if (Test-Path $nextCommand) {
+    return
+  }
+
+  Assert-CommandAvailable "npm.cmd" "Install Node.js 20 or newer from https://nodejs.org/."
+  Write-Host "Web dependencies are missing; running npm ci..."
+  Push-Location $WebRoot
+  try {
+    & npm.cmd ci
+    if ($LASTEXITCODE -ne 0) {
+      throw "npm ci failed with exit code $LASTEXITCODE."
+    }
+  } finally {
+    Pop-Location
+  }
+  if (-not (Test-Path $nextCommand)) {
+    throw "Web setup finished without Next.js. Remove web/node_modules and run 'npm ci' again."
+  }
+}
+
+function Assert-RuntimeModels {
+  $requiredModels = @(
+    "models\best.pt",
+    "models\new-class-specialist.pt"
+  )
+  $missingModels = @(
+    $requiredModels | Where-Object { -not (Test-Path (Join-Path $Root $_)) }
+  )
+  if ($missingModels.Count -gt 0) {
+    throw "Required runtime model(s) missing: $($missingModels -join ', '). Pull the latest main branch and verify Git completed the download."
+  }
+}
+
 function Import-LocalEnvFile {
   param([string]$Path)
   if (-not (Test-Path $Path)) {
@@ -45,10 +105,10 @@ $AuthExplicitlyConfigured = -not [string]::IsNullOrWhiteSpace($env:TRASH_SORTER_
 if (-not $AuthExplicitlyConfigured -and [string]::IsNullOrWhiteSpace($env:TRASH_SORTER_AUTH_DEV_DEFAULTS)) {
   $env:TRASH_SORTER_AUTH_DEV_DEFAULTS = "1"
 }
-$PythonExe = Join-Path $Root ".venv\Scripts\python.exe"
-if (-not (Test-Path $PythonExe)) {
-  $PythonExe = "python"
-}
+
+Assert-RuntimeModels
+$PythonExe = Initialize-PythonEnvironment
+Initialize-WebEnvironment
 
 function Test-PortBusy {
   param([int]$Port)

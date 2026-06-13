@@ -9,6 +9,7 @@
 
 - Windows 10/11.
 - Python 3.10-3.12 và `uv`.
+- Node.js 20 or newer with `npm`.
 - GPU NVIDIA nếu muốn train local. Repo đang khóa Torch CUDA `cu128` cho RTX 3060.
 - Camera USB ngoài. App không fallback webcam laptop.
 - Arduino/ESP32 USB nếu dùng UART; Bluetooth COM và COM thường bị khóa theo quy tắc USB-only.
@@ -17,7 +18,10 @@
 
 ```powershell
 cd "D:\PHAN LOAI RAC\trash-sorter-v2"
-python -m uv sync
+python -m uv sync --frozen
+cd web
+npm ci
+cd ..
 python -m uv run python -m app
 ```
 
@@ -26,6 +30,26 @@ Chạy agent và web dashboard:
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/start_local.ps1
 ```
+
+`start_local.ps1` checks a fresh checkout before launching. When `.venv` or
+`web/node_modules` is missing, it runs `python -m uv sync --frozen` or `npm ci`
+automatically. It stops with an actionable error when Python, Node.js, npm, or a
+required runtime model is unavailable.
+
+Fresh-clone checklist:
+
+```powershell
+git clone https://github.com/JasonTM17/App_AI_powered_waste_sorting.git
+cd App_AI_powered_waste_sorting
+Test-Path models/best.pt
+Test-Path models/new-class-specialist.pt
+powershell -ExecutionPolicy Bypass -File scripts/start_local.ps1
+```
+
+Both `Test-Path` commands must print `True`. The repository includes the primary
+and specialist runtime models; datasets, local databases, `.env.local`, training
+runs, and candidate checkpoints remain intentionally excluded. The first run can
+take several minutes while Python CUDA packages and web dependencies are installed.
 
 Trong desktop có nút `Mở Web`; bấm nút này app sẽ tự bật agent + web local nếu chưa chạy, rồi mở màn đăng nhập web dashboard. Sau khi đăng nhập, Admin vào dashboard vận hành, User vào dashboard báo cáo.
 
