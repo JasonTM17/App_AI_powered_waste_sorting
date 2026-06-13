@@ -1,5 +1,7 @@
 # Trash Sorter Pro
 
+Hướng dẫn chạy web app cho đồng nghiệp: [docs/huong-dan-chay-web-app.md](docs/huong-dan-chay-web-app.md).
+
 Ứng dụng phân loại rác dùng YOLO, camera USB, UART và dashboard web local. Dự án có hai giao diện chạy song song:
 
 - Desktop PySide6 để vận hành trực tiếp trên máy phân loại.
