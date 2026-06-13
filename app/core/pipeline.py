@@ -820,6 +820,8 @@ class Pipeline:
             for t in tracked:
                 if t.detection.route_consensus == "passed":
                     continue
+                if t.stable_frames < self.cfg.dispatch_guard.min_stable_frames:
+                    continue
                 blocked_consensus = True
                 should_log = self.tracker.should_emit(t.track_id)
                 self.tracker.mark_emitted(t.track_id)
