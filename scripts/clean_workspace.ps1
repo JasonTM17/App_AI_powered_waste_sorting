@@ -110,7 +110,6 @@ $auditGeneratedDirectories = @(
 $rootScratchFiles = @(
   ".codex-agent.log",
   ".coverage",
-  "Trash Sorter Pro.lnk",
   "TrashSorterPro.spec",
   "build.log",
   "build4.log",

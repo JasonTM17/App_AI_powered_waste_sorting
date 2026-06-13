@@ -1,6 +1,7 @@
 """Create Windows .lnk shortcuts to TrashSorterPro.exe.
 
-Drops two shortcuts so the user doesn't have to dig into the app folder:
+Drops three shortcuts so the user doesn't have to dig into the app folder:
+  - <project_root>/Trash Sorter Pro.lnk
   - <project_root>/dist/Trash Sorter Pro.lnk
   - <Desktop>/Trash Sorter Pro.lnk
 
@@ -49,7 +50,7 @@ def _make_lnk(target: Path, link: Path, icon: Path | None) -> None:
 
 
 def _shortcut_targets() -> list[Path]:
-    return [ROOT / "dist" / NAME, _desktop_dir() / NAME]
+    return [ROOT / NAME, ROOT / "dist" / NAME, _desktop_dir() / NAME]
 
 
 def main() -> int:

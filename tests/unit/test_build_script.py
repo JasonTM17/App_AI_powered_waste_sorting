@@ -30,10 +30,10 @@ def test_pyinstaller_outputs_stay_out_of_source_root(monkeypatch):
     assert build_exe.PYINSTALLER_BUILD != build_exe.ROOT
 
 
-def test_shortcuts_stay_out_of_source_root(monkeypatch):
+def test_shortcuts_include_obvious_launch_locations(monkeypatch):
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     import make_shortcuts
 
     targets = make_shortcuts._shortcut_targets()
-    assert make_shortcuts.ROOT / make_shortcuts.NAME not in targets
+    assert make_shortcuts.ROOT / make_shortcuts.NAME in targets
     assert make_shortcuts.ROOT / "dist" / make_shortcuts.NAME in targets

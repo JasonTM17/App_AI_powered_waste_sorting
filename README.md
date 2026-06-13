@@ -2,6 +2,9 @@
 
 Hướng dẫn chạy web app cho đồng nghiệp: [docs/huong-dan-chay-web-app.md](docs/huong-dan-chay-web-app.md).
 
+Mở Desktop App bằng `Trash Sorter Pro.lnk` ngay thư mục gốc, hoặc chạy trực tiếp
+`dist/TrashSorterPro/TrashSorterPro.exe`.
+
 Dọn cache, log, ảnh kiểm thử và file build tạm mà không đụng dataset/model/config:
 
 ```powershell

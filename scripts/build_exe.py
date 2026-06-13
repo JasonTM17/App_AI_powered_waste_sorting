@@ -89,7 +89,7 @@ def main() -> int:
     _repair_bundled_ssl_dlls()
     print(f"\n[OK] Build complete: {DIST / APP_NAME}")
 
-    # Keep generated shortcuts out of the source root.
+    # Keep one obvious root launcher plus copies in dist and on Desktop.
     try:
         from scripts.make_shortcuts import main as _make_shortcuts
         _make_shortcuts()
