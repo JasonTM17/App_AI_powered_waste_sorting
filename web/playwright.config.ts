@@ -27,6 +27,7 @@ const testEnv = cleanEnv({
   TRASH_SORTER_ALLOWED_ORIGINS: WEB_URL,
   TRASH_SORTER_AUTH_DB: path.join(APPDATA_ROOT, "TrashSorter", "auth.db"),
   TRASH_SORTER_AUTH_DEV_DEFAULTS: "0",
+  TRASH_SORTER_DISABLE_UART_AUTO_SELECT: "1",
   TRASH_SORTER_PLAYWRIGHT_TMP: TMP_ROOT,
   DEEPSEEK_BASE_URL: process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
   DEEPSEEK_MODEL: "deepseek-v4-flash",

@@ -87,6 +87,7 @@ export function HardwareProfilePanel({
         { label: "Vô cơ D6 45", command: "R" as const, d6: 45, d7: 180 },
         { label: "Vô cơ D7 45", command: "R" as const, d6: 180, d7: 45 }
       ];
+  const inorganicRoute = profile.routes.find((route) => String(route.command).toUpperCase() === "R");
   const calibrationPositions = [
     {
       label: "Wait",
@@ -111,13 +112,17 @@ export function HardwareProfilePanel({
   ];
   const audioTracks = [
     { label: "Startup", track: Number(profile.gd5800.startup_track ?? 1) },
-    { label: "Hữu cơ sort", track: 2 },
-    { label: "Vô cơ sort", track: 3 },
-    { label: "Tái chế sort", track: 4 },
-    { label: "Hữu cơ sensor", track: 5 },
-    { label: "Tái chế sensor", track: 6 },
-    { label: "Vô cơ sensor", track: 7 }
-  ];
+    ...profile.routes.map((route) => ({
+      label: `${String(route.label || route.command || "Route")} sort`,
+      track: Number(route.gd5800_track)
+    })),
+    ...(profile.proximity_sensors ?? []).map((sensor) => ({
+      label: `${String(sensor.label || sensor.command || "Sensor")} sensor`,
+      track: Number(sensor.gd5800_track)
+    })),
+    { label: "Multi-object warning", track: Number(profile.gd5800.multi_object_warning_track ?? 8) }
+  ].filter((item) => Number.isFinite(item.track) && item.track > 0);
+
   const mp3Tests = [
     { label: "Mode Primary D5/D4", command: "MODE_PRIMARY" as const },
     { label: "Mode Reverse D4/D5", command: "MODE_REVERSE" as const },
@@ -220,8 +225,10 @@ export function HardwareProfilePanel({
         <div className="policy-strip">
           <MousePointer2 size={18} />
           <div>
-            <strong>Replay hướng tái chế</strong>
-            <span>Mỗi nút phát track 3, đổ theo góc thử, rồi trở về home hiện tại.</span>
+            <strong>Replay hướng vô cơ</strong>
+            <span>
+              Mỗi nút gửi SORTTEST R, phát track {String(inorganicRoute?.gd5800_track ?? 4)}, đổ theo góc thử, rồi trở về home hiện tại.
+            </span>
           </div>
         </div>
         <div className="hardware-grid">

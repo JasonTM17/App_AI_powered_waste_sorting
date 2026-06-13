@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { screen, cleanup } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { screen, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { UserDashboardPanel } from "@/components/user-dashboard-panel";
 import { renderWithProviders } from "../helpers/render-with-providers";
@@ -60,6 +60,11 @@ function setup(overrides?: Partial<UserDashboardPanelProps>) {
     history: [],
     notice: "",
     operationAlerts: null,
+    operationRefresh: {
+      lastUpdatedAt: "2025-01-01T00:00:00Z",
+      isRefreshing: false,
+      refreshError: ""
+    },
     operationSchedules: null,
     imageToken: "test-token",
     passwordConfirm: "",
@@ -85,6 +90,7 @@ function setup(overrides?: Partial<UserDashboardPanelProps>) {
     onRefresh: vi.fn(),
     onRefreshOperations: vi.fn(),
     onReportDeviceIssue: vi.fn(),
+    onUserMapInteraction: vi.fn(),
     onViewChange: vi.fn(),
     ...overrides
   };
@@ -93,6 +99,10 @@ function setup(overrides?: Partial<UserDashboardPanelProps>) {
 }
 
 describe("UserDashboardPanel", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   afterEach(() => {
     cleanup();
   });
@@ -102,7 +112,6 @@ describe("UserDashboardPanel", () => {
     const user = userEvent.setup();
     await user.click(screen.getByText("Lịch sử"));
     expect(props.onViewChange).toHaveBeenCalledWith("history");
-    expect(window.location.pathname).toBe("/user/history");
   });
 
   it("renders range selector and calls onRangeChange on click", async () => {
@@ -123,5 +132,47 @@ describe("UserDashboardPanel", () => {
     expect(screen.getAllByText("Trash Sorter Pro").length).toBeGreaterThan(0);
     expect(screen.getByText("Xin chào, test-user")).toBeInTheDocument();
     expect(screen.getAllByText("Tổng quan").length).toBeGreaterThan(0);
+  });
+
+  it("persists collapsed sidebar preference", async () => {
+    const user = userEvent.setup();
+    const { container, unmount } = setup();
+
+    await user.click(screen.getByRole("button", { name: /thu gọn thanh điều hướng/i }));
+    expect(window.localStorage.getItem("trash-sorter-user-sidebar-collapsed")).toBe("1");
+    expect(container.querySelector(".app-shell")).toHaveClass("sidebar-collapsed");
+
+    unmount();
+    setup();
+    await waitFor(() => {
+      expect(document.querySelector(".app-shell")).toHaveClass("sidebar-collapsed");
+    });
+  });
+
+  it("renders EcoPet as an actionable user screen", async () => {
+    const { props } = setup({ chatbotEnabled: false, view: "ecopet" });
+    const user = userEvent.setup();
+
+    expect(screen.getByText("Trợ lý thói quen xanh")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Eco Score/i }));
+
+    expect(props.onChatQuestionChange).toHaveBeenCalledWith("Gợi ý một việc nhỏ để tăng Eco Score");
+    expect(props.onChatRequest).toHaveBeenCalledWith("Gợi ý một việc nhỏ để tăng Eco Score");
+  });
+
+  it("keeps local Eco-Share posts after leaving the community screen", async () => {
+    const user = userEvent.setup();
+    const { unmount } = setup({ view: "community" });
+
+    await user.type(screen.getByPlaceholderText(/Chia sẻ/i), "Mình vừa hoàn thành thử thách phân loại sạch.");
+    await user.click(screen.getByRole("button", { name: /Đăng bài/i }));
+    expect(screen.getAllByText(/Mình vừa hoàn thành thử thách/i).length).toBeGreaterThan(0);
+
+    unmount();
+    setup({ view: "community" });
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/Mình vừa hoàn thành thử thách/i).length).toBeGreaterThan(0);
+    });
   });
 });

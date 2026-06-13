@@ -71,6 +71,7 @@ export function AuthLoginPanel({
                 autoFocus
                 onChange={(event) => onUsernameChange(event.target.value)}
                 placeholder="admin hoặc user"
+                suppressHydrationWarning
                 type="text"
                 value={username}
               />
@@ -85,6 +86,7 @@ export function AuthLoginPanel({
                 autoComplete="current-password"
                 onChange={(event) => onPasswordChange(event.target.value)}
                 placeholder="Nhập mật khẩu"
+                suppressHydrationWarning
                 type={showPassword ? "text" : "password"}
                 value={password}
               />

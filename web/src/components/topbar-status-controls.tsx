@@ -6,7 +6,7 @@ import { useEffect, useId, useState } from "react";
 import { AGENT_URL, type AuthMe, type RuntimeStatus, type TrainingStatus } from "@/lib/agent";
 
 type StatusPanel = "camera" | "model" | "agent";
-type AdminTabTarget = "live" | "data" | "logs" | "settings";
+type AdminTabTarget = "live" | "camera" | "data" | "logs" | "settings";
 
 type TopbarStatusControlsProps = {
   agentError: string;
@@ -107,9 +107,9 @@ export function TopbarStatusControls({
               <StatusRow label="Non-black" value={formatPercent(status?.camera_diagnostics?.non_black_ratio)} />
               <p>{formatStatusMessage(status?.camera.message) || "Camera chỉ dùng thiết bị USB ngoài."}</p>
               <div className="status-popover-actions">
-                <button className="secondary-button compact-button" onClick={() => navigate("live")} type="button">
+                <button className="secondary-button compact-button" onClick={() => navigate("camera")} type="button">
                   <Camera size={15} />
-                  <span>Mở giám sát</span>
+                  <span>Mở camera</span>
                 </button>
                 {status?.camera.running ? (
                   <button className="danger-button compact-button" disabled={busy} onClick={onCameraStop} type="button">
@@ -119,7 +119,7 @@ export function TopbarStatusControls({
                 ) : (
                   <button className="primary-button compact-button" disabled={busy} onClick={onCameraStart} type="button">
                     <Play size={15} />
-                    <span>Quét USB</span>
+                    <span>Bật camera</span>
                   </button>
                 )}
               </div>

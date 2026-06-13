@@ -2,6 +2,7 @@
 
 import { AlertTriangle, LogOut } from "lucide-react";
 
+import { accountDisplayName, accountInitials, accountToneKey } from "@/lib/account-display";
 import type { AuthMe } from "@/lib/agent";
 
 type AccountControlProps = {
@@ -12,13 +13,15 @@ type AccountControlProps = {
 
 export function AccountControl({ auth, busy, onLogout }: AccountControlProps) {
   const roleLabel = auth?.role === "admin" ? "Quản trị viên" : "Tài khoản người dùng";
-  const displayName = displayAccountName(auth);
+  const displayName = accountDisplayName(auth);
+  const initials = accountInitials(displayName);
+  const tone = accountToneKey(auth?.username || displayName);
 
   return (
     <div className="account-control" aria-label={`Tài khoản đăng nhập: ${displayName}`}>
       <div className="account-chip" title={auth?.username ? `Username: ${auth.username}` : roleLabel}>
-        <span className="account-avatar-frame" aria-hidden="true">
-          <img alt="" src="/brand/trash-sorter-pro-mark.png" />
+        <span className="account-avatar-frame generated-avatar" data-tone={tone} aria-hidden="true">
+          <span>{initials}</span>
         </span>
         <div>
           <strong>{displayName}</strong>
@@ -37,23 +40,4 @@ export function AccountControl({ auth, busy, onLogout }: AccountControlProps) {
       </button>
     </div>
   );
-}
-
-function displayAccountName(auth: AuthMe | null) {
-  const username = auth?.username?.trim();
-  if (!username) {
-    return auth?.role === "admin" ? "Quản trị EcoSort" : "Thành viên EcoSort";
-  }
-  const normalized = username.toLowerCase();
-  if (auth?.role === "admin" && normalized === "admin") {
-    return "Quản trị EcoSort";
-  }
-  if (auth?.role === "user" && normalized === "user") {
-    return "Thành viên EcoSort";
-  }
-  return username
-    .split(/[-_.\s]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }

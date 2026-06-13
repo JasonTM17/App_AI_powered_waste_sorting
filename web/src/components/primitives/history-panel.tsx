@@ -3,7 +3,7 @@
 import { Camera } from "lucide-react";
 
 import type { HistoryRow } from "@/lib/agent";
-import { historyImageUrl } from "@/lib/agent";
+import { historyImagePath, openAgentBlob } from "@/lib/agent";
 
 type HistoryPanelProps = {
   imageToken: string;
@@ -41,15 +41,14 @@ export function HistoryPanel({ imageToken, rows }: HistoryPanelProps) {
                 <td>{row.ack_status || "-"}</td>
                 <td>
                   {row.annotated_path ? (
-                    <a
+                    <button
                       className="secondary-button compact-button history-image-link"
-                      href={historyImageUrl(row.id, "annotated", imageToken)}
-                      rel="noreferrer"
-                      target="_blank"
+                      onClick={() => void openAgentBlob(historyImagePath(row.id, "annotated"), imageToken)}
+                      type="button"
                     >
                       <Camera size={15} />
                       <span>Mở ảnh</span>
-                    </a>
+                    </button>
                   ) : (
                     "-"
                   )}

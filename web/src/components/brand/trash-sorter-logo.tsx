@@ -11,7 +11,7 @@ export function TrashSorterLogo({ className = "", variant = "mark" }: TrashSorte
   const src =
     variant === "lockup" ? "/brand/trash-sorter-pro-stitch-logo.png" : "/brand/trash-sorter-pro-mark.png";
   return (
-    <span className={rootClass} aria-label="Trash Sorter Pro">
+    <span className={rootClass} role="img" aria-label="Trash Sorter Pro">
       <img alt="" aria-hidden="true" className="trash-sorter-logo-image" draggable={false} src={src} />
     </span>
   );

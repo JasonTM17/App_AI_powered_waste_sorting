@@ -104,6 +104,7 @@ import {
 import { AccountControl } from "@/components/account-control";
 import { AdminAccountsPanel } from "@/components/admin-accounts-panel";
 import { AuthLoginPanel } from "@/components/auth-login-panel";
+import { AdminCameraPanel } from "@/components/camera/admin-camera-panel";
 import { ManualTrainingPanel } from "@/components/manual-training-panel";
 import { RoleChatbotLauncher } from "@/components/chat/role-chatbot-launcher";
 import {
@@ -133,6 +134,7 @@ import { SettingsPanel } from "@/components/settings/settings-panel";
 
 type TabId =
   | "live"
+  | "camera"
   | "history"
   | "data"
   | "training"
@@ -195,8 +197,10 @@ const BIN_LABELS: Record<string, string> = {
 
 const SESSION_TOKEN_KEY = "trash-sorter-session-token";
 const USER_CHATBOT_ENABLED_KEY = "trash-sorter-user-chatbot-enabled";
+const ADMIN_SIDEBAR_COLLAPSED_KEY = "trash-sorter-admin-sidebar-collapsed";
 
 const tabs = [
+  { id: "camera" as const, label: "Camera", icon: Camera },
   { id: "live" as const, label: "Giám sát", icon: Activity },
   { id: "history" as const, label: "Lịch sử", icon: History },
   { id: "bin-map" as const, label: "Bản đồ", icon: MapPin },
@@ -240,6 +244,9 @@ export function DashboardClient() {
   const [userBinMap, setUserBinMap] = useState<BinMapResponse | null>(null);
   const [userAlerts, setUserAlerts] = useState<AlertsResponse | null>(null);
   const [userSchedules, setUserSchedules] = useState<CollectionSchedulesResponse | null>(null);
+  const [userOperationsLastUpdatedAt, setUserOperationsLastUpdatedAt] = useState("");
+  const [userOperationsRefreshing, setUserOperationsRefreshing] = useState(false);
+  const [userOperationsRefreshError, setUserOperationsRefreshError] = useState("");
   const [userChat, setUserChat] = useState<AiChatResponse | null>(null);
   const [userChatQuestion, setUserChatQuestion] = useState("");
   const [userChatbotEnabled, setUserChatbotEnabled] = useState(true);
@@ -251,6 +258,7 @@ export function DashboardClient() {
   const [adminSchedules, setAdminSchedules] = useState<CollectionSchedulesResponse | null>(null);
   const [operationsHealth, setOperationsHealth] = useState<OperationsHealthResponse | null>(null);
   const [createUsername, setCreateUsername] = useState("");
+  const [createDisplayName, setCreateDisplayName] = useState("");
   const [createPassword, setCreatePassword] = useState("");
   const [createRole, setCreateRole] = useState<AuthRole>("user");
   const [resetPassword, setResetPassword] = useState("");
@@ -291,7 +299,7 @@ export function DashboardClient() {
   const [manualFiles, setManualFiles] = useState<FileList | null>(null);
   const [manualPhoneFiles, setManualPhoneFiles] = useState<FileList | null>(null);
   const [manualClass, setManualClass] = useState("");
-  const [trainingManualClass, setTrainingManualClass] = useState("");
+  const [trainingManualClass, setTrainingManualClass] = useState("Pen");
   const [manualImageUrl, setManualImageUrl] = useState("");
   const [manualSourcePageUrl, setManualSourcePageUrl] = useState("");
   const [manualSourceLicense, setManualSourceLicense] = useState("");
@@ -307,6 +315,8 @@ export function DashboardClient() {
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [chatBusy, setChatBusy] = useState(false);
+  const userOperationsRefreshInFlightRef = useRef(false);
+  const userOperationsInteractionUntilRef = useRef(0);
 
   const cameraStream = useMemo(() => {
     if (!cameraStreamTicket) {
@@ -316,6 +326,7 @@ export function DashboardClient() {
     url.searchParams.set("v", String(Date.now()));
     return url.toString();
   }, [cameraStreamTicket, status?.camera.running]);
+  const liveSocketRouteActive = active === "live" || active === "camera";
 
   useEffect(() => {
     if (auth?.role !== "admin" || auth.password_default || !status?.camera.running || !agentToken) {
@@ -557,9 +568,10 @@ export function DashboardClient() {
       setLoginPassword("");
       setNotice("Đã đăng nhập");
       if (data.role === "user") {
+        const targetView = window.location.pathname.startsWith("/user") ? userViewFromLocation() : "dashboard";
         setActive("live");
-        setUserView("dashboard");
-        window.history.replaceState(null, "", "/user/dashboard");
+        setUserView(targetView);
+        window.history.replaceState(null, "", userPathForView(targetView));
       } else if (window.location.pathname.startsWith("/user")) {
         window.history.replaceState(null, "", "/admin?tab=live");
       }
@@ -605,6 +617,8 @@ export function DashboardClient() {
       setUserBinMap(binMapData);
       setUserAlerts(alertsData);
       setUserSchedules(schedulesData);
+      setUserOperationsLastUpdatedAt(new Date().toISOString());
+      setUserOperationsRefreshError("");
       setAgentError("");
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : "Không tải được dashboard User");
@@ -716,15 +730,45 @@ export function DashboardClient() {
     setOperationsHealth(healthData);
   }
 
-  async function refreshUserOperations() {
-    const [binMapData, alertsData, schedulesData] = await Promise.all([
-      fetchAgent<BinMapResponse>("/api/user/bin-map", { timeoutMs: 45_000 }),
-      fetchAgent<AlertsResponse>("/api/user/alerts?include_resolved=false", { timeoutMs: 45_000 }),
-      fetchAgent<CollectionSchedulesResponse>("/api/user/collection-schedule", { timeoutMs: 45_000 })
-    ]);
-    setUserBinMap(binMapData);
-    setUserAlerts(alertsData);
-    setUserSchedules(schedulesData);
+  async function refreshUserOperations(options?: { background?: boolean }) {
+    if (userOperationsRefreshInFlightRef.current) {
+      return;
+    }
+    userOperationsRefreshInFlightRef.current = true;
+    const background = options?.background ?? false;
+    setUserOperationsRefreshing(true);
+    if (!background) {
+      setBusy(true);
+    }
+    try {
+      const [binMapData, alertsData, schedulesData] = await Promise.all([
+        fetchAgent<BinMapResponse>("/api/user/bin-map", { timeoutMs: 45_000 }),
+        fetchAgent<AlertsResponse>("/api/user/alerts?include_resolved=false", { timeoutMs: 45_000 }),
+        fetchAgent<CollectionSchedulesResponse>("/api/user/collection-schedule", { timeoutMs: 45_000 })
+      ]);
+      setUserBinMap(binMapData);
+      setUserAlerts(alertsData);
+      setUserSchedules(schedulesData);
+      setUserOperationsLastUpdatedAt(new Date().toISOString());
+      setUserOperationsRefreshError("");
+      setAgentError("");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Không tải được dữ liệu vận hành User";
+      setUserOperationsRefreshError(message);
+      if (!background) {
+        setAgentError(message);
+      }
+    } finally {
+      userOperationsRefreshInFlightRef.current = false;
+      setUserOperationsRefreshing(false);
+      if (!background) {
+        setBusy(false);
+      }
+    }
+  }
+
+  function markUserMapInteraction() {
+    userOperationsInteractionUntilRef.current = Date.now() + 2200;
   }
 
   async function saveOperationDevice(payload: OperationDeviceUpsertPayload) {
@@ -924,11 +968,13 @@ export function DashboardClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           username: createUsername.trim(),
+          display_name: createDisplayName.trim(),
           password: createPassword,
           role: createRole
         })
       });
       setCreateUsername("");
+      setCreateDisplayName("");
       setCreatePassword("");
       setNotice("Đã tạo tài khoản. Tài khoản mới sẽ bị bắt đổi mật khẩu khi đăng nhập.");
       await refreshAccounts();
@@ -1127,11 +1173,12 @@ export function DashboardClient() {
     const scopedFetch = <T,>(path: string, init: AgentFetchInit = {}) =>
       fetchAgent<T>(path, { ...init, signal });
     try {
+      const cameraLike = scope === "camera";
       const settingsLike = scope === "settings" || scope === "model" || scope === "audio";
       const operationsLike = scope === "roles" || scope === "devices" || scope === "bin-map" || scope === "alerts";
       const dataLike = scope === "data";
       const trainingLike = scope === "training";
-      const statusPath = settingsLike ? "/api/status" : "/api/status?include_devices=false";
+      const statusPath = settingsLike || cameraLike ? "/api/status" : "/api/status?include_devices=false";
       const statusRes = await scopedFetch<RuntimeStatus>(statusPath);
       setStatus(statusRes);
 
@@ -1191,6 +1238,38 @@ export function DashboardClient() {
       if (scope === "logs") {
         const logsRes = await scopedFetch<LogsResponse>("/api/logs?limit=120");
         setLogs(logsRes.lines);
+      }
+
+      if (cameraLike) {
+        const settingsRes = await scopedFetch<SettingsResponse>("/api/settings", { timeoutMs: 8000 });
+        setConfig(settingsRes.config);
+        void Promise.allSettled([
+          scopedFetch<ModelClassesResponse>("/api/model/classes"),
+          scopedFetch<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
+          scopedFetch<HardwareProfile>("/api/hardware/profile"),
+          scopedFetch<HardwareDiagnostics>("/api/hardware/diagnostics"),
+          scopedFetch<ActuationTestMode>("/api/actuation/test-mode")
+        ]).then(([classesRes, commonWasteRes, hardwareRes, hardwareDiagnosticsRes, actuationRes]) => {
+          if (signal?.aborted) {
+            return;
+          }
+          if (classesRes.status === "fulfilled") {
+            setModelClasses(classesRes.value.classes);
+            setManualClass((current) => current || classesRes.value.classes[0]?.name || "");
+          }
+          if (commonWasteRes.status === "fulfilled") {
+            setCommonWasteItems(commonWasteRes.value.items);
+          }
+          if (hardwareRes.status === "fulfilled") {
+            setHardwareProfile(hardwareRes.value);
+          }
+          if (hardwareDiagnosticsRes.status === "fulfilled") {
+            setHardwareDiagnostics(hardwareDiagnosticsRes.value);
+          }
+          if (actuationRes.status === "fulfilled") {
+            setActuationMode(actuationRes.value);
+          }
+        });
       }
 
       if (settingsLike) {
@@ -1283,17 +1362,49 @@ export function DashboardClient() {
   useEffect(() => {
     const savedToken = window.localStorage.getItem(SESSION_TOKEN_KEY) ?? "";
     const savedChatbot = window.localStorage.getItem(USER_CHATBOT_ENABLED_KEY);
+    const savedAdminSidebar = window.localStorage.getItem(ADMIN_SIDEBAR_COLLAPSED_KEY);
     setAgentToken(savedToken);
     setUserChatbotEnabled(savedChatbot !== "0");
+    setIsSidebarCollapsed(savedAdminSidebar === "1");
     setActive(tabFromLocation());
     setUserView(userViewFromLocation());
     setHasHydrated(true);
   }, []);
 
+  function updateAdminSidebarCollapsed(collapsed: boolean) {
+    setIsSidebarCollapsed(collapsed);
+    window.localStorage.setItem(ADMIN_SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+  }
+
   function updateUserChatbotEnabled(enabled: boolean) {
     setUserChatbotEnabled(enabled);
     window.localStorage.setItem(USER_CHATBOT_ENABLED_KEY, enabled ? "1" : "0");
   }
+
+  function navigateUserView(view: UserView) {
+    const href = userPathForView(view);
+    if (window.location.pathname !== href) {
+      window.history.pushState(null, "", href);
+    }
+    setUserView(view);
+  }
+
+  useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+    const syncRouteState = () => {
+      if (window.location.pathname.startsWith("/user")) {
+        setUserView(userViewFromLocation());
+        return;
+      }
+      if (window.location.pathname.startsWith("/admin")) {
+        setActive(tabFromLocation());
+      }
+    };
+    window.addEventListener("popstate", syncRouteState);
+    return () => window.removeEventListener("popstate", syncRouteState);
+  }, [hasHydrated]);
 
   useEffect(() => {
     if (!hasHydrated) {
@@ -1312,6 +1423,23 @@ export function DashboardClient() {
     }
     void refreshUserDashboard();
   }, [agentToken, auth?.role, auth?.password_default, userRangeDays]);
+
+  useEffect(() => {
+    const refreshableUserViews: UserView[] = ["dashboard", "map", "alerts", "schedule", "collect", "report-issue"];
+    if (auth?.role !== "user" || auth.password_default || !agentToken || !refreshableUserViews.includes(userView)) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+      if (Date.now() < userOperationsInteractionUntilRef.current) {
+        return;
+      }
+      void refreshUserOperations({ background: true });
+    }, 6000);
+    return () => window.clearInterval(timer);
+  }, [agentToken, auth?.role, auth?.password_default, userView]);
 
   useEffect(() => {
     if (!hasHydrated || auth?.role !== "admin" || auth.password_default) {
@@ -1343,11 +1471,13 @@ export function DashboardClient() {
   }, [active, auth?.role, auth?.password_default, hasHydrated]);
 
   useEffect(() => {
-    if (auth?.role !== "admin" || auth.password_default) {
+    if (auth?.role !== "admin" || auth.password_default || !agentToken || !liveSocketRouteActive) {
       return;
     }
     let socket: WebSocket | null = null;
     try {
+      // WebSocket auth uses the durable admin session token; one-time stream
+      // tickets stay reserved for the MJPEG camera stream.
       socket = new WebSocket(websocketUrl(agentToken));
       socket.onmessage = (event) => {
         const payload = JSON.parse(event.data) as AgentSnapshot;
@@ -1362,7 +1492,7 @@ export function DashboardClient() {
       socket = null;
     }
     return () => socket?.close();
-  }, [agentToken, auth?.role, auth?.password_default]);
+  }, [agentToken, auth?.role, auth?.password_default, liveSocketRouteActive]);
 
   async function runAction(path: string) {
     setBusy(true);
@@ -1454,6 +1584,8 @@ export function DashboardClient() {
       if (latest.rows[0]) {
         await openAnnotation(latest.rows[0].item_id);
       }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể thêm ảnh thủ công vào huấn luyện.");
     } finally {
       setBusy(false);
     }
@@ -1485,6 +1617,8 @@ export function DashboardClient() {
       if (latest.rows[0]) {
         await openAnnotation(latest.rows[0].item_id);
       }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể chụp mẫu camera.");
     } finally {
       setBusy(false);
     }
@@ -1542,6 +1676,8 @@ export function DashboardClient() {
       setTrainingManualClass(resolved.className);
       setCaptureSession(result);
       setNotice("Đã bắt đầu phiên chụp. Xoay hoặc đổi vị trí bút trước mỗi lần chụp.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể bắt đầu phiên chụp.");
     } finally {
       setBusy(false);
     }
@@ -1563,6 +1699,8 @@ export function DashboardClient() {
       setDatasetSource("manual_camera_capture");
       setDatasetOffset(0);
       await refreshActive("training");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể chụp tư thế tiếp theo.");
     } finally {
       setBusy(false);
     }
@@ -1576,6 +1714,8 @@ export function DashboardClient() {
       });
       setCaptureSession(result);
       setNotice(result.last_message);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể dừng phiên chụp.");
     } finally {
       setBusy(false);
     }
@@ -1816,6 +1956,8 @@ export function DashboardClient() {
       setLearnNow(result);
       setNotice("Đã làm mới nhận diện reference cho mẫu đã review.");
       await refreshActive("training");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể làm mới reference.");
     } finally {
       setBusy(false);
     }
@@ -1837,6 +1979,8 @@ export function DashboardClient() {
       setTrainingManualClass(resolved.className);
       setNotice(result.message);
       await refreshActive("training");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Không thể bắt đầu train candidate.");
     } finally {
       setBusy(false);
     }
@@ -2105,6 +2249,11 @@ export function DashboardClient() {
         experience={userExperience}
         history={userHistoryRows}
         operationAlerts={userAlerts}
+        operationRefresh={{
+          lastUpdatedAt: userOperationsLastUpdatedAt,
+          isRefreshing: userOperationsRefreshing,
+          refreshError: userOperationsRefreshError
+        }}
         operationSchedules={userSchedules}
         imageToken={agentToken}
         notice={notice}
@@ -2135,7 +2284,8 @@ export function DashboardClient() {
         onRefresh={() => void refreshUserDashboard()}
         onRefreshOperations={() => void refreshUserOperations()}
         onReportDeviceIssue={(payload) => void reportDeviceIssue(payload)}
-        onViewChange={setUserView}
+        onUserMapInteraction={markUserMapInteraction}
+        onViewChange={navigateUserView}
       />
     );
   }
@@ -2157,12 +2307,14 @@ export function DashboardClient() {
             const Icon = tab.icon;
             return (
               <button
+                aria-label={tab.label}
                 key={tab.id}
                 className={active === tab.id ? "nav-item active" : "nav-item"}
                 onClick={() => setActive(tab.id)}
+                title={tab.label}
                 type="button"
               >
-                <Icon size={18} />
+                <Icon aria-hidden="true" focusable="false" size={18} />
                 <span>{tab.label}</span>
               </button>
             );
@@ -2177,9 +2329,11 @@ export function DashboardClient() {
           </div>
         </div>
         <button
+          aria-label={isSidebarCollapsed ? "Mở rộng thanh điều hướng" : "Thu gọn thanh điều hướng"}
           className="sidebar-toggle"
-          onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          onClick={() => updateAdminSidebarCollapsed(!isSidebarCollapsed)}
           title={isSidebarCollapsed ? "Mở rộng" : "Thu gọn"}
+          type="button"
         >
           {isSidebarCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
         </button>
@@ -2250,6 +2404,19 @@ export function DashboardClient() {
             stream={cameraStream}
             training={training}
             onRefreshDevices={() => void refreshDevices()}
+            onStart={() => void runAction("/api/camera/start")}
+            onStop={() => void runAction("/api/camera/stop")}
+          />
+        ) : null}
+        {active === "camera" ? (
+          <AdminCameraPanel
+            busy={busy}
+            config={config}
+            status={status}
+            stream={cameraStream}
+            onChange={updateConfig}
+            onRefreshDevices={() => void refreshDevices()}
+            onSave={(nextConfig) => void saveSettings(nextConfig)}
             onStart={() => void runAction("/api/camera/start")}
             onStop={() => void runAction("/api/camera/stop")}
           />
@@ -2384,6 +2551,7 @@ export function DashboardClient() {
             createPassword={createPassword}
             createRole={createRole}
             createUsername={createUsername}
+            createDisplayName={createDisplayName}
             knowledgeCatalog={knowledgeCatalog}
             knowledgeEvaluation={knowledgeEvaluation}
             resetPassword={resetPassword}
@@ -2392,6 +2560,7 @@ export function DashboardClient() {
             onBackfillOwner={() => void backfillOwner()}
             onChatQuestionChange={setAdminChatQuestion}
             onCreateAccount={() => void createAccount()}
+            onCreateDisplayNameChange={setCreateDisplayName}
             onCreatePasswordChange={setCreatePassword}
             onCreateRoleChange={setCreateRole}
             onCreateUsernameChange={setCreateUsername}
@@ -2537,6 +2706,10 @@ function userViewFromLocation(): UserView {
   return views.includes(segment as UserView) ? (segment as UserView) : "dashboard";
 }
 
+function userPathForView(view: UserView) {
+  return `/user/${view}`;
+}
+
 function subtitleFor(tab: TabId) {
   if (tab === "bin-map") {
     return "Bản đồ Thủ Đức với 10 trạm seed, 30 ngăn và fallback list khi tile lỗi";
@@ -2558,6 +2731,9 @@ function subtitleFor(tab: TabId) {
   }
   if (tab === "reports") {
     return "Tổng hợp history, export CSV và chất lượng dataset cho Admin";
+  }
+  if (tab === "camera") {
+    return "Quản lý camera USB như desktop: nguồn, độ phân giải, xoay/lật, ROI và preview";
   }
   if (tab === "live") {
     return "Giám sát camera USB, AI detection và trạng thái UART theo thời gian thực";

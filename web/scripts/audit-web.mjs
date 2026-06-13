@@ -31,21 +31,55 @@ const SCREENSHOTS_DIR = path.join(AUDIT_DIR, 'screenshots');
 const OUTPUT_DIR = path.join(AUDIT_DIR, 'output');
 const WEB_URL = process.env.WEB_URL || 'http://localhost:3000';
 const AGENT_URL = process.env.AGENT_URL || 'http://localhost:8765';
+const SESSION_TOKEN_KEY = 'trash-sorter-session-token';
 
-const CREDS = {
+const CURRENT_DEFAULT_CREDS = {
   admin: {
-    username: process.env.ADMIN_USERNAME || 'admin',
-    password: process.env.ADMIN_PASSWORD || 'admin123'
+    username: 'admin',
+    password: 'admin-pass-123'
   },
   user: {
-    username: process.env.USER_USERNAME || 'user',
-    password: process.env.USER_PASSWORD || 'user123'
+    username: 'user',
+    password: 'user-pass-123'
   }
 };
 
+const LEGACY_DEFAULT_CREDS = {
+  admin: {
+    username: 'admin',
+    password: 'admin123'
+  },
+  user: {
+    username: 'user',
+    password: 'user123'
+  }
+};
+
+const SELECTED_CREDS = {};
+
+const ADMIN_TAB_ROUTES = [
+  { name: 'admin-root',     path: '/admin',                 positiveSelector: 'aside.sidebar' },
+  { name: 'admin-camera',   path: '/admin?tab=camera',      positiveSelector: '.camera-management-grid' },
+  { name: 'admin-live',     path: '/admin?tab=live',        positiveSelector: '.page-heading h1' },
+  { name: 'admin-history',  path: '/admin?tab=history',     positiveSelector: '.page-heading h1' },
+  { name: 'admin-bin-map',  path: '/admin?tab=bin-map',     positiveSelector: '.page-heading h1' },
+  { name: 'admin-alerts',   path: '/admin?tab=alerts',      positiveSelector: '.page-heading h1' },
+  { name: 'admin-devices',  path: '/admin?tab=devices',     positiveSelector: '.page-heading h1' },
+  { name: 'admin-roles',    path: '/admin?tab=roles',       positiveSelector: '.page-heading h1' },
+  { name: 'admin-data',     path: '/admin?tab=data',        positiveSelector: '.page-heading h1' },
+  { name: 'admin-training', path: '/admin?tab=training',    positiveSelector: '.page-heading h1' },
+  { name: 'admin-mapping',  path: '/admin?tab=mapping',     positiveSelector: '.page-heading h1' },
+  { name: 'admin-model',    path: '/admin?tab=model',       positiveSelector: '.page-heading h1' },
+  { name: 'admin-audio',    path: '/admin?tab=audio',       positiveSelector: '.page-heading h1' },
+  { name: 'admin-settings', path: '/admin?tab=settings',    positiveSelector: '.page-heading h1' },
+  { name: 'admin-logs',     path: '/admin?tab=logs',        positiveSelector: '.page-heading h1' },
+  { name: 'admin-accounts', path: '/admin?tab=accounts',    positiveSelector: '.page-heading h1' },
+  { name: 'admin-reports',  path: '/admin?tab=reports',     positiveSelector: '.page-heading h1' }
+].map((route) => ({ ...route, requiredRole: 'admin' }));
+
 const ROUTES = [
   { name: 'root',              path: '/',                    requiredRole: 'public', positiveSelector: 'body' },
-  { name: 'admin-root',        path: '/admin',               requiredRole: 'admin',  positiveSelector: 'aside.sidebar' },
+  ...ADMIN_TAB_ROUTES,
   { name: 'user-dashboard',    path: '/user/dashboard',      requiredRole: 'user',   positiveSelector: 'main.workspace, .user-workspace' },
   { name: 'user-analytics',    path: '/user/analytics',      requiredRole: 'user',   positiveSelector: 'aside.user-sidebar' },
   { name: 'user-map',          path: '/user/map',            requiredRole: 'user',   positiveSelector: '.leaflet-container' },
@@ -58,15 +92,16 @@ const ROUTES = [
   { name: 'user-ecopet',       path: '/user/ecopet',         requiredRole: 'user',   positiveSelector: 'aside.user-sidebar' },
   { name: 'user-advice',       path: '/user/advice',         requiredRole: 'user',   positiveSelector: 'aside.user-sidebar' },
   { name: 'user-reports',      path: '/user/reports',        requiredRole: 'user',   positiveSelector: 'aside.user-sidebar' },
-  { name: 'user-notifications', path: '/user/notifications', requiredRole: 'user',   positiveSelector: 'aside.user-sidebar' },
-  { name: 'user-community',    path: '/user/community',      requiredRole: 'user',   positiveSelector: 'aside.user-sidebar' },
-  { name: 'user-leaderboard',  path: '/user/leaderboard',    requiredRole: 'user',   positiveSelector: 'aside.user-sidebar' },
+  { name: 'user-notifications', path: '/user/notifications', requiredRole: 'user',   positiveSelector: '.notification-center' },
+  { name: 'user-community',    path: '/user/community',      requiredRole: 'user',   positiveSelector: '.user-card-grid' },
+  { name: 'user-leaderboard',  path: '/user/leaderboard',    requiredRole: 'user',   positiveSelector: '.leaderboard-panel' },
   { name: 'user-account',      path: '/user/account',        requiredRole: 'user',   positiveSelector: 'aside.user-sidebar' }
 ];
 
 const SMOKE_ROUTES = [
-  'root', 'admin-root', 'user-dashboard', 'user-analytics', 'user-history',
-  'user-map', 'user-alerts', 'user-account', 'user-reports', 'user-device'
+  'root', 'admin-root', 'admin-camera', 'admin-live', 'admin-training',
+  'user-dashboard', 'user-analytics', 'user-history', 'user-map',
+  'user-alerts', 'user-leaderboard', 'user-account', 'user-reports', 'user-device'
 ];
 
 const args = process.argv.slice(2);
@@ -86,13 +121,12 @@ Options:
   --role=all      Audit all roles (default)
   --help          Show this help
 
-Credentials (env vars, dev defaults shown):
-  ADMIN_USERNAME  default 'admin'     ADMIN_PASSWORD  default 'admin123'
-  USER_USERNAME   default 'user'      USER_PASSWORD   default 'user123'
+Credentials:
+  ADMIN_USERNAME / ADMIN_PASSWORD override admin login.
+  USER_USERNAME / USER_PASSWORD override user login.
 
-If dev defaults were changed in auth.db (TRASH_SORTER_AUTH_DEV_DEFAULTS=1 was
-not active at agent start), the audit will skip role-protected routes. Set
-the env vars above to use the current credentials.
+Without env overrides the audit tries current local defaults first, then legacy
+dev defaults. Passwords are never printed in the report.
 
 Required services (must be running before audit):
   WEB_URL   default http://localhost:3000  (next dev / next start)
@@ -117,26 +151,46 @@ function sanitize(value) {
   return out;
 }
 
-async function login(role) {
-  const creds = CREDS[role];
-  if (!creds) throw new Error(`Unknown role: ${role}`);
-  const res = await fetch(`${AGENT_URL}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(creds)
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Login failed for ${role}: ${res.status} ${body.slice(0, 200)}`);
-  }
-  const data = await res.json();
-  return data.token;
+function credentialCandidates(role) {
+  const envUsername = process.env[`${role.toUpperCase()}_USERNAME`];
+  const envPassword = process.env[`${role.toUpperCase()}_PASSWORD`];
+  const candidates = [];
+  const add = (creds) => {
+    if (!creds?.username || !creds?.password) return;
+    if (candidates.some((item) => item.username === creds.username && item.password === creds.password)) return;
+    candidates.push(creds);
+  };
+  add({ username: envUsername, password: envPassword });
+  add(CURRENT_DEFAULT_CREDS[role]);
+  add(LEGACY_DEFAULT_CREDS[role]);
+  return candidates;
 }
 
-// Form-based login: web uses cookie-based session, not bearer token header.
-// Visiting / and filling the form establishes a real session in the browser context.
+async function login(role) {
+  const candidates = credentialCandidates(role);
+  if (!candidates.length) throw new Error(`Unknown role or missing credentials: ${role}`);
+  const errors = [];
+  for (const creds of candidates) {
+    const res = await fetch(`${AGENT_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(creds)
+    });
+    if (res.ok) {
+      const data = await res.json();
+      SELECTED_CREDS[role] = creds;
+      return data.token;
+    }
+    const body = await res.text().catch(() => '');
+    errors.push(`${res.status} ${body.slice(0, 120)}`);
+  }
+  throw new Error(`Login failed for ${role}: ${errors.join(' | ')}`);
+}
+
+// Form-based fallback mirrors a user login and lets DashboardClient write the
+// token to localStorage. Normal audits inject the API token directly.
 async function formLoginInContext(context, role) {
-  const creds = CREDS[role];
+  const creds = SELECTED_CREDS[role] || credentialCandidates(role)[0];
   if (!creds) throw new Error(`Unknown role: ${role}`);
   const page = await context.newPage();
   try {
@@ -158,16 +212,6 @@ async function formLoginInContext(context, role) {
       await page.locator(expectedMarker).first()
         .waitFor({ state: 'visible', timeout: 10000 })
         .catch(() => null);
-      // F1 fix: verify a session cookie was actually set on the context. If
-      // the login API sets the cookie on a different response than the form
-      // submit triggers, the audit will see a missing cookie and can report it.
-      const cookies = await context.cookies();
-      const hasSessionCookie = cookies.some(c =>
-        /session|token|auth/i.test(c.name) || /session|token|auth/i.test(c.domain)
-      );
-      if (!hasSessionCookie) {
-        console.warn(`[audit] ${role} form login: no session cookie detected on context (cookies: ${cookies.map(c => c.name).join(', ') || 'none'})`);
-      }
     }
   } finally {
     await page.close();
@@ -175,11 +219,18 @@ async function formLoginInContext(context, role) {
 }
 
 async function auditRoute(browser, route, role, token) {
-  // Form-based login establishes a real session in the browser context (cookie-based).
-  // The token arg is kept for backward-compat logging only.
+  // DashboardClient uses a localStorage session token. Injecting the API login
+  // token gives the audit the same auth state as the Playwright e2e helpers.
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   if (role && role !== 'public') {
-    await formLoginInContext(context, role);
+    if (token) {
+      await context.addInitScript(
+        ([key, value]) => window.localStorage.setItem(key, value),
+        [SESSION_TOKEN_KEY, token]
+      );
+    } else {
+      await formLoginInContext(context, role);
+    }
   }
   const page = await context.newPage();
   const findings = {
@@ -208,10 +259,13 @@ async function auditRoute(browser, route, role, token) {
         findings.networkErrors.push({ url: res.url(), status: res.status(), body });
       }
     });
-    await page.goto(`${WEB_URL}${route.path}`, { waitUntil: 'networkidle', timeout: 15000 });
+    await page.goto(`${WEB_URL}${route.path}`, { waitUntil: 'domcontentloaded', timeout: 15000 });
     const sel = route.positiveSelector;
     if (sel) {
-      findings.positiveAssertPassed = await page.locator(sel).first().isVisible().catch(() => false);
+      findings.positiveAssertPassed = await page.locator(sel).first()
+        .waitFor({ state: 'visible', timeout: 15000 })
+        .then(() => true)
+        .catch(() => false);
     } else {
       findings.positiveAssertPassed = true;
     }
@@ -247,7 +301,8 @@ async function main() {
     }
   }
 
-  const routeList = opts.smoke ? ROUTES.filter(r => SMOKE_ROUTES.includes(r.name)) : ROUTES;
+  const routeList = (opts.smoke ? ROUTES.filter(r => SMOKE_ROUTES.includes(r.name)) : ROUTES)
+    .filter(r => opts.role === 'all' || r.requiredRole === 'public' || r.requiredRole === opts.role);
   const allFindings = [];
   for (const route of routeList) {
     const reqRole = route.requiredRole;
@@ -273,7 +328,8 @@ async function main() {
     f.error ||
     f.skipped ||
     f.positiveAssertPassed === false ||
-    (f.consoleErrors && f.consoleErrors.length > 0)
+    (f.consoleErrors && f.consoleErrors.length > 0) ||
+    (f.networkErrors && f.networkErrors.length > 0)
   ).length;
   console.log(`[audit] ${allFindings.length} routes, ${failed} with issues`);
   console.log(`[audit] output: ${path.relative(PROJECT_ROOT, outFile)}`);

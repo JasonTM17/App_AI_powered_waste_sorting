@@ -1,7 +1,8 @@
 "use client";
 
-import { Bell, KeyRound, LogOut, MessageCircle, ShieldCheck, UserRound } from "lucide-react";
+import { Bell, KeyRound, LogOut, MessageCircle, ShieldCheck } from "lucide-react";
 
+import { accountDisplayName, accountInitials, accountToneKey } from "@/lib/account-display";
 import type { UserDashboardPanelProps } from "./user-dashboard-types";
 
 export function UserAccountScreen(props: UserDashboardPanelProps) {
@@ -13,17 +14,21 @@ export function UserAccountScreen(props: UserDashboardPanelProps) {
     quotaRemaining === null || quotaUsed === null
       ? "36 lượt hỏi mỗi tháng"
       : `${quotaRemaining}/${quotaLimit} lượt còn lại trong tháng`;
+  const displayName = accountDisplayName(props.auth);
+  const initials = accountInitials(displayName);
+  const tone = accountToneKey(props.auth?.username || displayName);
   const owner = props.device?.owner_username || props.auth?.username || "Người dùng";
+
   return (
     <section className="user-account-screen">
       <div className="user-account-header">
         <div>
           <span className="eyebrow">Cài đặt tài khoản</span>
-          <h2>{props.auth?.username || "User"}</h2>
+          <h2>{displayName}</h2>
           <p>Quản lý đăng nhập, bảo mật và tùy chọn EcoPet của bạn.</p>
         </div>
-        <div className="account-avatar" aria-hidden="true">
-          <UserRound size={26} />
+        <div className="account-avatar generated-avatar" data-tone={tone} aria-hidden="true">
+          <span>{initials}</span>
         </div>
       </div>
 
@@ -37,6 +42,10 @@ export function UserAccountScreen(props: UserDashboardPanelProps) {
             <ShieldCheck size={21} />
           </div>
           <div className="account-readonly-list">
+            <div>
+              <span>Tên hiển thị</span>
+              <strong>{displayName}</strong>
+            </div>
             <div>
               <span>Tên đăng nhập</span>
               <strong>{props.auth?.username || "User"}</strong>

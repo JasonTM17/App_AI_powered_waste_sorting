@@ -30,6 +30,7 @@ type ManualTrainingPanelProps = {
 };
 
 const FALLBACK_CANONICAL_LABELS: Record<string, string> = {
+  pen: "Pen",
   "khẩu trang": "Textile",
   "miếng vải": "Textile",
   textile: "Textile",

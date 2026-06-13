@@ -491,6 +491,7 @@ export type AuthMe = {
   auth_required: boolean;
   account_id?: number | null;
   username?: string | null;
+  display_name?: string;
   token_source: "session" | "env" | "dev" | string;
   session_expires_at?: string | null;
   password_default: boolean;
@@ -501,6 +502,7 @@ export type AuthLoginResponse = {
   role: AuthRole;
   account_id?: number | null;
   username: string;
+  display_name?: string;
   capabilities: string[];
   expires_at: string;
   password_default: boolean;
@@ -509,6 +511,7 @@ export type AuthLoginResponse = {
 export type AccountDTO = {
   id: number;
   username: string;
+  display_name?: string;
   role: AuthRole;
   is_active: boolean;
   password_default: boolean;
@@ -1053,6 +1056,13 @@ export function websocketUrl(token = DEFAULT_AGENT_TOKEN) {
   return url.toString();
 }
 
+export function websocketStreamUrl(streamToken: string) {
+  const url = new URL(`${AGENT_URL}/ws/live`);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.searchParams.set("stream_token", streamToken);
+  return url.toString();
+}
+
 export function datasetImageUrl(itemId: string, token = DEFAULT_AGENT_TOKEN) {
   const url = new URL(`${AGENT_URL}/api/dataset/items/${encodeURIComponent(itemId)}/image`);
   if (token) {
@@ -1074,6 +1084,10 @@ export function historyImageUrl(
   return url.toString();
 }
 
+export function historyImagePath(rowId: number, kind: "annotated" | "raw" = "annotated") {
+  return `/api/history/${encodeURIComponent(String(rowId))}/image?kind=${encodeURIComponent(kind)}`;
+}
+
 export function userHistoryImageUrl(
   rowId: number,
   kind: "annotated" | "raw" = "annotated",
@@ -1087,6 +1101,10 @@ export function userHistoryImageUrl(
   return url.toString();
 }
 
+export function userHistoryImagePath(rowId: number, kind: "annotated" | "raw" = "annotated") {
+  return `/api/user/history/${encodeURIComponent(String(rowId))}/image?kind=${encodeURIComponent(kind)}`;
+}
+
 export function userHistoryExportUrl(rangeDays: AnalyticsRangeDays, token = DEFAULT_AGENT_TOKEN) {
   const url = new URL(`${AGENT_URL}/api/user/history/export.csv`);
   url.searchParams.set("range_days", String(rangeDays));
@@ -1094,6 +1112,70 @@ export function userHistoryExportUrl(rangeDays: AnalyticsRangeDays, token = DEFA
     url.searchParams.set("token", token);
   }
   return url.toString();
+}
+
+export function userHistoryExportPath(rangeDays: AnalyticsRangeDays) {
+  return `/api/user/history/export.csv?range_days=${encodeURIComponent(String(rangeDays))}`;
+}
+
+export async function agentFetchBlob(
+  path: string,
+  token = DEFAULT_AGENT_TOKEN,
+  init?: AgentFetchInit
+): Promise<Blob> {
+  const { timeoutMs, signal, ...requestInit } = init ?? {};
+  const headers = new Headers(init?.headers);
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs ?? AGENT_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${AGENT_URL}${path}`, {
+      ...requestInit,
+      headers,
+      cache: "no-store",
+      signal: signal ?? controller.signal
+    });
+    if (!res.ok) {
+      throw new AgentApiError(`Agent request failed: ${res.status}`, res.status);
+    }
+    return await res.blob();
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
+}
+
+export async function openAgentBlob(path: string, token = DEFAULT_AGENT_TOKEN) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  const blob = await agentFetchBlob(path, token);
+  const objectUrl = window.URL.createObjectURL(blob);
+  const opened = window.open(objectUrl, "_blank", "noopener,noreferrer");
+  if (!opened) {
+    window.location.assign(objectUrl);
+  }
+  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
+}
+
+export async function downloadAgentBlob(
+  path: string,
+  filename: string,
+  token = DEFAULT_AGENT_TOKEN
+) {
+  if (typeof document === "undefined") {
+    return;
+  }
+  const blob = await agentFetchBlob(path, token);
+  const objectUrl = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
 }
 
 export async function agentFetch<T>(

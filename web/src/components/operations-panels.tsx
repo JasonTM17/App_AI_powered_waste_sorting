@@ -71,6 +71,12 @@ type AdminAlertsPanelProps = {
 type UserMapScreenProps = {
   busy: boolean;
   map: BinMapResponse | null;
+  refreshMeta?: {
+    lastUpdatedAt: string;
+    isRefreshing: boolean;
+    refreshError: string;
+  };
+  onMapInteraction?: () => void;
   onRefresh: () => void;
 };
 
@@ -338,7 +344,7 @@ export function AdminAlertsPanel({ alerts, busy, schedules, onPatchAlert }: Admi
   );
 }
 
-export function UserMapScreen({ busy, map, onRefresh }: UserMapScreenProps) {
+export function UserMapScreen({ busy, map, refreshMeta, onMapInteraction, onRefresh }: UserMapScreenProps) {
   const [selectedId, setSelectedId] = useState("");
   const selected = map?.stations.find((station) => station.station_id === selectedId) ?? map?.stations[0] ?? null;
   return (
@@ -346,7 +352,9 @@ export function UserMapScreen({ busy, map, onRefresh }: UserMapScreenProps) {
       <OperationsBinMap
         busy={busy}
         map={map}
+        refreshMeta={refreshMeta}
         selectedStationId={selected?.station_id}
+        onInteraction={onMapInteraction}
         onRefresh={onRefresh}
         onSelectStation={(station) => setSelectedId(station.station_id)}
       />
@@ -355,7 +363,13 @@ export function UserMapScreen({ busy, map, onRefresh }: UserMapScreenProps) {
           <span className="eyebrow">Trạm gần bạn</span>
           <h2>{selected?.name ?? "Chọn trạm"}</h2>
         </div>
-        {selected ? <StationDetail station={selected} /> : <div className="empty-state">Chưa có trạm để hiển thị.</div>}
+        {selected ? (
+          <StationDetail station={selected} />
+        ) : (
+          <div className="empty-state" data-testid="user-map-station-detail-empty">
+            Chưa có trạm để hiển thị.
+          </div>
+        )}
       </aside>
     </>
   );
@@ -464,7 +478,7 @@ export function UserDeviceIssueScreen({ busy, map, onReportIssue }: UserDeviceIs
       <div className="form-grid two-col">
         <label>
           Trạm
-          <select onChange={(event) => setForm({ ...form, station_id: event.target.value })} value={form.station_id}>
+          <select onChange={(event) => setForm({ ...form, station_id: event.target.value, bin_id: "" })} value={form.station_id}>
             {(map?.stations ?? []).map((station) => (
               <option key={station.station_id} value={station.station_id}>
                 {station.name}
@@ -609,13 +623,13 @@ function ScheduleList({ compact, schedules }: { compact?: boolean; schedules: Co
 
 function StationDetail({ station }: { station: BinStation }) {
   return (
-    <div className="operations-station-detail">
+    <div className="operations-station-detail" data-testid="user-map-station-detail">
       <p>{station.address}</p>
       <p className="helper-text">
         {station.owner_username ? `Phụ trách: ${station.owner_username}` : "Chưa gán người phụ trách"}
         {station.latitude != null && station.longitude != null
           ? ` - ${station.latitude.toFixed(5)}, ${station.longitude.toFixed(5)}`
-          : ""}
+          : " - Chưa có tọa độ hợp lệ"}
       </p>
       <div className="operations-mini-metrics">
         <span>

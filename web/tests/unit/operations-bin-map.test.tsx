@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { screen, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { OperationsBinMap } from "@/components/operations-bin-map";
+import type { BinMapResponse } from "@/lib/agent";
 import { renderWithProviders } from "../helpers/render-with-providers";
 import { DEFAULT_BIN_MAP_RESPONSE } from "../helpers/mock-agent-fetch";
 
@@ -57,7 +58,16 @@ vi.mock("react-dom/client", () => ({
   }))
 }));
 
-function setup(overrides?: { busy?: boolean; map?: unknown; onRefresh?: () => void }) {
+function setup(overrides?: {
+  busy?: boolean;
+  map?: BinMapResponse | null;
+  refreshMeta?: {
+    lastUpdatedAt: string;
+    isRefreshing: boolean;
+    refreshError: string;
+  };
+  onRefresh?: () => void;
+}) {
   const props = {
     busy: false,
     map: DEFAULT_BIN_MAP_RESPONSE,
@@ -93,5 +103,25 @@ describe("OperationsBinMap", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /làm mới/i }));
     expect(props.onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders user realtime refresh status when provided", () => {
+    setup({
+      refreshMeta: {
+        lastUpdatedAt: new Date().toISOString(),
+        isRefreshing: false,
+        refreshError: ""
+      }
+    });
+
+    expect(screen.getByTestId("map-refresh-status")).toHaveTextContent(/Vừa cập nhật|Đang cập nhật/);
+  });
+
+  it("toggles map focus mode when expand button is clicked", async () => {
+    setup();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTitle("Mở rộng bản đồ"));
+    expect(screen.getByTitle("Thu nhỏ bản đồ")).toBeInTheDocument();
   });
 });

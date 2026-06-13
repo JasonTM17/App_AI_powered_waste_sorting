@@ -1,10 +1,17 @@
 "use client";
 
-import { KeyRound, RotateCcw, ShieldCheck, UserPlus, UsersRound } from "lucide-react";
+import { KeyRound, RotateCcw, UserPlus } from "lucide-react";
 
-import type { AccountDTO, AuthRole, KnowledgeCatalogResponse, KnowledgeEntry, KnowledgeEvaluateResponse } from "@/lib/agent";
 import { AdminAiTrainingPanel } from "@/components/admin-ai-training-panel";
 import { ChatPanel } from "@/components/chat/chat-panel";
+import { accountDisplayName, accountInitials, accountToneKey } from "@/lib/account-display";
+import type {
+  AccountDTO,
+  AuthRole,
+  KnowledgeCatalogResponse,
+  KnowledgeEntry,
+  KnowledgeEvaluateResponse
+} from "@/lib/agent";
 import type { AiChatResponse } from "@/lib/agent";
 
 type AdminAccountsPanelProps = {
@@ -12,6 +19,7 @@ type AdminAccountsPanelProps = {
   busy: boolean;
   chatAnswer: AiChatResponse | null;
   chatQuestion: string;
+  createDisplayName: string;
   createPassword: string;
   createRole: AuthRole;
   createUsername: string;
@@ -23,6 +31,7 @@ type AdminAccountsPanelProps = {
   onBackfillOwner: () => void;
   onChatQuestionChange: (value: string) => void;
   onCreateAccount: () => void;
+  onCreateDisplayNameChange: (value: string) => void;
   onCreatePasswordChange: (value: string) => void;
   onCreateRoleChange: (value: AuthRole) => void;
   onCreateUsernameChange: (value: string) => void;
@@ -49,6 +58,7 @@ export function AdminAccountsPanel({
   busy,
   chatAnswer,
   chatQuestion,
+  createDisplayName,
   createPassword,
   createRole,
   createUsername,
@@ -60,6 +70,7 @@ export function AdminAccountsPanel({
   onBackfillOwner,
   onChatQuestionChange,
   onCreateAccount,
+  onCreateDisplayNameChange,
   onCreatePasswordChange,
   onCreateRoleChange,
   onCreateUsernameChange,
@@ -95,41 +106,45 @@ export function AdminAccountsPanel({
         </div>
 
         <div className="account-table">
-          {accounts.map((account) => (
-            <article className="account-row-card" key={account.id}>
-              <div className="account-row-main">
-                <div className="account-avatar">
-                  {account.role === "admin" ? <ShieldCheck size={18} /> : <UsersRound size={18} />}
+          {accounts.map((account) => {
+            const displayName = accountDisplayName(account);
+            const tone = accountToneKey(account.username || displayName);
+            return (
+              <article className="account-row-card" key={account.id}>
+                <div className="account-row-main">
+                  <div className="account-avatar generated-avatar" data-tone={tone}>
+                    <span>{accountInitials(displayName)}</span>
+                  </div>
+                  <div>
+                    <strong>{displayName}</strong>
+                    <span>
+                      {account.username} - {account.role} - {account.is_active ? "đang hoạt động" : "đã vô hiệu"}
+                      {account.password_default ? " - bắt buộc đổi mật khẩu" : ""}
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  <strong>{account.username}</strong>
-                  <span>
-                    {account.role} - {account.is_active ? "đang hoạt động" : "đã vô hiệu"}
-                    {account.password_default ? " - bắt buộc đổi mật khẩu" : ""}
-                  </span>
+                <div className="button-row">
+                  <button
+                    className={account.is_active ? "danger-button compact-button" : "secondary-button compact-button"}
+                    disabled={busy}
+                    onClick={() => onToggleActive(account.username, !account.is_active)}
+                    type="button"
+                  >
+                    <span>{account.is_active ? "Vô hiệu" : "Kích hoạt"}</span>
+                  </button>
+                  <button
+                    className="secondary-button compact-button"
+                    disabled={busy || resetPassword.length < 8}
+                    onClick={() => onResetPassword(account.username)}
+                    type="button"
+                  >
+                    <KeyRound size={15} />
+                    <span>Đặt lại</span>
+                  </button>
                 </div>
-              </div>
-              <div className="button-row">
-                <button
-                  className={account.is_active ? "danger-button compact-button" : "secondary-button compact-button"}
-                  disabled={busy}
-                  onClick={() => onToggleActive(account.username, !account.is_active)}
-                  type="button"
-                >
-                  <span>{account.is_active ? "Vô hiệu" : "Kích hoạt"}</span>
-                </button>
-                <button
-                  className="secondary-button compact-button"
-                  disabled={busy || resetPassword.length < 8}
-                  onClick={() => onResetPassword(account.username)}
-                  type="button"
-                >
-                  <KeyRound size={15} />
-                  <span>Đặt lại</span>
-                </button>
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </div>
       </div>
 
@@ -142,6 +157,10 @@ export function AdminAccountsPanel({
           <label>
             Tên đăng nhập
             <input onChange={(event) => onCreateUsernameChange(event.target.value)} value={createUsername} />
+          </label>
+          <label>
+            Tên hiển thị
+            <input onChange={(event) => onCreateDisplayNameChange(event.target.value)} value={createDisplayName} />
           </label>
           <label>
             Vai trò
@@ -190,7 +209,7 @@ export function AdminAccountsPanel({
               .filter((account) => account.role === "user")
               .map((account) => (
                 <option key={account.id} value={account.username}>
-                  {account.username}
+                  {accountDisplayName(account)} ({account.username})
                 </option>
               ))}
           </select>

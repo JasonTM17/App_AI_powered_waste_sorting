@@ -11,6 +11,7 @@ const USER_AUTH: AuthMe = {
   auth_required: false,
   account_id: 1,
   username: "test-user",
+  display_name: "",
   token_source: "session",
   password_default: false
 };
@@ -21,6 +22,7 @@ const ADMIN_AUTH: AuthMe = {
   auth_required: false,
   account_id: 2,
   username: "test-admin",
+  display_name: "",
   token_source: "session",
   password_default: false
 };
@@ -45,10 +47,13 @@ describe("AccountControl", () => {
     const { container } = setup({ auth: USER_AUTH });
     expect(screen.getByText("Test User")).toBeInTheDocument();
     expect(screen.getByText("Tài khoản người dùng")).toBeInTheDocument();
-    expect(container.querySelector(".account-avatar-frame img")).toHaveAttribute(
-      "src",
-      "/brand/trash-sorter-pro-mark.png"
-    );
+    expect(container.querySelector(".account-avatar-frame")).toHaveTextContent("TU");
+  });
+
+  it("prefers display_name for member accounts", () => {
+    const { container } = setup({ auth: { ...USER_AUTH, username: "nguyen-son", display_name: "Nguyễn Sơn" } });
+    expect(screen.getByText("Nguyễn Sơn")).toBeInTheDocument();
+    expect(container.querySelector(".account-avatar-frame.generated-avatar")).toHaveTextContent("NS");
   });
 
   it("uses a professional display name for the generic local user account", () => {

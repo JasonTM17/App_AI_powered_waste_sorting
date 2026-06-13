@@ -15,6 +15,7 @@ import { UserDeviceScreen } from "./user-device-screen";
 import {
   ExperienceChallenges,
   UserCommunityScreen,
+  UserEcoPetScreen,
   UserLeaderboardScreen,
   UserNotificationScreen
 } from "./user-experience-screens";
@@ -32,7 +33,15 @@ export function UserRouteContent(props: UserDashboardPanelProps) {
     return <UserDeviceScreen analytics={analytics} device={device} history={history} imageToken={imageToken} />;
   }
   if (view === "map") {
-    return <UserMapScreen busy={props.busy} map={props.binMap} onRefresh={props.onRefreshOperations} />;
+    return (
+      <UserMapScreen
+        busy={props.busy}
+        map={props.binMap}
+        refreshMeta={props.operationRefresh}
+        onMapInteraction={props.onUserMapInteraction}
+        onRefresh={props.onRefreshOperations}
+      />
+    );
   }
   if (view === "alerts") {
     return <UserAlertsScreen alerts={props.operationAlerts} />;
@@ -88,7 +97,19 @@ export function UserRouteContent(props: UserDashboardPanelProps) {
   if (view === "account") {
     return <UserAccountScreen {...props} />;
   }
-  if (view === "dashboard" || view === "ecopet") {
+  if (view === "ecopet") {
+    return (
+      <UserEcoPetScreen
+        analytics={analytics}
+        answer={props.chatAnswer}
+        busy={props.chatBusy}
+        question={props.chatQuestion}
+        onAsk={props.onChatRequest}
+        onQuestionChange={props.onChatQuestionChange}
+      />
+    );
+  }
+  if (view === "dashboard") {
     return <StitchUserOverview analytics={analytics} history={history} />;
   }
   if (view === "advice") {

@@ -3,7 +3,7 @@
 import { ImageIcon, ListChecks } from "lucide-react";
 
 import type { UserHistoryItem } from "@/lib/agent";
-import { userHistoryImageUrl } from "@/lib/agent";
+import { openAgentBlob, userHistoryImagePath } from "@/lib/agent";
 
 const categoryLabels: Record<UserHistoryItem["category"], string> = {
   organic: "Hữu cơ",
@@ -38,15 +38,14 @@ export function UserHistoryPanel({ imageToken, rows }: UserHistoryPanelProps) {
               </div>
               <small>{row.route_label || `Thùng ${row.bin_index ?? "-"}`}</small>
               {row.image_available ? (
-                <a
+                <button
                   className="history-image-link"
-                  href={userHistoryImageUrl(row.id, "annotated", imageToken)}
-                  rel="noreferrer"
-                  target="_blank"
+                  onClick={() => void openAgentBlob(userHistoryImagePath(row.id, "annotated"), imageToken)}
+                  type="button"
                 >
                   <ImageIcon size={16} />
                   <span>Ảnh</span>
-                </a>
+                </button>
               ) : null}
             </article>
           ))

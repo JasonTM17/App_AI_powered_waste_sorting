@@ -21,7 +21,7 @@ import {
   type LucideIcon
 } from "lucide-react";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { AccountControl } from "@/components/account-control";
 import { TrashSorterLogo } from "@/components/brand/trash-sorter-logo";
@@ -50,13 +50,30 @@ const userNav: Array<{ id: UserView; href: string; label: string; icon: LucideIc
   { id: "account", href: "/user/account", label: "Tài khoản", icon: UserRound }
 ];
 
+const USER_SIDEBAR_COLLAPSED_KEY = "trash-sorter-user-sidebar-collapsed";
+
 export function UserDashboardPanel(props: UserDashboardPanelProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const { agentError, analytics, auth, busy, chatAnswer, chatBusy, chatQuestion, notice, rangeDays, view } = props;
   const primaryNav = userNav.slice(0, 5);
   const secondaryNav = userNav.slice(5);
+  const isMapView = view === "map";
+
+  useEffect(() => {
+    setIsSidebarCollapsed(window.localStorage.getItem(USER_SIDEBAR_COLLAPSED_KEY) === "1");
+  }, []);
+
+  function updateSidebarCollapsed(collapsed: boolean) {
+    setIsSidebarCollapsed(collapsed);
+    window.localStorage.setItem(USER_SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+  }
+
   return (
-    <div className={`app-shell user-shell polished-user-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <div
+      className={`app-shell user-shell polished-user-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""} ${
+        isMapView ? "user-map-view" : ""
+      }`}
+    >
       <aside className="sidebar user-sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -81,9 +98,11 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
           </div>
         </div>
         <button
+          aria-label={isSidebarCollapsed ? "Mở rộng thanh điều hướng" : "Thu gọn thanh điều hướng"}
           className="sidebar-toggle"
-          onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          onClick={() => updateSidebarCollapsed(!isSidebarCollapsed)}
           title={isSidebarCollapsed ? "Mở rộng" : "Thu gọn"}
+          type="button"
         >
           {isSidebarCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
         </button>
@@ -98,9 +117,9 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
           <AccountControl auth={auth} busy={busy} onLogout={props.onLogout} />
         </header>
 
-        <UserHeroSummary analytics={analytics} auth={auth} busy={busy} />
+        {isMapView ? null : <UserHeroSummary analytics={analytics} auth={auth} busy={busy} />}
 
-        {view !== "account" ? (
+        {view !== "account" && !isMapView ? (
           <div className="user-range-row">
             <div>
               <span className="eyebrow">Khoảng thời gian</span>
@@ -121,7 +140,6 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
           <RoleChatbotLauncher
             answer={chatAnswer}
             busy={chatBusy}
-            defaultOpen={view === "ecopet"}
             label="EcoPet"
             placeholder="Hỏi EcoPet..."
             question={chatQuestion}
@@ -152,16 +170,17 @@ function UserNavGroup({
         const Icon = item.icon;
         return (
           <a
+            aria-label={item.label}
             className={view === item.id ? "nav-item active" : "nav-item"}
             href={item.href}
             key={item.id}
             onClick={(event) => {
               event.preventDefault();
-              window.history.pushState(null, "", item.href);
               onViewChange(item.id);
             }}
+            title={item.label}
           >
-            <Icon size={18} />
+            <Icon aria-hidden="true" focusable="false" size={18} />
             <span>{item.label}</span>
           </a>
         );

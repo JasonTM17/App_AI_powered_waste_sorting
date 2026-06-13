@@ -25,7 +25,7 @@ export function UserHeroSummary({
         <HeroStat
           detail={analytics ? `${analytics.today_total} lượt hôm nay` : "Đang tải dữ liệu"}
           icon="total"
-          label="Tổng lượt hôm nay"
+          label="Tổng lượt phân loại"
           suffix="lượt"
           value={analytics?.total ?? 0}
         />

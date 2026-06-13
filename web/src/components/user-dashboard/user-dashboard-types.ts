@@ -49,6 +49,11 @@ export type UserDashboardPanelProps = {
   notice: string;
   operationAlerts: AlertsResponse | null;
   operationSchedules: CollectionSchedulesResponse | null;
+  operationRefresh: {
+    lastUpdatedAt: string;
+    isRefreshing: boolean;
+    refreshError: string;
+  };
   imageToken: string;
   passwordConfirm: string;
   passwordCurrent: string;
@@ -73,5 +78,6 @@ export type UserDashboardPanelProps = {
   onRefresh: () => void;
   onRefreshOperations: () => void;
   onReportDeviceIssue: (payload: DeviceIssueCreatePayload) => void;
+  onUserMapInteraction: () => void;
   onViewChange: (value: UserView) => void;
 };

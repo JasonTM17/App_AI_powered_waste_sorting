@@ -3,7 +3,7 @@
 import { FileDown } from "lucide-react";
 
 import type { UserReport } from "@/lib/agent";
-import { userHistoryExportUrl } from "@/lib/agent";
+import { downloadAgentBlob, userHistoryExportPath } from "@/lib/agent";
 
 type UserReportScreenProps = {
   imageToken: string;
@@ -31,10 +31,20 @@ export function UserReportScreen({ imageToken, report }: UserReportScreenProps) 
           <FileDown size={21} />
         </div>
         <p>File export chỉ gồm các cột tổng hợp theo tài khoản, không có đường dẫn ảnh hoặc log thô.</p>
-        <a className="primary-button" href={userHistoryExportUrl(report?.range_days ?? 30, imageToken)}>
+        <button
+          className="primary-button"
+          onClick={() =>
+            void downloadAgentBlob(
+              userHistoryExportPath(report?.range_days ?? 30),
+              `ecosort-user-history-${report?.range_days ?? 30}d.csv`,
+              imageToken
+            )
+          }
+          type="button"
+        >
           <FileDown size={17} />
           <span>Tải CSV User</span>
-        </a>
+        </button>
         <div className="safe-field-list">
           {(report?.csv_safe_fields ?? []).map((field) => (
             <span key={field}>{field}</span>

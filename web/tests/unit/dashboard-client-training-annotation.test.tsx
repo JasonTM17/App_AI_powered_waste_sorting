@@ -59,7 +59,8 @@ const TRAINING = {
 const CLASS_RESPONSE = {
   classes: [
     { id: 18, name: "Paper" },
-    { id: 37, name: "Textile" }
+    { id: 37, name: "Textile" },
+    { id: 42, name: "Pen" }
   ]
 };
 
@@ -190,5 +191,24 @@ describe("DashboardClient training annotation", () => {
     await userEvent.click(screen.getByRole("button", { name: /phone/i }));
 
     await expect(screen.findByTestId("training-annotation-selected-class")).resolves.toHaveTextContent("Textile");
+  });
+
+  it("shows camera capture failures as a notice instead of an unhandled error", async () => {
+    window.history.replaceState(null, "", "/admin?tab=training");
+    window.localStorage.setItem("trash-sorter-session-token", "qa-token");
+    agentFetchMock.mockImplementation(async (path: string) => {
+      if (path === "/api/dataset/camera-sample") {
+        throw new Error("Camera is not running or has no frame yet");
+      }
+      return responseFor(path);
+    });
+
+    render(<DashboardClient />);
+
+    const cameraButton = await screen.findByRole("button", { name: /Chụp camera/i });
+    await waitFor(() => expect(cameraButton).toBeEnabled());
+    await userEvent.click(cameraButton);
+
+    await expect(screen.findByText("Camera is not running or has no frame yet")).resolves.toBeVisible();
   });
 });
