@@ -4,7 +4,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
-from PySide6.QtWidgets import QAbstractSpinBox, QApplication, QPushButton
+from PySide6.QtWidgets import (
+    QAbstractSpinBox,
+    QApplication,
+    QPushButton,
+    QSizePolicy,
+)
 
 from app.core.config import AppConfig
 from app.ui.pages.settings import SettingsPage
@@ -62,6 +67,27 @@ def test_settings_collect_uses_camera_rotation(qtbot):
     page.cam_rotation.setCurrentIndex(page.cam_rotation.findData(270))
     out = page._collect()
     assert out.camera.rotation == 270
+
+
+def test_settings_camera_selector_expands_and_hint_does_not_overlap(qtbot):
+    page = SettingsPage(AppConfig())
+    qtbot.addWidget(page)
+    page.resize(1000, 4000)
+    page.cam_hint.setText(
+        "Đã tìm thấy camera USB đọc được frame. "
+        "Chọn dòng USB rồi bấm Test camera."
+    )
+    page.show()
+    QApplication.processEvents()
+
+    assert (
+        page.cam_source.sizePolicy().horizontalPolicy()
+        == QSizePolicy.Policy.Expanding
+    )
+    assert page.cam_source.width() >= 500
+    hint_bottom = page.cam_hint.mapTo(page, QPoint(0, page.cam_hint.height())).y()
+    width_top = page.cam_w.mapTo(page, QPoint(0, 0)).y()
+    assert hint_bottom <= width_top
 
 
 def test_settings_collect_saves_roi_fields(qtbot):

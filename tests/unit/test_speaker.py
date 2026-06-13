@@ -76,3 +76,15 @@ def test_waste_speaker_previews_all_audio_events(tmp_path, monkeypatch):
 
     assert [item[0] for item in played] == [AUDIO_EVENT_LABELS[key] for key in AUDIO_EVENT_LABELS]
     assert {item[1] for item in played} == {str(fake_audio)}
+
+
+def test_completion_beep_plays_exactly_once_per_trial(monkeypatch):
+    events = []
+    monkeypatch.setattr(speaker_module.threading, "Thread", _ImmediateThread)
+    speaker = WasteSpeaker(enabled=False)
+    monkeypatch.setattr(speaker, "_play_completion_tone", lambda: events.append("beep"))
+
+    assert speaker.play_completion_beep("trial-1") is True
+    assert speaker.play_completion_beep("trial-1") is False
+    assert speaker.play_completion_beep("trial-2") is True
+    assert events == ["beep", "beep"]

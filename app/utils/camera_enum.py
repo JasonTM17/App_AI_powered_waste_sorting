@@ -174,6 +174,8 @@ def probe_usb_cameras(max_idx: int = 9) -> list[dict[str, object]]:
                         "reason": quality.reason if quality is not None else "cannot open source",
                     }
                 )
+                if quality is not None and quality.usable:
+                    return probes
             finally:
                 cap.release()
     return probes

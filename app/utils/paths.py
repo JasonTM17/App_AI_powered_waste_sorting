@@ -64,6 +64,12 @@ def detection_captures_dir() -> Path:
     return p
 
 
+def recognition_test_captures_dir() -> Path:
+    p = app_data_dir() / "recognition_tests"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def config_path() -> Path:
     return app_data_dir() / "config.json"
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -56,6 +57,58 @@ detections = Table(
     Column("owner_account_id", Integer),
     Column("owner_username", String),
     Column("device_id", String),
+)
+
+qa_sessions = Table(
+    "qa_sessions",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("started_at", String, nullable=False),
+    Column("completed_at", String),
+    Column("phase", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("repetitions", Integer, nullable=False),
+    Column("countdown_seconds", Float, nullable=False),
+    Column("scan_timeout_seconds", Float, nullable=False),
+    Column("model_path", String),
+    Column("model_hash", String),
+    Column("sample_count", Integer, nullable=False),
+    Column("config_json", String),
+)
+
+qa_trials = Table(
+    "qa_trials",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("session_id", String, nullable=False),
+    Column("sample_index", Integer, nullable=False),
+    Column("sample_label", String, nullable=False),
+    Column("expected_class", String, nullable=False),
+    Column("expected_route", String, nullable=False),
+    Column("trial_number", Integer, nullable=False),
+    Column("phase", String, nullable=False),
+    Column("started_at", String, nullable=False),
+    Column("completed_at", String, nullable=False),
+    Column("verdict", String, nullable=False),
+    Column("predicted_class", String),
+    Column("predicted_route", String),
+    Column("confidence", Float),
+    Column("bbox_x1", Integer),
+    Column("bbox_y1", Integer),
+    Column("bbox_x2", Integer),
+    Column("bbox_y2", Integer),
+    Column("detection_count", Integer, nullable=False),
+    Column("raw_image_path", String),
+    Column("annotated_image_path", String),
+    Column("meta_path", String),
+    Column("guard_reason", String),
+    Column("speaker_mode", String),
+    Column("uart_payload", String),
+    Column("ack_status", String),
+    Column("rtt_ms", Integer),
+    Column("model_hash", String),
+    Column("promoted_path", String),
+    Column("extra_json", String),
 )
 
 _OPTIONAL_DETECTION_COLUMNS = {
@@ -120,6 +173,18 @@ class HistoryService:
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_detections_ts ON detections(ts)"))
             conn.execute(
                 text("CREATE INDEX IF NOT EXISTS idx_detections_cls ON detections(cls_name)")
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_qa_trials_session "
+                    "ON qa_trials(session_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_qa_trials_completed "
+                    "ON qa_trials(completed_at)"
+                )
             )
 
     def insert(
@@ -297,6 +362,139 @@ class HistoryService:
             w.writerow(cols)
             for r in rows:
                 w.writerow([getattr(r, c, "") for c in cols])
+        return len(rows)
+
+    def create_qa_session(self, values: dict) -> str:
+        session_id = str(values["id"])
+        with self._engine.begin() as conn:
+            conn.execute(
+                qa_sessions.insert().values(
+                    id=session_id,
+                    started_at=str(values["started_at"]),
+                    completed_at=values.get("completed_at"),
+                    phase=str(values["phase"]),
+                    status=str(values.get("status", "running")),
+                    repetitions=int(values["repetitions"]),
+                    countdown_seconds=float(values["countdown_seconds"]),
+                    scan_timeout_seconds=float(values["scan_timeout_seconds"]),
+                    model_path=values.get("model_path"),
+                    model_hash=values.get("model_hash"),
+                    sample_count=int(values["sample_count"]),
+                    config_json=json.dumps(
+                        values.get("config", {}),
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+        return session_id
+
+    def update_qa_session_status(
+        self,
+        session_id: str,
+        status: str,
+        *,
+        completed_at: str | None = None,
+    ) -> None:
+        values: dict[str, str] = {"status": status}
+        if completed_at is not None:
+            values["completed_at"] = completed_at
+        with self._engine.begin() as conn:
+            conn.execute(
+                qa_sessions.update()
+                .where(qa_sessions.c.id == session_id)
+                .values(**values)
+            )
+
+    def insert_qa_trial(self, values: dict) -> str:
+        bbox = values.get("bbox") or (None, None, None, None)
+        with self._engine.begin() as conn:
+            conn.execute(
+                qa_trials.insert().values(
+                    id=str(values["id"]),
+                    session_id=str(values["session_id"]),
+                    sample_index=int(values["sample_index"]),
+                    sample_label=str(values["sample_label"]),
+                    expected_class=str(values["expected_class"]),
+                    expected_route=str(values["expected_route"]),
+                    trial_number=int(values["trial_number"]),
+                    phase=str(values["phase"]),
+                    started_at=str(values["started_at"]),
+                    completed_at=str(values["completed_at"]),
+                    verdict=str(values["verdict"]),
+                    predicted_class=values.get("predicted_class"),
+                    predicted_route=values.get("predicted_route"),
+                    confidence=values.get("confidence"),
+                    bbox_x1=bbox[0],
+                    bbox_y1=bbox[1],
+                    bbox_x2=bbox[2],
+                    bbox_y2=bbox[3],
+                    detection_count=int(values.get("detection_count", 0)),
+                    raw_image_path=values.get("raw_image_path"),
+                    annotated_image_path=values.get("annotated_image_path"),
+                    meta_path=values.get("meta_path"),
+                    guard_reason=values.get("guard_reason"),
+                    speaker_mode=values.get("speaker_mode"),
+                    uart_payload=values.get("uart_payload"),
+                    ack_status=values.get("ack_status"),
+                    rtt_ms=values.get("rtt_ms"),
+                    model_hash=values.get("model_hash"),
+                    promoted_path=values.get("promoted_path"),
+                    extra_json=json.dumps(
+                        values.get("extra", {}),
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+        return str(values["id"])
+
+    def list_qa_sessions(self, limit: int = 100):
+        stmt = select(qa_sessions).order_by(qa_sessions.c.started_at.desc()).limit(limit)
+        with self._engine.begin() as conn:
+            rows = conn.execute(stmt).mappings().all()
+        return [HistoryRow(**dict(row)) for row in rows]
+
+    def query_qa_trials(
+        self,
+        *,
+        session_id: str | None = None,
+        limit: int = 500,
+    ):
+        stmt = select(qa_trials).order_by(qa_trials.c.completed_at.desc()).limit(limit)
+        if session_id:
+            stmt = stmt.where(qa_trials.c.session_id == session_id)
+        with self._engine.begin() as conn:
+            rows = conn.execute(stmt).mappings().all()
+        return [HistoryRow(**dict(row)) for row in rows]
+
+    def get_qa_trial(self, trial_id: str):
+        stmt = select(qa_trials).where(qa_trials.c.id == trial_id)
+        with self._engine.begin() as conn:
+            row = conn.execute(stmt).mappings().first()
+        return HistoryRow(**dict(row)) if row is not None else None
+
+    def mark_qa_trial_promoted(self, trial_id: str, promoted_path: str) -> None:
+        with self._engine.begin() as conn:
+            conn.execute(
+                qa_trials.update()
+                .where(qa_trials.c.id == trial_id)
+                .values(promoted_path=promoted_path)
+            )
+
+    def export_qa_session(self, session_id: str, out_path: Path) -> int:
+        rows = self.query_qa_trials(session_id=session_id, limit=1_000_000)
+        if out_path.suffix.lower() == ".json":
+            payload = [dict(row.__dict__) for row in rows]
+            out_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            return len(rows)
+        columns = [column.name for column in qa_trials.columns]
+        with out_path.open("w", encoding="utf-8", newline="") as output:
+            writer = csv.writer(output)
+            writer.writerow(columns)
+            for row in rows:
+                writer.writerow([getattr(row, column, "") for column in columns])
         return len(rows)
 
     def close(self) -> None:

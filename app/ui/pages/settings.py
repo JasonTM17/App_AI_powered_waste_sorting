@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QSlider,
     QVBoxLayout,
     QWidget,
@@ -162,6 +163,17 @@ def _section(title: str) -> tuple[QFrame, QFormLayout]:
     return box, form
 
 
+def _configure_expanding_selector(widget: QWidget) -> None:
+    widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+
+def _configure_wrapped_hint(label: QLabel, *, minimum_lines: int = 2) -> None:
+    label.setWordWrap(True)
+    label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+    label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+    label.setMinimumHeight(label.fontMetrics().lineSpacing() * minimum_lines + 4)
+
+
 class SettingsPage(QWidget):
     config_saved = Signal(AppConfig)
     test_camera_requested = Signal(str)
@@ -194,6 +206,7 @@ class SettingsPage(QWidget):
         cam_box, cam_form = _section("Camera")
         self.cam_source = SafeComboBox()
         self.cam_source.setEditable(False)
+        _configure_expanding_selector(self.cam_source)
         initial_source = self._cfg.camera.source.strip()
         if normalize_camera_source(initial_source) == "0":
             initial_source = ""
@@ -201,7 +214,7 @@ class SettingsPage(QWidget):
         self.cam_source.addItem("Đang kiểm tra camera USB...", "")
         self.cam_source.setCurrentIndex(0)
         self.cam_hint = QLabel("Bấm Scan để tìm camera USB đang cắm vào máy.")
-        self.cam_hint.setWordWrap(True)
+        _configure_wrapped_hint(self.cam_hint)
         self.cam_hint.setObjectName("muted")
         self.cam_w = SafeSpinBox()
         self.cam_w.setRange(160, 7680)
@@ -325,13 +338,14 @@ class SettingsPage(QWidget):
         uart_box, uart_form = _section("UART")
         self.uart_port = SafeComboBox()
         self.uart_port.setEditable(False)
+        _configure_expanding_selector(self.uart_port)
         if self._cfg.uart.port.strip():
             self.uart_port.addItem(self._cfg.uart.port, self._cfg.uart.port)
             self.uart_port.setCurrentText(self._cfg.uart.port)
         else:
             self.uart_port.addItem("Đang kiểm tra cổng USB/Arduino...", "")
         self.uart_hint = QLabel("Ưu tiên cổng USB/Arduino. Bluetooth COM sẽ không được chọn tự động.")
-        self.uart_hint.setWordWrap(True)
+        _configure_wrapped_hint(self.uart_hint)
         self.uart_hint.setObjectName("muted")
         self.uart_baud = SafeComboBox()
         self.uart_baud.addItems(["9600", "19200", "38400", "57600", "115200"])

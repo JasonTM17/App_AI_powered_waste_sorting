@@ -145,6 +145,37 @@ def main() -> int:
 
     controller.actuation_mode_changed.connect(_sync_actuation_test_mode)
     window.live_page.actuation_test_mode_toggled.connect(_on_actuation_test_mode_request)
+    window.live_page.recognition_test_start_requested.connect(
+        controller.start_recognition_test
+    )
+    window.live_page.recognition_test_pause_requested.connect(
+        controller.pause_recognition_test
+    )
+    window.live_page.recognition_test_resume_requested.connect(
+        controller.resume_recognition_test
+    )
+    window.live_page.recognition_test_abort_requested.connect(
+        controller.abort_recognition_test
+    )
+    controller.recognition_test_state_changed.connect(
+        window.live_page.set_recognition_test_state
+    )
+    controller.recognition_test_trial_saved.connect(
+        window.live_page.set_recognition_test_trial
+    )
+    controller.recognition_test_action_result.connect(
+        window.live_page.set_recognition_test_action_result
+    )
+    if window.history_page is not None:
+        window.history_page.qa_promote_requested.connect(
+            controller.promote_recognition_trial
+        )
+        controller.recognition_test_trial_saved.connect(
+            lambda _trial: window.history_page.refresh_qa()
+        )
+        controller.recognition_test_action_result.connect(
+            lambda _ok, _message: window.history_page.refresh_qa()
+        )
 
     def _on_speaker_output_mode_request(mode: str) -> None:
         new_cfg = controller.cfg.model_copy(deep=True)
@@ -228,6 +259,7 @@ def main() -> int:
     controller.test_uart_result.connect(_on_test_result)
     controller.reload_model_result.connect(_on_test_result)
     controller.snapshot_saved.connect(_on_test_result)
+    controller.recognition_test_action_result.connect(_on_test_result)
 
     def _on_frame(frame, detections, fps, latency):
         window.live_page.update_frame(frame, detections)

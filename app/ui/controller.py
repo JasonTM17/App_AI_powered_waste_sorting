@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import time
 from contextlib import suppress
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -28,6 +30,16 @@ from app.core.learn_now_training import (
     training_processes,
 )
 from app.core.pipeline import Pipeline
+from app.core.recognition_test import (
+    RecognitionTestRunner,
+    RecognitionTestSample,
+    RecognitionTestSessionConfig,
+    RecognitionTrialResult,
+)
+from app.core.recognition_test_capture import (
+    model_sha256,
+    save_recognition_test_capture,
+)
 from app.core.speaker import WasteSpeaker
 from app.core.uart import UartWorker
 from app.core.uart_protocol import UartProtocol, encode_sort
@@ -36,7 +48,7 @@ from app.core.voice_pack import (
     AUDIO_EVENT_TRACKS,
     normalize_voice_gender,
 )
-from app.core.waste_categories import canonical_class_name
+from app.core.waste_categories import TRAINING_CLASS_ORDER_45, canonical_class_name
 from app.utils import serial_enum
 from app.utils.camera_frame_quality import evaluate_frame_quality
 from app.utils.camera_source import backend_hint, normalize_camera_source
@@ -265,6 +277,11 @@ class AppController(QObject):
     learn_now_action_result = Signal(bool, str)
     training_status_changed = Signal(object)
     actuation_mode_changed = Signal(bool)
+    recognition_test_state_changed = Signal(object)
+    recognition_test_trial_saved = Signal(object)
+    recognition_test_action_result = Signal(bool, str)
+    _recognition_dispatch_started = Signal(object)
+    _recognition_dispatch_completed = Signal(object)
 
     def __init__(self, cfg: AppConfig, config_path: Path, db_path: Path):
         super().__init__()
@@ -307,6 +324,20 @@ class AppController(QObject):
         self._pending_learn_now_class: str | None = None
         self._training_status_worker: _TrainingStatusWorker | None = None
         self._training_status_pending = False
+        self._qa_model_hash = ""
+        self._qa_dispatch_armed = False
+        self._qa_authorized_route = ""
+        self._recognition_test = RecognitionTestRunner(
+            on_state=self._on_recognition_test_state,
+            on_trial_ready=self._save_recognition_test_trial,
+            on_dispatch_arm=self._arm_recognition_test_dispatch,
+        )
+        self._recognition_dispatch_started.connect(
+            self._on_recognition_dispatch_started
+        )
+        self._recognition_dispatch_completed.connect(
+            self._on_recognition_dispatch_completed
+        )
 
     def _track_probe(self, worker: QThread) -> None:
         worker.finished.connect(lambda worker=worker: self._forget_probe(worker))
@@ -374,6 +405,9 @@ class AppController(QObject):
         )
         self._configure_camera_dispatch()
         self._pipeline.on_capture_saved = self.capture_saved.emit
+        self._pipeline.dispatch_authorizer = self._authorize_recognition_test_dispatch
+        self._pipeline.on_dispatch_started = self._recognition_dispatch_started.emit
+        self._pipeline.on_dispatch_completed = self._recognition_dispatch_completed.emit
         self._inference_worker = InferenceWorker(self._pipeline)
         self._inference_worker.processed.connect(self._on_inferred)
         self._inference_worker.start()
@@ -540,7 +574,17 @@ class AppController(QObject):
     def _configure_camera_dispatch(self) -> None:
         if self._pipeline is None:
             return
-        self._pipeline.set_hardware_dispatch_enabled(self._actuation_test_enabled)
+        qa_active = self._recognition_test.active
+        enabled = self._actuation_test_enabled and (
+            not qa_active or self._qa_dispatch_armed
+        )
+        try:
+            self._pipeline.set_hardware_dispatch_enabled(
+                enabled,
+                preserve_tracks=qa_active and not enabled,
+            )
+        except TypeError:
+            self._pipeline.set_hardware_dispatch_enabled(enabled)
 
     def _on_uart_connected(self, ok: bool) -> None:
         if not ok and self._actuation_test_enabled:
@@ -574,9 +618,12 @@ class AppController(QObject):
             self.camera_error.emit(msg)
             logger.info("camera start deferred: model still loading")
             return
-        from app.utils.camera_enum import find_readable_usb_camera
+        from app.utils.camera_enum import find_readable_usb_camera, has_external_camera
 
-        usb_source = find_readable_usb_camera()
+        configured_source = str(self.cfg.camera.source or "").strip()
+        usb_source = configured_source if configured_source and has_external_camera() else ""
+        if not usb_source:
+            usb_source = find_readable_usb_camera() or ""
         if not usb_source:
             msg = (
                 "Chưa mở được camera USB. "
@@ -660,6 +707,22 @@ class AppController(QObject):
         import time
         now = time.time()
         self._last_detections = list(detections)
+        if self._recognition_test.active:
+            from app.core.multi_object_dispatch import foreground_object_boxes
+
+            foreground_count = len(
+                foreground_object_boxes(
+                    frame,
+                    roi=self.cfg.roi,
+                    min_area_ratio=self.cfg.unknown_fallback.min_area_ratio,
+                )
+            )
+            self._recognition_test.observe(
+                frame,
+                detections,
+                dispatch_status=self.dispatch_status(),
+                foreground_count=foreground_count,
+            )
         # Cap UI emit rate to ~30 fps regardless of how fast inference runs.
         # The pipeline still ran (history + UART), we just skip pushing the
         # frame to the renderer when the previous emit was very recent.
@@ -851,7 +914,7 @@ class AppController(QObject):
     def _set_auto_sort_enabled(self, enabled: bool) -> None:
         self._actuation_test_enabled = bool(enabled)
         if self._pipeline is not None:
-            self._pipeline.set_hardware_dispatch_enabled(self._actuation_test_enabled)
+            self._configure_camera_dispatch()
             self._pipeline.reset_dispatch_state()
         self.actuation_mode_changed.emit(self._actuation_test_enabled)
 
@@ -906,6 +969,317 @@ class AppController(QObject):
 
     def is_uart_connected(self) -> bool:
         return bool(self._uart is not None and self._uart.isRunning() and self._uart.is_connected)
+
+    def start_recognition_test(self, payload: object) -> None:
+        if self._recognition_test.active:
+            self.recognition_test_action_result.emit(
+                False,
+                "Một phiên kiểm thử đang chạy.",
+            )
+            return
+        if self._pipeline is None or not self.is_camera_running():
+            self.recognition_test_action_result.emit(
+                False,
+                "Cần model sẵn sàng và camera đang chạy trước khi bắt đầu.",
+            )
+            return
+        values = payload if isinstance(payload, dict) else {}
+        raw_samples = values.get("samples", [])
+        samples: list[RecognitionTestSample] = []
+        for item in raw_samples if isinstance(raw_samples, list) else []:
+            if not isinstance(item, dict):
+                continue
+            raw_class = str(item.get("expected_class", "")).strip()
+            expected_class = canonical_class_name(raw_class) or raw_class
+            if expected_class not in TRAINING_CLASS_ORDER_45:
+                self.recognition_test_action_result.emit(
+                    False,
+                    f"Nhãn chưa thuộc bộ 45 class: {raw_class}",
+                )
+                return
+            samples.append(
+                RecognitionTestSample(
+                    label=str(item.get("label") or expected_class).strip(),
+                    expected_class=expected_class,
+                )
+            )
+        if not samples:
+            self.recognition_test_action_result.emit(
+                False,
+                "Thêm ít nhất một mẫu rác thật vào danh sách.",
+            )
+            return
+
+        phase = "servo" if values.get("phase") == "servo" else "recognition"
+        if phase == "servo":
+            reason = self._recognition_servo_preflight_error()
+            if reason:
+                self.recognition_test_action_result.emit(False, reason)
+                return
+            self._set_auto_sort_enabled(True)
+        else:
+            self._set_auto_sort_enabled(False)
+
+        config = RecognitionTestSessionConfig(
+            samples=tuple(samples),
+            repetitions=max(1, min(20, int(values.get("repetitions", 5)))),
+            countdown_seconds=max(
+                0.0,
+                min(30.0, float(values.get("countdown_seconds", 3.0))),
+            ),
+            scan_timeout_seconds=max(
+                1.0,
+                min(60.0, float(values.get("scan_timeout_seconds", 8.0))),
+            ),
+            stable_frames=max(1, min(30, int(values.get("stable_frames", 3)))),
+            empty_seconds=max(
+                0.0,
+                min(30.0, float(values.get("empty_seconds", 2.0))),
+            ),
+            empty_frames=max(1, min(120, int(values.get("empty_frames", 10)))),
+            busy_settle_seconds=max(
+                0.0,
+                float(self.cfg.dispatch_guard.busy_settle_seconds),
+            ),
+            phase=phase,
+        )
+        self._qa_dispatch_armed = False
+        self._qa_authorized_route = ""
+        self._qa_model_hash = model_sha256(self.cfg.model.path)
+        session_id = self._recognition_test.start(config)
+        try:
+            self._recognition_history().create_qa_session(
+                {
+                    "id": session_id,
+                    "started_at": datetime.now().isoformat(),
+                    "phase": phase,
+                    "status": "running",
+                    "repetitions": config.repetitions,
+                    "countdown_seconds": config.countdown_seconds,
+                    "scan_timeout_seconds": config.scan_timeout_seconds,
+                    "model_path": self.cfg.model.path,
+                    "model_hash": self._qa_model_hash,
+                    "sample_count": len(config.samples),
+                    "config": {
+                        "samples": [
+                            {
+                                "label": sample.label,
+                                "expected_class": sample.expected_class,
+                            }
+                            for sample in config.samples
+                        ],
+                        "stable_frames": config.stable_frames,
+                        "empty_seconds": config.empty_seconds,
+                        "empty_frames": config.empty_frames,
+                    },
+                }
+            )
+        except Exception as e:
+            self._recognition_test.abort()
+            self._set_auto_sort_enabled(False)
+            self.recognition_test_action_result.emit(
+                False,
+                f"Không tạo được phiên kiểm thử: {e}",
+            )
+            return
+        self._configure_camera_dispatch()
+        self.recognition_test_action_result.emit(
+            True,
+            (
+                f"Đã bắt đầu phiên {phase}: {len(samples)} mẫu, "
+                f"{config.repetitions} lượt/mẫu."
+            ),
+        )
+
+    def pause_recognition_test(self) -> None:
+        if self._recognition_test.state == "WAITING_ACK":
+            self.recognition_test_action_result.emit(
+                False,
+                "Đang chờ cơ cấu hoàn tất; chưa thể tạm dừng.",
+            )
+            return
+        self._recognition_test.pause()
+
+    def resume_recognition_test(self) -> None:
+        self._recognition_test.resume()
+
+    def abort_recognition_test(self) -> None:
+        if self._recognition_test.state == "WAITING_ACK":
+            self.recognition_test_action_result.emit(
+                False,
+                "Đang chờ ACK/HOME; chưa thể hủy giữa chu kỳ servo.",
+            )
+            return
+        self._recognition_test.abort()
+
+    def recognition_test_state(self) -> dict:
+        return self._recognition_test.state_payload()
+
+    def promote_recognition_trial(self, trial_id: str) -> None:
+        from app.core.dataset_queue import import_manual_camera_frame
+
+        trial = self._recognition_history().get_qa_trial(str(trial_id))
+        if trial is None:
+            self.recognition_test_action_result.emit(False, "Không tìm thấy lượt test.")
+            return
+        if int(getattr(trial, "detection_count", 0) or 0) != 1:
+            self.recognition_test_action_result.emit(
+                False,
+                "Ảnh nhiều vật hoặc mơ hồ chỉ giữ làm QA evidence.",
+            )
+            return
+        expected_class = str(getattr(trial, "expected_class", "") or "")
+        if expected_class not in TRAINING_CLASS_ORDER_45:
+            self.recognition_test_action_result.emit(False, "Nhãn thật không hợp lệ.")
+            return
+        image_path = Path(str(getattr(trial, "raw_image_path", "") or ""))
+        if not image_path.exists():
+            self.recognition_test_action_result.emit(False, "Ảnh gốc không còn tồn tại.")
+            return
+        import cv2
+
+        frame = cv2.imread(str(image_path))
+        if frame is None:
+            self.recognition_test_action_result.emit(False, "Không đọc được ảnh gốc.")
+            return
+        bbox_values = (
+            getattr(trial, "bbox_x1", None),
+            getattr(trial, "bbox_y1", None),
+            getattr(trial, "bbox_x2", None),
+            getattr(trial, "bbox_y2", None),
+        )
+        bbox = bbox_values if all(value is not None for value in bbox_values) else None
+        try:
+            promoted_path = import_manual_camera_frame(
+                frame,
+                self._capture_queue_dir(),
+                expected_class,
+                TRAINING_CLASS_ORDER_45.index(expected_class),
+                xyxy=bbox,
+                catalog_path=dataset_db_path(),
+                extra_meta={
+                    "source": "real_waste_qa",
+                    "qa_trial_id": str(trial_id),
+                    "reviewed": False,
+                    "needs_annotation": True,
+                    "training_excluded": True,
+                },
+            )
+            self._recognition_history().mark_qa_trial_promoted(
+                str(trial_id),
+                str(promoted_path),
+            )
+        except Exception as e:
+            self.recognition_test_action_result.emit(False, str(e))
+            return
+        self.capture_saved.emit(str(promoted_path))
+        self.recognition_test_action_result.emit(
+            True,
+            f"Đã đưa ảnh vào hàng chờ duyệt: {promoted_path.name}",
+        )
+
+    def _recognition_servo_preflight_error(self) -> str:
+        if not self.is_uart_connected():
+            return "Vòng servo cần UART/Arduino đang kết nối."
+        if (
+            not self.cfg.roi.enabled
+            or self.cfg.roi.width <= 0
+            or self.cfg.roi.height <= 0
+        ):
+            return "Vòng servo cần ROI hợp lệ quanh bệ."
+        return ""
+
+    def _on_recognition_test_state(self, state: dict) -> None:
+        current = str(state.get("state", ""))
+        if current == "BEEP":
+            self._qa_dispatch_armed = False
+            self._qa_authorized_route = ""
+            self._configure_camera_dispatch()
+        if current in {"COMPLETED", "ABORTED"}:
+            session_id = str(state.get("session_id", "") or "")
+            if session_id:
+                with suppress(Exception):
+                    self._recognition_history().update_qa_session_status(
+                        session_id,
+                        current.lower(),
+                        completed_at=datetime.now().isoformat(),
+                    )
+            self._qa_dispatch_armed = False
+            self._qa_authorized_route = ""
+            self._set_auto_sort_enabled(False)
+        self.recognition_test_state_changed.emit(state)
+
+    def _save_recognition_test_trial(
+        self,
+        result: RecognitionTrialResult,
+        frame: np.ndarray,
+        detections,
+    ) -> None:
+        try:
+            evidenced = replace(result, model_hash=self._qa_model_hash)
+            raw_path, annotated_path, meta_path = save_recognition_test_capture(
+                evidenced,
+                frame,
+                detections,
+            )
+            stored = replace(
+                evidenced,
+                raw_image_path=raw_path,
+                annotated_image_path=annotated_path,
+            )
+            values = stored.to_dict()
+            values["started_at"] = datetime.fromtimestamp(
+                stored.started_at
+            ).isoformat()
+            values["completed_at"] = datetime.fromtimestamp(
+                stored.completed_at
+            ).isoformat()
+            values["meta_path"] = meta_path
+            self._recognition_history().insert_qa_trial(values)
+        except Exception as e:
+            logger.exception("recognition test trial save failed")
+            self.recognition_test_action_result.emit(
+                False,
+                f"Không lưu được lượt test: {e}",
+            )
+            return
+        self._speaker.play_completion_beep(stored.id)
+        self.recognition_test_trial_saved.emit(stored.to_dict())
+
+    def _arm_recognition_test_dispatch(
+        self,
+        result: RecognitionTrialResult,
+    ) -> None:
+        self._qa_authorized_route = result.expected_route
+        self._qa_dispatch_armed = True
+        self._configure_camera_dispatch()
+
+    def _authorize_recognition_test_dispatch(self, evidence: dict) -> bool:
+        if not self._recognition_test.active:
+            return True
+        if self._recognition_test.phase != "servo":
+            return False
+        return bool(
+            self._qa_dispatch_armed
+            and str(evidence.get("route", "")) == self._qa_authorized_route
+        )
+
+    def _on_recognition_dispatch_started(self, evidence: object) -> None:
+        if not isinstance(evidence, dict):
+            return
+        self._recognition_test.dispatch_started(evidence)
+        self._qa_dispatch_armed = False
+        self._configure_camera_dispatch()
+
+    def _on_recognition_dispatch_completed(self, evidence: object) -> None:
+        if not isinstance(evidence, dict):
+            return
+        self._recognition_test.dispatch_completed(evidence)
+
+    def _recognition_history(self):
+        if self._pipeline is None:
+            raise RuntimeError("Recognition history is unavailable before model startup")
+        return self._pipeline.history
 
     def refresh_learn_now_status(self, cls_name: str = "") -> None:
         class_name = canonical_class_name(cls_name) or str(cls_name or "").strip()
@@ -1359,6 +1733,8 @@ class AppController(QObject):
         return (left, top, right, bottom)
 
     def stop(self) -> None:
+        if self._recognition_test.active:
+            self._recognition_test.abort()
         self._pending_learn_now_class = None
         self._training_status_pending = False
         for worker in (self._learn_now_worker, self._training_status_worker):

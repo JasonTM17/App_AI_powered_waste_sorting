@@ -93,6 +93,61 @@ class HistoryTableModel(QAbstractTableModel):
         return None
 
 
+class RecognitionTestTableModel(QAbstractTableModel):
+    HEADERS: ClassVar[tuple[str, ...]] = (
+        "Time",
+        "Mẫu",
+        "Lượt",
+        "Nhãn thật",
+        "AI dự đoán",
+        "Kết luận",
+        "Route",
+        "ACK / RTT",
+    )
+
+    def __init__(self, rows=None):
+        super().__init__()
+        self._rows = rows or []
+
+    def set_rows(self, rows):
+        self.beginResetModel()
+        self._rows = rows
+        self.endResetModel()
+
+    def rowCount(self, _parent=None):  # noqa: N802
+        return len(self._rows)
+
+    def columnCount(self, _parent=None):  # noqa: N802
+        return len(self.HEADERS)
+
+    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):  # noqa: N802
+        if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
+            return self.HEADERS[section]
+        return None
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
+            return None
+        row = self._rows[index.row()]
+        values = (
+            str(getattr(row, "completed_at", "")).replace("T", " ")[:19],
+            getattr(row, "sample_label", ""),
+            str(getattr(row, "trial_number", "")),
+            getattr(row, "expected_class", ""),
+            getattr(row, "predicted_class", "") or "không nhận diện",
+            getattr(row, "verdict", ""),
+            (
+                f"{getattr(row, 'expected_route', '')} → "
+                f"{getattr(row, 'predicted_route', '') or '-'}"
+            ),
+            (
+                f"{getattr(row, 'ack_status', '') or '-'} / "
+                f"{getattr(row, 'rtt_ms', '') or '-'} ms"
+            ),
+        )
+        return values[index.column()]
+
+
 def _section_card() -> QFrame:
     f = QFrame()
     f.setObjectName("card")
@@ -112,6 +167,7 @@ def _filter_group(label_text: str, control: QWidget) -> QWidget:
 
 class HistoryPage(QWidget):
     refresh_requested = Signal()
+    qa_promote_requested = Signal(str)
 
     def __init__(self, history: HistoryService, parent=None):
         super().__init__(parent)
@@ -224,6 +280,40 @@ class HistoryPage(QWidget):
         table_layout.addWidget(self.table)
         outer.addWidget(table_card, 1)
 
+        qa_card = _section_card()
+        qa_layout = QVBoxLayout(qa_card)
+        qa_layout.setContentsMargins(8, 8, 8, 8)
+        qa_header = QHBoxLayout()
+        qa_title = QLabel("PHIÊN TEST RÁC THẬT")
+        qa_title.setObjectName("mono")
+        self.qa_session_filter = SafeComboBox()
+        self.qa_session_filter.setMinimumWidth(300)
+        self.qa_session_filter.currentIndexChanged.connect(self._reload_qa_trials)
+        self.btn_qa_export = QPushButton("Export QA")
+        self.btn_qa_export.setObjectName("secondary")
+        self.btn_qa_export.clicked.connect(self._export_qa)
+        qa_header.addWidget(qa_title)
+        qa_header.addStretch()
+        qa_header.addWidget(QLabel("Phiên test"))
+        qa_header.addWidget(self.qa_session_filter)
+        qa_header.addWidget(self.btn_qa_export)
+        qa_layout.addLayout(qa_header)
+        self.qa_empty_label = QLabel("Chưa có lượt kiểm thử rác thật.")
+        self.qa_empty_label.setObjectName("muted")
+        self.qa_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        qa_layout.addWidget(self.qa_empty_label)
+        self.qa_table = QTableView()
+        self.qa_model = RecognitionTestTableModel([])
+        self.qa_table.setModel(self.qa_model)
+        self.qa_table.setAlternatingRowColors(True)
+        self.qa_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.qa_table.verticalHeader().setVisible(False)
+        self.qa_table.doubleClicked.connect(self._open_qa_detail)
+        qa_layout.addWidget(self.qa_table)
+        outer.addWidget(qa_card, 1)
+
         QTimer.singleShot(0, self.request_reload)
 
     def changeEvent(self, event):  # noqa: N802
@@ -288,6 +378,7 @@ class HistoryPage(QWidget):
             self._refresh_class_filter(filter_counts)
             self._draw_bar(class_counts)
             self._draw_area(hourly_counts)
+            self._refresh_qa_sessions()
         finally:
             self._reload_in_progress = False
             self._set_busy(False)
@@ -371,11 +462,70 @@ class HistoryPage(QWidget):
         dlg = DetectionDetailDialog(row, self)
         dlg.exec()
 
+    def _refresh_qa_sessions(self) -> None:
+        sessions = self.history.list_qa_sessions()
+        current = self.qa_session_filter.currentData() or ""
+        self.qa_session_filter.blockSignals(True)
+        self.qa_session_filter.clear()
+        self.qa_session_filter.addItem("Tất cả phiên test", "")
+        for session in sessions:
+            label = (
+                f"{str(getattr(session, 'started_at', '')).replace('T', ' ')[:19]} "
+                f"| {getattr(session, 'phase', '')} | {getattr(session, 'status', '')}"
+            )
+            self.qa_session_filter.addItem(label, getattr(session, "id", ""))
+        index = self.qa_session_filter.findData(current)
+        if index >= 0:
+            self.qa_session_filter.setCurrentIndex(index)
+        self.qa_session_filter.blockSignals(False)
+        self._reload_qa_trials()
+
+    def _reload_qa_trials(self) -> None:
+        session_id = self.qa_session_filter.currentData() or None
+        rows = self.history.query_qa_trials(session_id=session_id, limit=500)
+        self.qa_model.set_rows(rows)
+        self.qa_empty_label.setVisible(not rows)
+
+    def _open_qa_detail(self, index) -> None:
+        from app.ui.widgets.detail_dialog import RecognitionTestDetailDialog
+
+        if not index.isValid():
+            return
+        row = (
+            self.qa_model._rows[index.row()]
+            if 0 <= index.row() < len(self.qa_model._rows)
+            else None
+        )
+        if row is None:
+            return
+        dialog = RecognitionTestDetailDialog(
+            row,
+            on_promote=self.qa_promote_requested.emit,
+            parent=self,
+        )
+        dialog.exec()
+
+    def refresh_qa(self) -> None:
+        self._refresh_qa_sessions()
+
     def _export(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Export CSV", "history.csv", "CSV (*.csv)")
         if not path:
             return
         self.history.export_csv(Path(path))
+
+    def _export_qa(self) -> None:
+        session_id = str(self.qa_session_filter.currentData() or "")
+        if not session_id:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export QA",
+            f"qa-{session_id[:8]}.csv",
+            "CSV (*.csv);;JSON (*.json)",
+        )
+        if path:
+            self.history.export_qa_session(session_id, Path(path))
 
 
 def _recent_start_qdate(days: int = 30):

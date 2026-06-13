@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -106,4 +107,91 @@ class DetectionDetailDialog(QDialog):
         btn_row.addWidget(btn_close)
         info.addLayout(btn_row)
 
+        outer.addLayout(info, 1)
+
+
+class RecognitionTestDetailDialog(QDialog):
+    def __init__(
+        self,
+        row,
+        *,
+        on_promote: Callable[[str], None],
+        parent: QWidget | None = None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("Chi tiết lượt kiểm thử")
+        self.setMinimumSize(820, 520)
+
+        outer = QHBoxLayout(self)
+        outer.setContentsMargins(20, 20, 20, 20)
+        outer.setSpacing(20)
+
+        image = QLabel()
+        image.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        image.setStyleSheet("background:#000; border-radius:8px;")
+        image.setMinimumSize(420, 420)
+        path = Path(str(getattr(row, "annotated_image_path", "") or ""))
+        pixmap = QPixmap(str(path)) if path.exists() else QPixmap()
+        if pixmap.isNull():
+            image.setText("(no image)")
+        else:
+            image.setPixmap(
+                pixmap.scaled(
+                    420,
+                    420,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        outer.addWidget(image, 1)
+
+        info = QVBoxLayout()
+        title = QLabel("Recognition QA")
+        title.setStyleSheet("font-size:18px; font-weight:700;")
+        info.addWidget(title)
+        form = QFormLayout()
+
+        def _add(label: str, value: object) -> None:
+            left, right = _info_row(label, str(value or "—"))
+            right.setWordWrap(True)
+            form.addRow(left, right)
+
+        _add("Mẫu", getattr(row, "sample_label", ""))
+        _add("Lượt", getattr(row, "trial_number", ""))
+        _add("Nhãn thật", getattr(row, "expected_class", ""))
+        _add("AI dự đoán", getattr(row, "predicted_class", ""))
+        confidence = getattr(row, "confidence", None)
+        _add("Confidence", f"{confidence:.3f}" if confidence is not None else "—")
+        _add("Kết luận", getattr(row, "verdict", ""))
+        _add(
+            "Route",
+            f"{getattr(row, 'expected_route', '')} → "
+            f"{getattr(row, 'predicted_route', '') or '-'}",
+        )
+        _add("Guard", getattr(row, "guard_reason", ""))
+        _add("Loa", getattr(row, "speaker_mode", ""))
+        _add("Payload", getattr(row, "uart_payload", ""))
+        _add("ACK", getattr(row, "ack_status", ""))
+        rtt = getattr(row, "rtt_ms", None)
+        _add("RTT", f"{rtt} ms" if rtt is not None else "—")
+        _add("Model hash", getattr(row, "model_hash", ""))
+        info.addLayout(form)
+        info.addStretch()
+
+        actions = QHBoxLayout()
+        promote = QPushButton("Đưa vào dữ liệu cải thiện")
+        promote.setObjectName("secondary")
+        promote.setEnabled(
+            int(getattr(row, "detection_count", 0) or 0) == 1
+            and not bool(getattr(row, "promoted_path", ""))
+        )
+        trial_id = str(getattr(row, "id", ""))
+        promote.clicked.connect(lambda: (on_promote(trial_id), self.accept()))
+        close = QPushButton("Đóng")
+        close.setObjectName("primary")
+        close.clicked.connect(self.accept)
+        actions.addWidget(promote)
+        actions.addStretch()
+        actions.addWidget(close)
+        info.addLayout(actions)
         outer.addLayout(info, 1)

@@ -36,6 +36,9 @@ class Speaker(Protocol):
     def speak_text(self, *, text: str, key: str, cooldown_seconds: float | None = None) -> None:
         """Announce a warning/status text without implying a sort completed."""
 
+    def play_completion_beep(self, trial_id: str) -> bool:
+        """Play one PC completion tone for a unique QA trial."""
+
 
 class NoopSpeaker:
     def speak(
@@ -51,6 +54,9 @@ class NoopSpeaker:
     def speak_text(self, *, text: str, key: str, cooldown_seconds: float | None = None) -> None:
         return
 
+    def play_completion_beep(self, trial_id: str) -> bool:
+        return False
+
 
 class WasteSpeaker:
     def __init__(
@@ -65,6 +71,7 @@ class WasteSpeaker:
         self.voice_gender = normalize_voice_gender(voice_gender)
         self._lock = threading.Lock()
         self._last_spoken_at: dict[str, float] = {}
+        self._completion_beeps: set[str] = set()
 
     def configure(
         self,
@@ -115,6 +122,24 @@ class WasteSpeaker:
             cooldown_seconds=cooldown_seconds,
             require_enabled=True,
         )
+
+    def play_completion_beep(self, trial_id: str) -> bool:
+        clean_trial_id = str(trial_id or "").strip()
+        if not clean_trial_id:
+            return False
+        with self._lock:
+            if clean_trial_id in self._completion_beeps:
+                return False
+            self._completion_beeps.add(clean_trial_id)
+            if len(self._completion_beeps) > 1000:
+                self._completion_beeps = {clean_trial_id}
+        threading.Thread(
+            target=self._play_completion_tone,
+            name="trash-sorter-completion-beep",
+            daemon=True,
+        ).start()
+        logger.info("completion beep queued trial_id={}", clean_trial_id)
+        return True
 
     def preview_command(self, command: str, *, voice_gender: str | None = None) -> bool:
         category = category_for_command(command)
@@ -199,6 +224,17 @@ class WasteSpeaker:
             except Exception as e:
                 logger.warning("speaker mp3 failed, falling back to TTS: {}", e)
         self._speak_background(text)
+
+    def _play_completion_tone(self) -> None:
+        if sys.platform != "win32":
+            logger.info("completion beep")
+            return
+        try:
+            import winsound
+
+            winsound.MessageBeep(winsound.MB_OK)
+        except Exception as e:
+            logger.warning("completion beep failed: {}", e)
 
     def _play_audio_file(self, audio_path: Path) -> None:
         if sys.platform != "win32":

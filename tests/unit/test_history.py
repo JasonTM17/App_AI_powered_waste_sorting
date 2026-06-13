@@ -223,3 +223,55 @@ def test_count_by_hour(tmp_path):
     assert counts[10] == 1
     assert counts[14] == 1
     svc.close()
+
+
+def test_qa_sessions_and_trials_are_separate_from_operational_stats(tmp_path):
+    svc = HistoryService(tmp_path / "h.db")
+    svc.create_qa_session(
+        {
+            "id": "qa-1",
+            "started_at": "2026-06-13T10:00:00",
+            "phase": "recognition",
+            "status": "running",
+            "repetitions": 5,
+            "countdown_seconds": 3,
+            "scan_timeout_seconds": 8,
+            "model_path": "model.pt",
+            "model_hash": "abc",
+            "sample_count": 1,
+            "config": {"samples": ["Aluminum can"]},
+        }
+    )
+    svc.insert_qa_trial(
+        {
+            "id": "trial-1",
+            "session_id": "qa-1",
+            "sample_index": 0,
+            "sample_label": "real can",
+            "expected_class": "Aluminum can",
+            "expected_route": "I",
+            "trial_number": 1,
+            "phase": "recognition",
+            "started_at": "2026-06-13T10:00:03",
+            "completed_at": "2026-06-13T10:00:04",
+            "verdict": "correct",
+            "predicted_class": "Aluminum can",
+            "predicted_route": "I",
+            "confidence": 0.94,
+            "bbox": (1, 2, 30, 40),
+            "detection_count": 1,
+            "raw_image_path": "raw.jpg",
+            "annotated_image_path": "annotated.jpg",
+            "model_hash": "abc",
+        }
+    )
+
+    assert svc.query(limit=10) == []
+    assert svc.count_by_class() == {}
+    assert svc.list_qa_sessions()[0].id == "qa-1"
+    trial = svc.query_qa_trials(session_id="qa-1")[0]
+    assert trial.expected_class == "Aluminum can"
+    assert trial.bbox_x1 == 1
+    svc.mark_qa_trial_promoted("trial-1", "queued.jpg")
+    assert svc.get_qa_trial("trial-1").promoted_path == "queued.jpg"
+    svc.close()

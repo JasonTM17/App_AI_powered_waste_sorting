@@ -183,3 +183,26 @@ def test_live_page_keeps_distinct_or_later_detections(qtbot, monkeypatch):
     page.append_detection("Pen", 0.53, "09:32:02", "route A")
 
     assert page.stream.count() == 3
+
+
+def test_recognition_test_panel_emits_canonical_sample_plan(qtbot):
+    page = LivePage()
+    qtbot.addWidget(page)
+    panel = page.recognition_test_panel
+    panel.sample_name.setText("lon bia thật")
+    panel.expected_class.setCurrentText("lon bia")
+    panel.btn_add.click()
+
+    with qtbot.waitSignal(
+        page.recognition_test_start_requested,
+        timeout=500,
+    ) as blocker:
+        panel.btn_start.click()
+
+    payload = blocker.args[0]
+    assert payload["samples"] == [
+        {"label": "lon bia thật", "expected_class": "Aluminum can"}
+    ]
+    assert payload["repetitions"] == 5
+    assert payload["countdown_seconds"] == 3
+    assert payload["scan_timeout_seconds"] == 8

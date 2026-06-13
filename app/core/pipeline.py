@@ -141,6 +141,7 @@ class Pipeline:
         self._track_to_speech: dict[int, tuple[str, int, str, float]] = {}
         self._unknown_fallback = UnknownObjectFallback()
         self._hardware_dispatch_enabled = True
+        self._preserve_tracks_when_dispatch_disabled = False
         self.dispatch_status = "waiting empty tray"
         self._dispatch_guard = DispatchGuard()
         self._last_multi_class_warning_at = 0.0
@@ -152,6 +153,9 @@ class Pipeline:
         self._foreground_background_frames = 0
         self._foreground_warmup_frames = 6
         self.on_capture_saved = None  # type: ignore[assignment]
+        self.dispatch_authorizer = None  # type: ignore[assignment]
+        self.on_dispatch_started = None  # type: ignore[assignment]
+        self.on_dispatch_completed = None  # type: ignore[assignment]
 
     def update_config(self, cfg: AppConfig) -> None:
         self.cfg = cfg
@@ -182,8 +186,14 @@ class Pipeline:
     def set_uart(self, uart) -> None:
         self.uart = uart if uart is not None else _NoopUart()
 
-    def set_hardware_dispatch_enabled(self, enabled: bool) -> None:
+    def set_hardware_dispatch_enabled(
+        self,
+        enabled: bool,
+        *,
+        preserve_tracks: bool = False,
+    ) -> None:
         self._hardware_dispatch_enabled = bool(enabled)
+        self._preserve_tracks_when_dispatch_disabled = bool(preserve_tracks)
 
     @property
     def auto_sort_state(self) -> str:
@@ -794,7 +804,10 @@ class Pipeline:
         if not multi_class.allowed:
             self.dispatch_status = multi_class.reason
             self._speak_multi_class_warning(multi_class.class_names)
-            if not self._hardware_dispatch_enabled:
+            if (
+                not self._hardware_dispatch_enabled
+                and not self._preserve_tracks_when_dispatch_disabled
+            ):
                 for t in tracked:
                     self.tracker.mark_emitted(t.track_id)
             return detections_for_render
@@ -808,7 +821,10 @@ class Pipeline:
             )
             self.dispatch_status = foreground_multi.reason
             self._speak_multi_class_warning(foreground_multi.class_names)
-            if not self._hardware_dispatch_enabled:
+            if (
+                not self._hardware_dispatch_enabled
+                and not self._preserve_tracks_when_dispatch_disabled
+            ):
                 for t in tracked:
                     self.tracker.mark_emitted(t.track_id)
             return detections_for_render
@@ -854,8 +870,9 @@ class Pipeline:
                 return detections_for_render
         if not self._hardware_dispatch_enabled:
             self.dispatch_status = "TEST OFF"
-            for t in tracked:
-                self.tracker.mark_emitted(t.track_id)
+            if not self._preserve_tracks_when_dispatch_disabled:
+                for t in tracked:
+                    self.tracker.mark_emitted(t.track_id)
             return detections_for_render
         for t in tracked:
             if self._unknown_dispatch_blocked(t.detection):
@@ -887,6 +904,30 @@ class Pipeline:
                 continue
             mapping = self._mapping_for_detection(t.detection)
             owner_username = self.cfg.device.owner_username.strip()
+            dispatch_evidence = {
+                "track_id": t.track_id,
+                "predicted_class": t.detection.cls_name,
+                "route": mapping.command,
+                "bin_index": int(mapping.bin_index),
+                "confidence": float(t.detection.conf),
+                "speaker_mode": (
+                    "computer" if computer_speaker_enabled(self.cfg) else "hardware"
+                ),
+                "payload": self._uart_payload_preview(
+                    mapping.command,
+                    t.detection.conf,
+                ),
+            }
+            authorizer = self.dispatch_authorizer
+            if callable(authorizer):
+                try:
+                    if not bool(authorizer(dict(dispatch_evidence))):
+                        self.dispatch_status = "QA route not armed"
+                        continue
+                except Exception as e:
+                    self.dispatch_status = "QA authorization failed"
+                    logger.warning("dispatch authorizer failed: {}", e)
+                    continue
             self.tracker.mark_emitted(t.track_id)
             category = category_for_command(mapping.command)
             capture: LabeledCapture = {
@@ -979,6 +1020,19 @@ class Pipeline:
                     ack_timeout_seconds=self._ack_timeout_seconds(),
                 )
                 self.dispatch_status = self._dispatch_guard.last_reason
+                dispatch_evidence.update(
+                    {
+                        "history_id": row_id,
+                        "image_path": capture["image_path"],
+                        "annotated_path": capture["annotated_path"],
+                    }
+                )
+                callback = self.on_dispatch_started
+                if callable(callback):
+                    try:
+                        callback(dict(dispatch_evidence))
+                    except Exception as e:
+                        logger.warning("on_dispatch_started callback failed: {}", e)
                 if computer_speaker_enabled(self.cfg):
                     assert callable(send_silent)
                     send_silent(
@@ -1121,6 +1175,20 @@ class Pipeline:
         if row_id is None:
             return
         self.history.update_ack(row_id, status=status, rtt_ms=rtt_ms)
+        callback = self.on_dispatch_completed
+        if callable(callback):
+            try:
+                callback(
+                    {
+                        "track_id": track_id,
+                        "history_id": row_id,
+                        "route": command,
+                        "ack_status": status,
+                        "rtt_ms": rtt_ms,
+                    }
+                )
+            except Exception as e:
+                logger.warning("on_dispatch_completed callback failed: {}", e)
         logger.info(
             "dispatch evidence ack track={} history_id={} cmd={} ack_status={} rtt_ms={} state={}",
             track_id,
