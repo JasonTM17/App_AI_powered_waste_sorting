@@ -62,6 +62,7 @@ def test_first_stable_object_dispatches_after_empty_rearm():
     )
 
     assert decision.allowed is True
+    assert guard.state == "DETECTING"
 
 
 def test_busy_blocks_until_ack_timeout_and_settle():
@@ -86,8 +87,24 @@ def test_busy_blocks_until_ack_timeout_and_settle():
 
     assert blocked.allowed is False
     assert blocked.reason == "sort busy"
+    assert guard.state == "WAITING_EMPTY"
     assert expired.allowed is False
     assert expired.reason == "waiting empty tray"
+
+
+def test_guard_reports_ready_sorting_returning_and_waiting_states():
+    guard = _guard()
+    _arm(guard)
+    assert guard.state == "READY"
+
+    guard.begin_dispatch(track_id=1, now=3.0, ack_timeout_seconds=4.5)
+    assert guard.state == "SORTING"
+
+    guard.complete_dispatch(track_id=1, now=4.0)
+    assert guard.state == "RETURNING"
+
+    guard.observe_frame(has_visible_object=False, roi_ready=True, now=5.1)
+    assert guard.state == "WAITING_EMPTY"
 
 
 def test_cooldown_blocks_back_to_back_sorts_after_rearm():

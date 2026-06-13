@@ -16,6 +16,9 @@ class MultiObjectDecision:
     class_names: tuple[str, ...] = ()
     reason: str = ""
     object_count: int = 0
+    foreground_count: int = 0
+    reference_count: int = 0
+    unmatched_foreground_count: int = 0
 
 
 def _roi_bounds(
@@ -116,20 +119,58 @@ def evaluate_foreground_multi_object_dispatch(
     roi: object | None,
     max_objects: int = 1,
     min_area_ratio: float = 0.003,
+    reference_boxes: tuple[tuple[int, int, int, int], ...] = (),
 ) -> MultiObjectDecision:
     """Block dispatch when the ROI clearly contains more than one foreground object."""
     if max_objects <= 0:
         return MultiObjectDecision(allowed=True)
     boxes = _foreground_boxes(frame_bgr, roi=roi, min_area_ratio=min_area_ratio)
-    if len(boxes) <= max_objects:
-        return MultiObjectDecision(allowed=True, object_count=len(boxes))
-    count = len(boxes)
+    references = tuple(reference_boxes)
+    unmatched_count = sum(
+        1
+        for foreground_box in boxes
+        if not any(_foreground_belongs_to_reference(foreground_box, reference) for reference in references)
+    )
+    count = len(references) + unmatched_count if references else len(boxes)
+    decision_meta = {
+        "object_count": count,
+        "foreground_count": len(boxes),
+        "reference_count": len(references),
+        "unmatched_foreground_count": unmatched_count,
+    }
+    if count <= max_objects:
+        return MultiObjectDecision(allowed=True, **decision_meta)
     return MultiObjectDecision(
         allowed=False,
         class_names=(f"{count} visible objects",),
         reason=f"multiple waste types ({count} visible objects)",
-        object_count=count,
+        **decision_meta,
     )
+
+
+def _foreground_belongs_to_reference(
+    foreground: tuple[int, int, int, int],
+    reference: tuple[int, int, int, int],
+) -> bool:
+    fx1, fy1, fx2, fy2 = foreground
+    rx1, ry1, rx2, ry2 = reference
+    reference_width = max(0, rx2 - rx1)
+    reference_height = max(0, ry2 - ry1)
+    expand_x = max(2, round(reference_width * 0.04))
+    expand_y = max(2, round(reference_height * 0.04))
+    center_x = (fx1 + fx2) / 2.0
+    center_y = (fy1 + fy2) / 2.0
+    center_inside = (
+        rx1 - expand_x <= center_x <= rx2 + expand_x
+        and ry1 - expand_y <= center_y <= ry2 + expand_y
+    )
+    if center_inside:
+        return True
+    intersection = max(0, min(fx2, rx2) - max(fx1, rx1)) * max(
+        0, min(fy2, ry2) - max(fy1, ry1)
+    )
+    foreground_area = max(1, max(0, fx2 - fx1) * max(0, fy2 - fy1))
+    return intersection / foreground_area >= 0.5
 
 
 def foreground_object_boxes(

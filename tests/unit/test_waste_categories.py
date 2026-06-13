@@ -40,7 +40,10 @@ def test_category_examples_match_three_bin_rules():
     assert category_for_class("Leftover food") == ORGANIC
     assert category_for_class("Beer can") == RECYCLABLE
     assert category_for_class("Milk carton") == RECYCLABLE
-    assert category_for_class("Foam food box") == INORGANIC
+    assert category_for_class("Foam food box") == RECYCLABLE
+    assert category_for_class("Disposable tableware") == RECYCLABLE
+    assert category_for_class("Instant noodle cup") == RECYCLABLE
+    assert category_for_class("Styrofoam cup") == RECYCLABLE
     assert category_for_class("Face mask") == INORGANIC
     assert category_for_class("Milk tea cup") == RECYCLABLE
 
@@ -73,6 +76,12 @@ def test_default_class_id_supports_extended_camera_labels():
     assert default_class_id_for_name("Toothbrush") is not None
     assert default_class_id_for_name("Battery") == 43
     assert default_class_id_for_name("Toothbrush") == 44
+
+
+def test_exact_training_class_names_win_over_common_aliases():
+    assert canonical_class_name("Wood") == "Wood"
+    assert canonical_class_name("wood") == "Wood"
+    assert default_class_id_for_name("Wood") == 40
 
 
 def test_vietnamese_aliases_resolve_to_existing_training_classes():

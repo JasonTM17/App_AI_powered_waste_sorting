@@ -23,9 +23,11 @@ def test_hardware_profile_routes_are_exact():
         "mode": "two_servo_gate",
         "wait_degrees": {"D6": 90, "D7": 85},
         "dump_degrees": "per_route",
-        "hold_ms": 2000,
+        "hold_ms": 1800,
         "pre_sort_home_settle_ms": 0,
-        "return_settle_ms": 1500,
+        "return_settle_ms": 250,
+        "move_step_degrees": 2,
+        "move_step_ms": 10,
         "idle_policy": "detach",
     }
     assert profile["routes"] == [

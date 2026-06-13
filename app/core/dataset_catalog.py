@@ -22,6 +22,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Connection, Engine
 
+from app.core.waste_categories import canonical_class_name
+
 metadata = MetaData()
 
 dataset_items = Table(
@@ -166,6 +168,50 @@ class DatasetCatalog:
             row = conn.execute(stmt).first()
         return dict(row._mapping) if row is not None else None
 
+    def list_items_for_box_class(
+        self,
+        cls_name: str,
+        *,
+        limit: int | None = 100,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        """List distinct items containing the class in any annotation box."""
+        class_filter = dataset_boxes.c.cls_name.in_(self._matching_box_class_names(cls_name))
+        total_stmt = (
+            select(func.count(func.distinct(dataset_items.c.item_id)))
+            .select_from(dataset_items.join(dataset_boxes, dataset_boxes.c.item_id == dataset_items.c.item_id))
+            .where(class_filter)
+        )
+        rows_stmt = (
+            select(dataset_items)
+            .join(dataset_boxes, dataset_boxes.c.item_id == dataset_items.c.item_id)
+            .where(class_filter)
+            .distinct()
+            .order_by(dataset_items.c.updated_at.desc(), dataset_items.c.id.desc())
+            .offset(offset)
+        )
+        if limit is not None:
+            rows_stmt = rows_stmt.limit(limit)
+        with self._engine.begin() as conn:
+            total = int(conn.execute(total_stmt).scalar_one())
+            rows = [dict(row._mapping) for row in conn.execute(rows_stmt).all()]
+        return rows, total
+
+    def count_trust_states_for_box_class(self, cls_name: str) -> dict[str, int]:
+        """Count distinct class items by their current review/trust state."""
+        stmt = (
+            select(dataset_items.c.trust_state, func.count(func.distinct(dataset_items.c.item_id)))
+            .select_from(dataset_items.join(dataset_boxes, dataset_boxes.c.item_id == dataset_items.c.item_id))
+            .where(dataset_boxes.c.cls_name.in_(self._matching_box_class_names(cls_name)))
+            .group_by(dataset_items.c.trust_state)
+        )
+        with self._engine.begin() as conn:
+            return {
+                str(state): int(count)
+                for state, count in conn.execute(stmt).all()
+                if state is not None
+            }
+
     def list_boxes(self, item_id: str) -> list[dict[str, Any]]:
         stmt = (
             select(dataset_boxes)
@@ -221,6 +267,14 @@ class DatasetCatalog:
         stmt = select(func.count(func.distinct(dataset_boxes.c.cls_name)))
         with self._engine.begin() as conn:
             return int(conn.execute(stmt).scalar_one())
+
+    def _matching_box_class_names(self, cls_name: str) -> list[str]:
+        requested = canonical_class_name(cls_name) or str(cls_name).strip()
+        stmt = select(dataset_boxes.c.cls_name).distinct()
+        with self._engine.begin() as conn:
+            names = [str(name) for (name,) in conn.execute(stmt).all() if name]
+        matches = [name for name in names if canonical_class_name(name) == requested]
+        return matches or [str(cls_name).strip()]
 
     def close(self) -> None:
         self._engine.dispose()

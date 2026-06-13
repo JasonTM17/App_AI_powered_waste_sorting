@@ -39,6 +39,42 @@ def test_export_queue_blocks_item_with_unknown_label_boxes(tmp_path):
     assert not (out / "labels" / "train" / "sample.txt").exists()
 
 
+def test_export_queue_removes_stale_images_labels_and_caches(tmp_path):
+    queue = tmp_path / "queue"
+    out = tmp_path / "out"
+    queue.mkdir()
+    stale_image = out / "images" / "train" / "stale.jpg"
+    stale_label = out / "labels" / "train" / "stale.txt"
+    stale_cache = out / "train.cache"
+    stale_image.parent.mkdir(parents=True)
+    stale_label.parent.mkdir(parents=True)
+    stale_image.write_bytes(b"old")
+    stale_label.write_text("0 0.5 0.5 1 1\n", encoding="utf-8")
+    stale_cache.write_bytes(b"cache")
+
+    image_path = queue / "sample.jpg"
+    Image.new("RGB", (100, 100), "white").save(image_path)
+    image_path.with_suffix(".json").write_text(
+        json.dumps(
+            {
+                "source": "manual_import",
+                "reviewed": True,
+                "bbox_reviewed": True,
+                "boxes": [{"cls_id": 18, "cls_name": "Paper", "xyxy": [10, 10, 50, 50]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    stats = _export_queue(queue, out, {18: "Paper"}, train_ratio=1.0, valid_ratio=0.0)
+
+    assert stats["images"] == 1
+    assert (out / "images" / "train" / "sample.jpg").exists()
+    assert not stale_image.exists()
+    assert not stale_label.exists()
+    assert not stale_cache.exists()
+
+
 def test_export_queue_remaps_known_name_to_model_class_id(tmp_path):
     queue = tmp_path / "queue"
     out = tmp_path / "out"

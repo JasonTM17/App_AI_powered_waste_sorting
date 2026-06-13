@@ -32,10 +32,20 @@ PLAIN_GROUP_ACK_COMMANDS = {
 }
 
 
-def encode_sort(command: str, conf: float, protocol: UartProtocol = "sort_line") -> bytes:
+def encode_sort(
+    command: str,
+    conf: float,
+    protocol: UartProtocol = "sort_line",
+    *,
+    silent: bool = False,
+) -> bytes:
     if not command or len(command) != 1:
         raise ValueError("command must be exactly 1 character")
     command = command.upper()
+    if silent:
+        if command not in PLAIN_GROUP_COMMANDS:
+            raise ValueError("silent sort only supports O/R/I commands")
+        return f"SORTSILENT:{command}\n".encode()
     if protocol == "plain_group":
         payload = PLAIN_GROUP_COMMANDS.get(command)
         if payload is None:

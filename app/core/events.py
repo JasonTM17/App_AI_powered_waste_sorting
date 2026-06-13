@@ -16,6 +16,11 @@ class Detection:
     conf: float
     xyxy: tuple[int, int, int, int]
     source: str = "YOLO"
+    secondary_route: str = ""
+    secondary_confidence: float | None = None
+    secondary_margin: float | None = None
+    route_consensus: Literal["not_required", "passed", "blocked"] = "not_required"
+    route_consensus_reason: str = ""
 
 
 @dataclass(frozen=True)

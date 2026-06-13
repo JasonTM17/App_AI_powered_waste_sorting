@@ -94,3 +94,47 @@ def test_foreground_multi_object_dispatch_allows_one_visible_object():
 
     assert decision.allowed is True
     assert decision.object_count == 1
+
+
+def test_foreground_components_inside_one_yolo_box_count_as_one_object():
+    decision = evaluate_foreground_multi_object_dispatch(
+        _two_object_frame(),
+        roi=_roi(),
+        max_objects=1,
+        min_area_ratio=0.002,
+        reference_boxes=((20, 20, 285, 205),),
+    )
+
+    assert decision.allowed is True
+    assert decision.object_count == 1
+    assert decision.foreground_count == 2
+    assert decision.reference_count == 1
+    assert decision.unmatched_foreground_count == 0
+
+
+def test_foreground_component_outside_yolo_box_still_counts_as_second_object():
+    decision = evaluate_foreground_multi_object_dispatch(
+        _two_object_frame(),
+        roi=_roi(),
+        max_objects=1,
+        min_area_ratio=0.002,
+        reference_boxes=((20, 20, 100, 170),),
+    )
+
+    assert decision.allowed is False
+    assert decision.object_count == 2
+    assert decision.unmatched_foreground_count == 1
+
+
+def test_two_yolo_boxes_stay_blocked_even_when_foreground_merges_cleanly():
+    decision = evaluate_foreground_multi_object_dispatch(
+        _two_object_frame(),
+        roi=_roi(),
+        max_objects=1,
+        min_area_ratio=0.002,
+        reference_boxes=((20, 20, 100, 170), (150, 50, 285, 205)),
+    )
+
+    assert decision.allowed is False
+    assert decision.object_count == 2
+    assert decision.reference_count == 2

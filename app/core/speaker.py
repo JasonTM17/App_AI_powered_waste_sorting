@@ -8,10 +8,11 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 from app.core.voice_pack import (
     AUDIO_EVENT_LABELS,
+    AudioEventKey,
     audio_event_path,
     normalize_voice_gender,
     sort_voice_path,
@@ -115,24 +116,41 @@ class WasteSpeaker:
             require_enabled=True,
         )
 
-    def preview_command(self, command: str) -> bool:
+    def preview_command(self, command: str, *, voice_gender: str | None = None) -> bool:
         category = category_for_command(command)
         if category is None:
             return False
-        return self.preview_event(f"sort_{category.code}", text=category.voice_text)
+        return self.preview_event(
+            f"sort_{category.code}",
+            text=category.voice_text,
+            voice_gender=voice_gender,
+        )
 
-    def preview_warning(self) -> bool:
+    def preview_warning(self, *, voice_gender: str | None = None) -> bool:
         return self.preview_event(
             "multi_object_warning",
             text="Chỉ đặt một loại rác trong khay.",
+            voice_gender=voice_gender,
         )
 
-    def preview_event(self, event_key: str, *, text: str = "") -> bool:
+    def preview_event(
+        self,
+        event_key: str,
+        *,
+        text: str = "",
+        voice_gender: str | None = None,
+    ) -> bool:
         clean_key = str(event_key or "").strip()
-        audio_path = audio_event_path(clean_key, self.voice_gender)
+        selected_gender = (
+            normalize_voice_gender(voice_gender)
+            if voice_gender is not None
+            else self.voice_gender
+        )
+        audio_path = audio_event_path(clean_key, selected_gender)
         if audio_path is None:
             return False
-        label = text.strip() or AUDIO_EVENT_LABELS.get(clean_key, clean_key)
+        typed_key = cast(AudioEventKey, clean_key)
+        label = text.strip() or AUDIO_EVENT_LABELS.get(typed_key, clean_key)
         self._queue(
             text=label,
             key=f"preview:{clean_key}",

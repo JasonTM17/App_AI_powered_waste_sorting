@@ -73,7 +73,11 @@ def _stage_camera_anchor_queue(queue_dir: Path, staging: Path, threshold: float)
     staged_items: list[dict[str, Any]] = []
     anchor_indexes: dict[str, int] = defaultdict(int)
     for image_path in sorted(queue_dir.glob("*.jpg")) if queue_dir.exists() else []:
+        if not image_path.exists():
+            continue
         meta_path = image_path.with_suffix(".json")
+        if not meta_path.exists():
+            continue
         meta = _read_meta(meta_path)
         allowed, reason = strict_recovery_allowed(meta, image_path, threshold=threshold)
         if not allowed:

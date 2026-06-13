@@ -7,8 +7,9 @@ import pytest
 from app.core.events import Detection
 from app.core.inference import InferenceEngine
 
-MODEL = Path("models/best.pt")
-FIXTURE = Path("tests/fixtures/sample_trash.jpg")
+ROOT = Path(__file__).resolve().parents[2]
+MODEL = ROOT / "models" / "best.pt"
+FIXTURE = ROOT / "tests" / "fixtures" / "sample_trash.jpg"
 
 
 @pytest.mark.skipif(not MODEL.exists(), reason="best.pt missing")

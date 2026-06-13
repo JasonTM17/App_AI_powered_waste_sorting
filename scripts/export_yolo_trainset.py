@@ -7,6 +7,8 @@ import hashlib
 import json
 import shutil
 import sys
+from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +22,19 @@ from app.core.dataset_queue import is_trainable_meta  # noqa: E402
 from app.core.waste_categories import (  # noqa: E402
     TRAINING_CLASS_ORDER_45,
     canonical_class_name,
+    category_for_class,
 )
+
+
+@dataclass(frozen=True)
+class ExportEntry:
+    image_path: Path
+    meta: dict[str, Any]
+    width: int
+    height: int
+    image_hash: str
+    group_key: str
+    locked_split: str | None
 
 
 def main() -> int:
@@ -76,12 +90,91 @@ def _export_queue(
         "skipped_empty": 0,
         "skipped_empty_after_filter": 0,
         "skipped_unknown_boxes": 0,
+        "skipped_invalid_bbox": 0,
         "remapped_boxes": 0,
+        "duplicate_image_groups": 0,
+        "duplicate_image_files": 0,
+        "split_locked_groups": 0,
+        "route_boxes": {"O": 0, "R": 0, "I": 0},
+        "split_route_boxes": {
+            "train": {"O": 0, "R": 0, "I": 0},
+            "valid": {"O": 0, "R": 0, "I": 0},
+            "test": {"O": 0, "R": 0, "I": 0},
+        },
     }
+    _reset_export_output(out_dir)
     if not queue_dir.exists():
         _write_data_yaml(out_dir, class_names)
         return stats
 
+    class_id_by_name = {name: cls_id for cls_id, name in class_names.items()}
+    entries = _collect_export_entries(queue_dir, stats)
+    split_by_group = _assign_group_splits(
+        entries,
+        train_ratio=train_ratio,
+        valid_ratio=valid_ratio,
+    )
+    group_counts: dict[str, int] = {}
+    for entry in entries:
+        group_counts[entry.group_key] = group_counts.get(entry.group_key, 0) + 1
+    duplicate_counts = [count for count in group_counts.values() if count > 1]
+    stats["duplicate_image_groups"] = len(duplicate_counts)
+    stats["duplicate_image_files"] = sum(duplicate_counts)
+    stats["split_locked_groups"] = len(
+        {entry.group_key for entry in entries if entry.locked_split is not None}
+    )
+
+    for entry in entries:
+        image_path = entry.image_path
+        meta = entry.meta
+        width = entry.width
+        height = entry.height
+        boxes = list(meta.get("boxes") or [])
+        split = split_by_group[entry.group_key]
+        lines = []
+        for box in boxes:
+            xyxy = box.get("xyxy") or [0, 0, 1, 1]
+            if not _valid_bbox(xyxy, width, height):
+                stats["skipped_invalid_bbox"] += 1
+                continue
+            cls_id = int(box.get("cls_id", 0))
+            cls_name = canonical_class_name(
+                str(box.get("cls_name") or class_names.get(cls_id, str(cls_id)))
+            )
+            expected_id = class_id_by_name.get(cls_name)
+            if expected_id is not None:
+                if expected_id != cls_id:
+                    stats["remapped_boxes"] += 1
+                cls_id = expected_id
+            elif cls_id not in class_names:
+                stats["skipped_unknown_boxes"] += 1
+                continue
+            cls_name = class_names[cls_id]
+            stats["classes"][cls_name] = int(stats["classes"].get(cls_name, 0)) + 1
+            route = category_for_class(cls_name).code
+            stats["route_boxes"][route] = int(stats["route_boxes"].get(route, 0)) + 1
+            stats["split_route_boxes"][split][route] = (
+                int(stats["split_route_boxes"][split].get(route, 0)) + 1
+            )
+            lines.append(_box_to_yolo_line(cls_id, xyxy, width, height))
+        if not lines:
+            stats["skipped_empty_after_filter"] += 1
+            continue
+        image_out = out_dir / "images" / split / image_path.name
+        label_out = out_dir / "labels" / split / f"{image_path.stem}.txt"
+        image_out.parent.mkdir(parents=True, exist_ok=True)
+        label_out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(image_path, image_out)
+        label_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        stats["images"] += 1
+        stats["boxes"] += len(lines)
+        stats["splits"][split] += 1
+    _write_data_yaml(out_dir, class_names)
+    return stats
+
+
+def _collect_export_entries(queue_dir: Path, stats: dict[str, Any]) -> list[ExportEntry]:
+    entries: list[ExportEntry] = []
     for image_path in sorted(queue_dir.glob("*.jpg")):
         meta = _read_meta(image_path)
         if meta is None:
@@ -100,39 +193,99 @@ def _export_queue(
         except Exception:
             stats["skipped_empty"] += 1
             continue
-        split = _stable_split(image_path.stem, train_ratio, valid_ratio)
-        image_out = out_dir / "images" / split / image_path.name
-        label_out = out_dir / "labels" / split / f"{image_path.stem}.txt"
-        image_out.parent.mkdir(parents=True, exist_ok=True)
-        label_out.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(image_path, image_out)
-        lines = []
-        class_id_by_name = {name: cls_id for cls_id, name in class_names.items()}
-        for box in boxes:
-            cls_id = int(box.get("cls_id", 0))
-            cls_name = canonical_class_name(
-                str(box.get("cls_name") or class_names.get(cls_id, str(cls_id)))
+        image_hash = _sha256_file(image_path)
+        entries.append(
+            ExportEntry(
+                image_path=image_path,
+                meta=meta,
+                width=width,
+                height=height,
+                image_hash=image_hash,
+                group_key=_split_group_key(image_path, meta, image_hash),
+                locked_split=_locked_split(meta),
             )
-            expected_id = class_id_by_name.get(cls_name)
-            if expected_id is not None:
-                if expected_id != cls_id:
-                    stats["remapped_boxes"] += 1
-                cls_id = expected_id
-            elif cls_id not in class_names:
-                stats["skipped_unknown_boxes"] += 1
-                continue
-            cls_name = class_names[cls_id]
-            stats["classes"][cls_name] = int(stats["classes"].get(cls_name, 0)) + 1
-            lines.append(_box_to_yolo_line(cls_id, box.get("xyxy") or [0, 0, 1, 1], width, height))
-        if not lines:
-            stats["skipped_empty_after_filter"] += 1
+        )
+    return entries
+
+
+def _assign_group_splits(
+    entries: list[ExportEntry],
+    *,
+    train_ratio: float,
+    valid_ratio: float,
+) -> dict[str, str]:
+    locked_by_group: dict[str, set[str]] = {}
+    for entry in entries:
+        if entry.locked_split is not None:
+            locked_by_group.setdefault(entry.group_key, set()).add(entry.locked_split)
+
+    split_by_group: dict[str, str] = {}
+    for entry in entries:
+        if entry.group_key in split_by_group:
             continue
-        label_out.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        stats["images"] += 1
-        stats["boxes"] += len(lines)
-        stats["splits"][split] += 1
-    _write_data_yaml(out_dir, class_names)
-    return stats
+        locked = locked_by_group.get(entry.group_key, set())
+        if "test" in locked:
+            split = "test"
+        elif "valid" in locked:
+            split = "valid"
+        elif "train" in locked:
+            split = "train"
+        else:
+            split = _stable_split(entry.group_key, train_ratio, valid_ratio)
+        split_by_group[entry.group_key] = split
+    return split_by_group
+
+
+def _split_group_key(image_path: Path, meta: dict[str, Any], image_hash: str) -> str:
+    for key in (
+        "capture_session_id",
+        "source_path",
+        "original_file",
+        "perceptual_hash",
+    ):
+        value = str(meta.get(key) or "").strip()
+        if value:
+            return f"{key}:{value.casefold()}"
+    return f"sha256:{image_hash}"
+
+
+def _locked_split(meta: dict[str, Any]) -> str | None:
+    if meta.get("holdout") is True:
+        return "test"
+    raw = str(meta.get("split") or "").strip().lower()
+    if raw == "val":
+        raw = "valid"
+    if meta.get("split_lock") is True and raw in {"train", "valid", "test"}:
+        return raw
+    return None
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _valid_bbox(xyxy: object, width: int, height: int) -> bool:
+    if not isinstance(xyxy, list | tuple) or len(xyxy) < 4:
+        return False
+    try:
+        x1, y1, x2, y2 = (float(value) for value in xyxy[:4])
+    except (TypeError, ValueError):
+        return False
+    return x1 >= 0 and y1 >= 0 and x2 > x1 and y2 > y1 and x2 <= width and y2 <= height
+
+
+def _reset_export_output(out_dir: Path) -> None:
+    for name in ("images", "labels"):
+        target = out_dir / name
+        if target.exists():
+            shutil.rmtree(target)
+    for cache_file in out_dir.glob("*.cache"):
+        with suppress(OSError):
+            cache_file.unlink()
 
 
 def _canonical_training_class_names() -> dict[int, str]:

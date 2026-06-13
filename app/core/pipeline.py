@@ -6,6 +6,7 @@ import io
 import json
 import time
 import uuid
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TypedDict
@@ -21,6 +22,7 @@ from app.core.config import (
 )
 from app.core.dispatch_guard import DispatchGuard
 from app.core.events import Detection, TrackedDetection
+from app.core.hardware_profile import route_for_command
 from app.core.history import HistoryService
 from app.core.manual_reference_recognition import ManualReferenceRecognizer
 from app.core.multi_object_dispatch import (
@@ -34,10 +36,13 @@ from app.core.three_bin_classifier import (
     parse_three_bin_class_name,
 )
 from app.core.tracker import Tracker
+from app.core.uart_protocol import encode_sort
 from app.core.unknown_object_fallback import UnknownObjectFallback
+from app.core.voice_pack import sort_voice_path
 from app.core.waste_categories import (
     category_for_class,
     category_for_command,
+    category_for_known_class,
     normalize_mapping_to_three_bins,
 )
 from app.utils.logging import logger
@@ -112,6 +117,9 @@ class _NoopUart:
             conf,
         )
 
+    def send_silent(self, track_id, command, conf) -> None:
+        self.send(track_id, command, conf)
+
 
 class Pipeline:
     def __init__(
@@ -176,6 +184,10 @@ class Pipeline:
 
     def set_hardware_dispatch_enabled(self, enabled: bool) -> None:
         self._hardware_dispatch_enabled = bool(enabled)
+
+    @property
+    def auto_sort_state(self) -> str:
+        return self._dispatch_guard.state
 
     def set_dispatch_cooldown(self, seconds: float) -> None:
         self.cfg.dispatch_guard.min_sort_interval_seconds = max(0.0, float(seconds))
@@ -304,6 +316,71 @@ class Pipeline:
                 cb(str(img_path))
             except Exception as e:
                 logger.warning("on_capture_saved callback failed: {}", e)
+
+    def _save_route_consensus_review(
+        self,
+        frame_bgr: np.ndarray,
+        detection: Detection,
+        ts: datetime,
+    ) -> str:
+        import cv2
+
+        out_dir = Path(self.cfg.capture.output_dir) / "low_conf_queue"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        uid = f"route_consensus_{uuid.uuid4().hex[:12]}"
+        img_path = out_dir / f"{uid}.jpg"
+        if not cv2.imwrite(str(img_path), frame_bgr):
+            raise OSError(f"could not write review frame: {img_path}")
+        primary_route = self._mapping_for_detection(detection).command
+        meta = {
+            "ts": ts.isoformat(),
+            "source": "route_consensus_review",
+            "reviewed": False,
+            "bbox_reviewed": False,
+            "needs_annotation": True,
+            "review_required": True,
+            "training_excluded": True,
+            "training_exclusion_reason": "route_consensus_blocked",
+            "recognition_enabled": False,
+            "route_consensus": {
+                "primary_route": primary_route,
+                "secondary_route": detection.secondary_route,
+                "secondary_confidence": detection.secondary_confidence,
+                "secondary_margin": detection.secondary_margin,
+                "status": detection.route_consensus,
+                "reason": detection.route_consensus_reason,
+            },
+            "boxes": [
+                {
+                    "cls_id": detection.cls_id,
+                    "cls_name": detection.cls_name,
+                    "conf": detection.conf,
+                    "xyxy": list(detection.xyxy),
+                }
+            ],
+        }
+        img_path.with_suffix(".json").write_text(
+            json.dumps(meta, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        try:
+            from app.core.dataset_catalog import DatasetCatalog
+            from app.utils.paths import dataset_db_path
+
+            catalog = DatasetCatalog(dataset_db_path())
+            try:
+                catalog.upsert_item(img_path, meta)
+            finally:
+                catalog.close()
+        except Exception as e:
+            logger.warning("route consensus review catalog update failed: {}", e)
+        cb = self.on_capture_saved
+        if callable(cb):
+            try:
+                cb(str(img_path))
+            except Exception as e:
+                logger.warning("on_capture_saved callback failed: {}", e)
+        return str(img_path)
 
     def _in_roi(self, xyxy):
         roi = self.cfg.roi
@@ -560,7 +637,11 @@ class Pipeline:
     ) -> list[Detection]:
         classifier = self._three_bin_classifier
         cfg = self.cfg.three_bin_classifier
-        if classifier is None or not cfg.enabled:
+        if not cfg.enabled:
+            return detections
+        if cfg.mode == "route_consensus":
+            return self._apply_route_consensus(frame_bgr, detections)
+        if classifier is None:
             return detections
         fallback_name = self.cfg.unknown_fallback.class_name
         out: list[Detection] = []
@@ -591,9 +672,71 @@ class Pipeline:
             )
         return out
 
+    def _apply_route_consensus(
+        self,
+        frame_bgr: np.ndarray,
+        detections: list[Detection],
+    ) -> list[Detection]:
+        classifier = self._three_bin_classifier
+        out: list[Detection] = []
+        for detection in detections:
+            primary_route = self._mapping_for_detection(detection).command
+            prediction = (
+                classifier.classify_bgr(frame_bgr, detection.xyxy)
+                if classifier is not None
+                else None
+            )
+            if prediction is None:
+                out.append(
+                    replace(
+                        detection,
+                        route_consensus="blocked",
+                        route_consensus_reason="secondary classifier unavailable",
+                    )
+                )
+                continue
+            if not prediction.passed:
+                out.append(
+                    replace(
+                        detection,
+                        secondary_route=prediction.command,
+                        secondary_confidence=prediction.confidence,
+                        secondary_margin=prediction.margin,
+                        route_consensus="blocked",
+                        route_consensus_reason="secondary confidence or margin below gate",
+                    )
+                )
+                continue
+            passed = prediction.command == primary_route
+            out.append(
+                replace(
+                    detection,
+                    secondary_route=prediction.command,
+                    secondary_confidence=prediction.confidence,
+                    secondary_margin=prediction.margin,
+                    route_consensus="passed" if passed else "blocked",
+                    route_consensus_reason=(
+                        ""
+                        if passed
+                        else f"route disagreement {primary_route}->{prediction.command}"
+                    ),
+                )
+            )
+        return out
+
     def process_frame(self, frame_bgr: np.ndarray, ts: datetime):
         raw = self.engine.predict(frame_bgr)
-        filtered = [d for d in raw if d.conf >= self.cfg.model.conf_threshold]
+        threshold_for_detection = getattr(self.engine, "threshold_for_detection", None)
+        filtered = [
+            detection
+            for detection in raw
+            if detection.conf
+            >= (
+                float(threshold_for_detection(detection))
+                if callable(threshold_for_detection)
+                else self.cfg.model.conf_threshold
+            )
+        ]
         filtered_in_roi = [d for d in filtered if self._in_roi(d.xyxy)]
         unknown = self._unknown_detection(frame_bgr, raw, filtered_in_roi)
         if unknown is not None:
@@ -605,12 +748,16 @@ class Pipeline:
         detections_for_render = [t.detection for t in tracked]
         now_mono = time.monotonic()
         roi_ready = self._roi_ready_for_dispatch(frame_bgr)
+        roi_reference_boxes = tuple(
+            t.detection.xyxy for t in tracked if self._in_roi(t.detection.xyxy)
+        )
         foreground_multi = (
             evaluate_foreground_multi_object_dispatch(
                 frame_bgr,
                 roi=self.cfg.roi,
                 max_objects=self.cfg.dispatch_guard.max_objects_per_dispatch,
                 min_area_ratio=self.cfg.unknown_fallback.min_area_ratio,
+                reference_boxes=roi_reference_boxes,
             )
             if roi_ready
             else None
@@ -621,6 +768,7 @@ class Pipeline:
                 roi=None,
                 max_objects=self.cfg.dispatch_guard.max_objects_per_dispatch,
                 min_area_ratio=max(self.cfg.unknown_fallback.min_area_ratio, 0.005),
+                reference_boxes=tuple(t.detection.xyxy for t in tracked),
             )
             if not frame_foreground_multi.allowed:
                 foreground_multi = frame_foreground_multi
@@ -637,13 +785,6 @@ class Pipeline:
             now=now_mono,
         )
         self.dispatch_status = self._dispatch_guard.last_reason
-        if foreground_multi is not None and not foreground_multi.allowed:
-            self.dispatch_status = foreground_multi.reason
-            self._speak_multi_class_warning(foreground_multi.class_names)
-            if not self._hardware_dispatch_enabled:
-                for t in tracked:
-                    self.tracker.mark_emitted(t.track_id)
-            return detections_for_render
         multi_class = evaluate_single_class_dispatch(
             tracked,
             in_roi=lambda xyxy: bool(roi_ready and self._in_roi(xyxy)),
@@ -657,6 +798,55 @@ class Pipeline:
                 for t in tracked:
                     self.tracker.mark_emitted(t.track_id)
             return detections_for_render
+        if foreground_multi is not None and not foreground_multi.allowed:
+            logger.debug(
+                "foreground dispatch blocked objects={} references={} components={} unmatched={}",
+                foreground_multi.object_count,
+                foreground_multi.reference_count,
+                foreground_multi.foreground_count,
+                foreground_multi.unmatched_foreground_count,
+            )
+            self.dispatch_status = foreground_multi.reason
+            self._speak_multi_class_warning(foreground_multi.class_names)
+            if not self._hardware_dispatch_enabled:
+                for t in tracked:
+                    self.tracker.mark_emitted(t.track_id)
+            return detections_for_render
+        if self.cfg.three_bin_classifier.mode == "route_consensus":
+            blocked_consensus = False
+            for t in tracked:
+                if t.detection.route_consensus == "passed":
+                    continue
+                blocked_consensus = True
+                should_log = self.tracker.should_emit(t.track_id)
+                self.tracker.mark_emitted(t.track_id)
+                self.dispatch_status = (
+                    t.detection.route_consensus_reason or "route consensus required"
+                )
+                if should_log:
+                    try:
+                        review_path = self._save_route_consensus_review(
+                            frame_bgr,
+                            t.detection,
+                            ts,
+                        )
+                    except Exception as e:
+                        review_path = "-"
+                        logger.warning("route consensus review capture failed: {}", e)
+                    logger.info(
+                        "dispatch blocked route consensus track={} cls={} primary={} "
+                        "secondary={} secondary_conf={} margin={} reason={} review={}",
+                        t.track_id,
+                        t.detection.cls_name,
+                        self._mapping_for_detection(t.detection).command,
+                        t.detection.secondary_route or "-",
+                        t.detection.secondary_confidence,
+                        t.detection.secondary_margin,
+                        self.dispatch_status,
+                        review_path,
+                    )
+            if blocked_consensus:
+                return detections_for_render
         if not self._hardware_dispatch_enabled:
             self.dispatch_status = "TEST OFF"
             for t in tracked:
@@ -744,6 +934,33 @@ class Pipeline:
                 continue
             if self._has_uart():
                 self._track_to_row[t.track_id] = row_id
+                send_silent = None
+                if computer_speaker_enabled(self.cfg):
+                    send_silent = getattr(self.uart, "send_silent", None)
+                    if not callable(send_silent):
+                        self.history.update_ack(
+                            row_id,
+                            status="audio_route_unsupported",
+                            rtt_ms=None,
+                        )
+                        self._track_to_row.pop(t.track_id, None)
+                        logger.error(
+                            "dispatch blocked because UART sender lacks SORTSILENT support "
+                            "track={} cmd={}",
+                            t.track_id,
+                            mapping.command,
+                        )
+                        continue
+                self._log_dispatch_evidence(
+                    track_id=t.track_id,
+                    cls_name=t.detection.cls_name,
+                    command=mapping.command,
+                    bin_index=int(mapping.bin_index),
+                    confidence=t.detection.conf,
+                    secondary_route=t.detection.secondary_route,
+                    secondary_confidence=t.detection.secondary_confidence,
+                    secondary_margin=t.detection.secondary_margin,
+                )
                 if computer_speaker_enabled(self.cfg):
                     self._speak_dispatch(
                         command=mapping.command,
@@ -757,7 +974,19 @@ class Pipeline:
                     ack_timeout_seconds=self._ack_timeout_seconds(),
                 )
                 self.dispatch_status = self._dispatch_guard.last_reason
-                self.uart.send(track_id=t.track_id, command=mapping.command, conf=t.detection.conf)
+                if computer_speaker_enabled(self.cfg):
+                    assert callable(send_silent)
+                    send_silent(
+                        track_id=t.track_id,
+                        command=mapping.command,
+                        conf=t.detection.conf,
+                    )
+                else:
+                    self.uart.send(
+                        track_id=t.track_id,
+                        command=mapping.command,
+                        conf=t.detection.conf,
+                    )
             logger.info(
                 "dispatch track={} cls={} cmd={} bin={} conf={:.2f}",
                 t.track_id,
@@ -767,6 +996,59 @@ class Pipeline:
                 t.detection.conf,
             )
         return detections_for_render
+
+    def _uart_payload_preview(self, command: str, confidence: float) -> str:
+        try:
+            return encode_sort(
+                command,
+                confidence,
+                protocol=self.cfg.uart.protocol,
+                silent=computer_speaker_enabled(self.cfg),
+            ).decode("utf-8").strip()
+        except Exception as e:
+            return f"invalid:{e}"
+
+    def _log_dispatch_evidence(
+        self,
+        *,
+        track_id: int,
+        cls_name: str,
+        command: str,
+        bin_index: int,
+        confidence: float,
+        secondary_route: str = "",
+        secondary_confidence: float | None = None,
+        secondary_margin: float | None = None,
+    ) -> None:
+        route = route_for_command(command)
+        audio_event = f"sort_{command.strip().upper()[:1]}"
+        laptop_audio_path = (
+            sort_voice_path(command, self.cfg.speaker.voice_gender)
+            if computer_speaker_enabled(self.cfg)
+            else None
+        )
+        logger.info(
+            "dispatch evidence send track={} cls={} cmd={} bin={} route={} "
+            "secondary_route={} secondary_conf={} secondary_margin={} "
+            "audio_mode={} audio_event={} hardware_audio_track={} voice_gender={} audio_file={} "
+            "uart_protocol={} uart_payload={} ack_status=pending conf={:.2f}",
+            track_id,
+            cls_name,
+            command,
+            bin_index,
+            route.label if route is not None else "-",
+            secondary_route or "-",
+            secondary_confidence,
+            secondary_margin,
+            self.cfg.speaker.output_mode,
+            audio_event,
+            route.gd5800_track if route is not None else "-",
+            self.cfg.speaker.voice_gender,
+            str(laptop_audio_path) if laptop_audio_path is not None else "-",
+            self.cfg.uart.protocol,
+            self._uart_payload_preview(command, confidence),
+            confidence,
+        )
 
     def _speak_multi_class_warning(self, class_names: tuple[str, ...]) -> None:
         text = normalize_multi_class_warning_text(self.cfg.dispatch_guard.multi_class_warning_text)
@@ -816,9 +1098,13 @@ class Pipeline:
             logger.warning("speaker dispatch failed: {}", e)
 
     def _unknown_dispatch_blocked(self, detection: Detection) -> bool:
+        if parse_three_bin_class_name(detection.cls_name) is not None:
+            return False
+        if detection.cls_name in self._mapping:
+            return False
         fallback = self.cfg.unknown_fallback
         if detection.cls_name != fallback.class_name:
-            return False
+            return category_for_known_class(detection.cls_name) is None
         if detection.cls_name in self._mapping:
             return False
         return not bool(fallback.dispatch_enabled)
@@ -830,6 +1116,15 @@ class Pipeline:
         if row_id is None:
             return
         self.history.update_ack(row_id, status=status, rtt_ms=rtt_ms)
+        logger.info(
+            "dispatch evidence ack track={} history_id={} cmd={} ack_status={} rtt_ms={} state={}",
+            track_id,
+            row_id,
+            command,
+            status,
+            rtt_ms,
+            self._dispatch_guard.state,
+        )
         self._track_to_speech.pop(track_id, None)
 
     def close(self):

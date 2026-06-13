@@ -99,6 +99,41 @@ def test_catalog_indexes_all_boxes_for_multi_box_item(tmp_path: Path):
         catalog.close()
 
 
+def test_catalog_lists_items_when_class_is_not_the_first_box(tmp_path: Path):
+    qdir = tmp_path / "queue"
+    image_path = _make_item(qdir, "manual_multi", multi_box=True, reviewed=True)
+
+    catalog = DatasetCatalog(tmp_path / "dataset.db")
+    try:
+        catalog.index_queue(qdir)
+        rows, total = catalog.list_items_for_box_class("Plastic", limit=80)
+
+        assert total == 1
+        assert [row["image_path"] for row in rows] == [str(image_path.resolve())]
+        assert catalog.count_trust_states_for_box_class("Plastic") == {"quarantine": 1}
+    finally:
+        catalog.close()
+
+
+def test_catalog_class_query_deduplicates_repeated_boxes(tmp_path: Path):
+    qdir = tmp_path / "queue"
+    image_path = _make_item(qdir, "manual_repeat", reviewed=True)
+    meta_path = image_path.with_suffix(".json")
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta["boxes"].append(dict(meta["boxes"][0]))
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
+
+    catalog = DatasetCatalog(tmp_path / "dataset.db")
+    try:
+        catalog.index_queue(qdir)
+        rows, total = catalog.list_items_for_box_class("Paper", limit=None)
+
+        assert total == 1
+        assert len(rows) == 1
+    finally:
+        catalog.close()
+
+
 def test_catalog_sync_removes_stale_items(tmp_path: Path):
     qdir = tmp_path / "queue"
     stale = _make_item(qdir, "manual_old")

@@ -376,7 +376,7 @@ def _candidate_crop_boxes(
     box_h = max(1, y2 - y1)
     aspect = max(box_w, box_h) / max(1, min(box_w, box_h))
     area_ratio = (box_w * box_h) / max(1.0, float(width * height))
-    if box_w >= box_h and aspect >= 3.0:
+    if box_w >= box_h and aspect >= 2.5:
         boxes.append(
             _expanded_box(
                 base,

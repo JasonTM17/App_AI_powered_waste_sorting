@@ -7,7 +7,10 @@ from PIL import Image
 
 from app.core.events import Detection
 from app.core.image_embedding import LegacyImageEmbedder
-from app.core.manual_reference_recognition import ManualReferenceRecognizer
+from app.core.manual_reference_recognition import (
+    ManualReferenceRecognizer,
+    _candidate_crop_boxes,
+)
 
 
 class _CountingEmbedder:
@@ -343,3 +346,12 @@ def test_manual_reference_canonicalizes_legacy_common_aliases(tmp_path):
     assert match is not None
     assert match.cls_name == "Organic"
     assert match.cls_id == 17
+
+
+def test_candidate_crops_expand_fragmented_elongated_objects():
+    boxes = _candidate_crop_boxes((542, 371, 707, 432), 960, 540)
+
+    assert boxes == [
+        (542, 371, 707, 432),
+        (237, 286, 960, 517),
+    ]

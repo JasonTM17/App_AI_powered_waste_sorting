@@ -86,9 +86,11 @@ DEFAULT_BAUD = 9600
 DEFAULT_PROTOCOL = "plain_group"
 HOME_DEGREES = SERVO_WAIT_POSITIONS
 DUMP_DEGREES = "per_route"
-HOLD_MS = 2000
+HOLD_MS = 1800
 PRE_SORT_HOME_SETTLE_MS = 0
-RETURN_SETTLE_MS = 1500
+RETURN_SETTLE_MS = 250
+SERVO_MOVE_STEP_DEGREES = 2
+SERVO_MOVE_STEP_MS = 10
 SERVO_IDLE_POLICY = "detach"
 
 _ROUTES_BY_COMMAND: dict[str, HardwareRoute] = {route.command: route for route in ROUTES}
@@ -112,6 +114,8 @@ def hardware_profile_payload() -> dict[str, object]:
             "hold_ms": HOLD_MS,
             "pre_sort_home_settle_ms": PRE_SORT_HOME_SETTLE_MS,
             "return_settle_ms": RETURN_SETTLE_MS,
+            "move_step_degrees": SERVO_MOVE_STEP_DEGREES,
+            "move_step_ms": SERVO_MOVE_STEP_MS,
             "idle_policy": SERVO_IDLE_POLICY,
         },
         "calibration": {
@@ -190,6 +194,8 @@ __all__ = [
     "ROUTES",
     "SENSOR_PINS",
     "SERVO_IDLE_POLICY",
+    "SERVO_MOVE_STEP_DEGREES",
+    "SERVO_MOVE_STEP_MS",
     "HardwareCommand",
     "HardwareRoute",
     "ProximitySensorPins",

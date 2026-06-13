@@ -121,3 +121,42 @@ def test_plain_group_sends_block_command_and_waits_for_ack(monkeypatch, qtbot):
     w.wait(2000)
     assert instances[0]._tx == [b"PING\n", b"PROFILE\n", b"voco\n"]
     assert acks and acks[0] == (3, "R", "ok")
+
+
+def test_audio_only_test_sends_track_and_emits_ack(monkeypatch, qtbot):
+    class AudioSerial(FakeSerial):
+        def write(self, data):
+            self._tx.append(bytes(data))
+            if data == b"AUDIO:4\n":
+                self._rx.append(b"ACK:AUDIO:4\n")
+            return len(data)
+
+    instances = []
+
+    def factory(port, baud, timeout=0.1):
+        serial_port = AudioSerial(port, baud, timeout)
+        instances.append(serial_port)
+        return serial_port
+
+    monkeypatch.setattr("app.core.uart.serial.Serial", factory)
+    acks = []
+    worker = UartWorker(
+        port="COM_FAKE",
+        baud=9600,
+        ack_timeout_ms=200,
+        protocol="plain_group",
+    )
+    worker.ack_received.connect(
+        lambda track_id, command, status, _rtt: acks.append(
+            (track_id, command, status)
+        )
+    )
+    worker.start()
+    _wait(lambda: worker.is_connected, 2.0)
+    worker.send_audio_test(track_id=-2, track=4)
+    _wait(lambda: len(acks) >= 1, 2.0)
+    worker.stop()
+    worker.wait(2000)
+
+    assert instances[0]._tx == [b"PING\n", b"PROFILE\n", b"AUDIO:4\n"]
+    assert acks == [(-2, "AUDIO:4", "ok")]

@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 DEFAULT_UART_ACK_TIMEOUT_MS = 4500
 MULTI_CLASS_WARNING_TEXT = "Chỉ đặt 1 vật trong khay. Đang thấy nhiều loại/vật nên không phân loại."
@@ -26,6 +26,34 @@ class CameraConfig(BaseModel):
     rotation: Literal[0, 90, 180, 270] = 0
 
 
+class SpecialistModelConfig(BaseModel):
+    enabled: bool = True
+    path: str = "models/new-class-specialist.pt"
+    class_thresholds: dict[str, float] = Field(
+        default_factory=lambda: {
+            "Pen": 0.15,
+            "Battery": 0.30,
+            "Toothbrush": 0.25,
+        }
+    )
+    nms_iou: float = Field(0.7, ge=0.0, le=1.0)
+    overlap_iou: float = Field(0.5, ge=0.0, le=1.0)
+
+    @field_validator("class_thresholds")
+    @classmethod
+    def validate_class_thresholds(cls, value: dict[str, float]) -> dict[str, float]:
+        clean: dict[str, float] = {}
+        for raw_name, raw_threshold in value.items():
+            name = str(raw_name).strip()
+            threshold = float(raw_threshold)
+            if not name:
+                raise ValueError("specialist class names must not be empty")
+            if not 0.0 <= threshold <= 1.0:
+                raise ValueError("specialist class thresholds must be between 0 and 1")
+            clean[name] = threshold
+        return clean
+
+
 class ModelConfig(BaseModel):
     path: str = "models/best.pt"
     device: Literal["auto", "cpu", "cuda"] = "auto"
@@ -33,6 +61,7 @@ class ModelConfig(BaseModel):
     iou_threshold: float = Field(0.45, ge=0.0, le=1.0)
     input_size: int = 640
     half_precision: bool = False
+    specialist: SpecialistModelConfig = Field(default_factory=SpecialistModelConfig)
 
 
 class UartConfig(BaseModel):
@@ -122,6 +151,7 @@ class ManualReferenceRecognitionConfig(BaseModel):
 class ThreeBinClassifierConfig(BaseModel):
     enabled: bool = False
     model_path: str = "models/three_bin_classifier.pt"
+    mode: Literal["unknown_only", "route_consensus"] = "unknown_only"
     min_confidence: float = Field(0.72, ge=0.0, le=1.0)
     min_margin: float = Field(0.12, ge=0.0, le=1.0)
     unknown_only: bool = True
@@ -180,6 +210,7 @@ def default_three_bin_classifier_config() -> ThreeBinClassifierConfig:
     return ThreeBinClassifierConfig(
         enabled=False,
         model_path="models/three_bin_classifier.pt",
+        mode="unknown_only",
         min_confidence=0.72,
         min_margin=0.12,
         unknown_only=True,
@@ -298,6 +329,10 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     if cfg.dispatch_guard.multi_class_warning_text != normalized_warning:
         cfg.dispatch_guard.multi_class_warning_text = normalized_warning
         changed = True
+    expected_unknown_only = cfg.three_bin_classifier.mode == "unknown_only"
+    if cfg.three_bin_classifier.unknown_only != expected_unknown_only:
+        cfg.three_bin_classifier.unknown_only = expected_unknown_only
+        changed = True
     seed = _load_example_config(path)
     if seed is not None:
         cfg, mappings_changed = merge_missing_mappings(cfg, seed)
@@ -311,9 +346,11 @@ def _missing_default_config_fields(raw: object) -> bool:
     if not isinstance(raw, dict):
         return False
     checks = (
+        ("model", "specialist"),
         ("speaker", "voice_gender"),
         ("unknown_fallback", "dispatch_enabled"),
         ("dispatch_guard", "max_objects_per_dispatch"),
+        ("three_bin_classifier", "mode"),
     )
     for section, key in checks:
         value = raw.get(section)

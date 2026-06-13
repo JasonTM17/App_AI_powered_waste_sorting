@@ -32,6 +32,7 @@ class _Cmd:
     conf: float
     enqueued_at: float
     audio_track: int | None = None
+    silent: bool = False
 
 
 class UartWorker(QThread):
@@ -61,12 +62,19 @@ class UartWorker(QThread):
         self._last_open_warn = 0.0
 
     def send(self, track_id, command, conf):
+        self._enqueue_sort(track_id, command, conf, silent=False)
+
+    def send_silent(self, track_id, command, conf):
+        self._enqueue_sort(track_id, command, conf, silent=True)
+
+    def _enqueue_sort(self, track_id, command, conf, *, silent: bool) -> None:
+        item = _Cmd(track_id, command, conf, time.time(), silent=silent)
         try:
-            self._queue.put_nowait(_Cmd(track_id, command, conf, time.time()))
+            self._queue.put_nowait(item)
         except queue.Full:
             with suppress(queue.Empty):
                 self._queue.get_nowait()
-            self._queue.put_nowait(_Cmd(track_id, command, conf, time.time()))
+            self._queue.put_nowait(item)
 
     def send_audio_warning(self, track: int) -> None:
         try:
@@ -75,6 +83,16 @@ class UartWorker(QThread):
             with suppress(queue.Empty):
                 self._queue.get_nowait()
             self._queue.put_nowait(_Cmd(-1, f"AUDIO:{int(track)}", 0.0, time.time(), int(track)))
+
+    def send_audio_test(self, track_id: int, track: int) -> None:
+        command = f"AUDIO:{int(track)}"
+        item = _Cmd(int(track_id), command, 0.0, time.time(), int(track))
+        try:
+            self._queue.put_nowait(item)
+        except queue.Full:
+            with suppress(queue.Empty):
+                self._queue.get_nowait()
+            self._queue.put_nowait(item)
 
     def _open(self):
         try:
@@ -140,7 +158,12 @@ class UartWorker(QThread):
             except queue.Empty:
                 continue
             if cmd.audio_track is None:
-                payload = encode_sort(cmd.command, cmd.conf, protocol=self._protocol)
+                payload = encode_sort(
+                    cmd.command,
+                    cmd.conf,
+                    protocol=self._protocol,
+                    silent=cmd.silent,
+                )
                 expected_ack = expected_ack_command(cmd.command, self._protocol)
             else:
                 payload = encode_audio_test(cmd.audio_track)
@@ -165,6 +188,11 @@ class UartWorker(QThread):
             if cmd.audio_track is not None:
                 if outcome is None:
                     logger.warning("uart audio warning no ack track={} rtt={}", cmd.audio_track, rtt)
+                    if cmd.track_id != -1:
+                        self.ack_received.emit(cmd.track_id, cmd.command, "no_ack", rtt)
+                elif cmd.track_id != -1:
+                    status, _ = outcome
+                    self.ack_received.emit(cmd.track_id, cmd.command, status, rtt)
                 continue
             if outcome is None:
                 self.ack_received.emit(cmd.track_id, cmd.command, "no_ack", rtt)

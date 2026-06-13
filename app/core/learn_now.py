@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from app.core.common_waste_catalog import common_waste_class_names
+from app.core.dataset_catalog import DatasetCatalog
 from app.core.dataset_queue import is_trainable_meta, is_trusted_meta
 from app.core.licensed_source_ingestion import (
     GENERATED_CAP_RATIO,
@@ -50,59 +51,13 @@ def build_learn_now_status(queue_dir: Path, selected_class: str = "") -> dict[st
         if not isinstance(meta, dict):
             continue
         total_images += 1
-        source = str(meta.get("source") or "")
-        trainable = is_trainable_meta(meta)
-        reviewed = meta.get("reviewed") is True and meta.get("bbox_reviewed") is True
-        holdout = meta.get("holdout") is True or str(meta.get("split") or "").lower() == "test"
-        generated = is_generated_meta(meta)
-        train_only_supplemental = is_train_only_supplemental_meta(meta)
-        source_issue_count = len(source_manifest_issues(meta))
-        eligible_reviewed = (
-            reviewed
-            and is_trusted_meta(meta)
-            and meta.get("training_excluded") is not True
-            and not train_only_supplemental
+        total_boxes += _accumulate_meta_stats(
+            meta,
+            allowed=allowed,
+            class_names=class_names,
+            stats=stats,
+            blocked_labels=blocked_labels,
         )
-        reference_allowed = (
-            trainable
-            and reviewed
-            and not holdout
-            and not train_only_supplemental
-            and source in MANUAL_REFERENCE_SOURCES
-            and bool(meta.get("recognition_enabled", True))
-        )
-        classes_in_item: set[str] = set()
-        for box in meta.get("boxes") or []:
-            if not isinstance(box, dict):
-                continue
-            total_boxes += 1
-            raw_name = str(box.get("cls_name") or "").strip()
-            class_name = canonical_class_name(raw_name)
-            if class_name not in allowed:
-                if raw_name:
-                    blocked_labels[raw_name] += 1
-                continue
-            classes_in_item.add(class_name)
-            class_names.add(class_name)
-        for class_name in classes_in_item:
-            stats[class_name]["images"] += 1
-            if trainable:
-                stats[class_name]["trainable"] += 1
-            if generated:
-                stats[class_name]["generated"] += 1
-            stats[class_name]["source_issues"] += source_issue_count
-            if reviewed:
-                stats[class_name]["reviewed"] += 1
-            if reviewed and trainable:
-                stats[class_name]["trainable_reviewed"] += 1
-            if eligible_reviewed:
-                stats[class_name]["eligible_reviewed"] += 1
-            if reviewed and source in MANUAL_REFERENCE_SOURCES:
-                stats[class_name]["manual_reviewed"] += 1
-            if reference_allowed:
-                stats[class_name]["reference"] += 1
-            if reviewed and holdout:
-                stats[class_name]["holdout"] += 1
 
     rows = [_status_row(class_name, stats[class_name]) for class_name in sorted(class_names)]
     selected_status = (
@@ -119,6 +74,130 @@ def build_learn_now_status(queue_dir: Path, selected_class: str = "") -> dict[st
         "total_boxes": total_boxes,
         "queue_dir": str(queue_dir.resolve()),
     }
+
+
+def build_selected_learn_now_status(
+    queue_dir: Path,
+    selected_class: str,
+    catalog_path: Path,
+) -> dict[str, object]:
+    """Build readiness by reading metadata only for the selected catalog class."""
+    selected = canonical_class_name(selected_class)
+    if not selected:
+        return build_learn_now_status(queue_dir, selected_class)
+
+    catalog = DatasetCatalog(catalog_path)
+    try:
+        rows, selected_total = catalog.list_items_for_box_class(selected, limit=None)
+        catalog_total = catalog.count_total()
+        total_boxes = catalog.count_boxes_total()
+    finally:
+        catalog.close()
+    if catalog_total == 0 and queue_dir.exists() and any(queue_dir.glob("*.jpg")):
+        return build_learn_now_status(queue_dir, selected)
+
+    stats: dict[str, Counter[str]] = defaultdict(Counter)
+    blocked_labels: Counter[str] = Counter()
+    class_names = {selected}
+    valid_images = 0
+    for row in rows:
+        image_path = Path(str(row.get("image_path") or ""))
+        try:
+            meta = json.loads(image_path.with_suffix(".json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(meta, dict):
+            continue
+        valid_images += 1
+        _accumulate_meta_stats(
+            meta,
+            allowed={selected},
+            class_names=class_names,
+            stats=stats,
+            blocked_labels=blocked_labels,
+            class_filter=selected,
+        )
+
+    selected_status = _status_row(selected, stats[selected])
+    return {
+        "selected_class": selected,
+        "selected": selected_status,
+        "classes": [selected_status],
+        "blocked_labels": dict(blocked_labels.most_common(30)),
+        "total_images": catalog_total,
+        "selected_images_scanned": valid_images,
+        "selected_images": selected_total,
+        "total_boxes": total_boxes,
+        "queue_dir": str(queue_dir.resolve()),
+    }
+
+
+def _accumulate_meta_stats(
+    meta: dict[str, object],
+    *,
+    allowed: set[str],
+    class_names: set[str],
+    stats: dict[str, Counter[str]],
+    blocked_labels: Counter[str],
+    class_filter: str | None = None,
+) -> int:
+    source = str(meta.get("source") or "")
+    trainable = is_trainable_meta(meta)
+    reviewed = meta.get("reviewed") is True and meta.get("bbox_reviewed") is True
+    holdout = meta.get("holdout") is True or str(meta.get("split") or "").lower() == "test"
+    generated = is_generated_meta(meta)
+    train_only_supplemental = is_train_only_supplemental_meta(meta)
+    source_issue_count = len(source_manifest_issues(meta))
+    eligible_reviewed = (
+        reviewed
+        and is_trusted_meta(meta)
+        and meta.get("training_excluded") is not True
+        and not train_only_supplemental
+    )
+    reference_allowed = (
+        trainable
+        and reviewed
+        and not holdout
+        and not train_only_supplemental
+        and source in MANUAL_REFERENCE_SOURCES
+        and bool(meta.get("recognition_enabled", True))
+    )
+    classes_in_item: set[str] = set()
+    total_boxes = 0
+    for box in meta.get("boxes") or []:
+        if not isinstance(box, dict):
+            continue
+        total_boxes += 1
+        raw_name = str(box.get("cls_name") or "").strip()
+        class_name = canonical_class_name(raw_name)
+        if class_name not in allowed:
+            if raw_name and class_filter is None:
+                blocked_labels[raw_name] += 1
+            continue
+        classes_in_item.add(class_name)
+        class_names.add(class_name)
+    if class_filter is not None:
+        classes_in_item.intersection_update({class_filter})
+    for class_name in classes_in_item:
+        stats[class_name]["images"] += 1
+        if trainable:
+            stats[class_name]["trainable"] += 1
+        if generated:
+            stats[class_name]["generated"] += 1
+        stats[class_name]["source_issues"] += source_issue_count
+        if reviewed:
+            stats[class_name]["reviewed"] += 1
+        if reviewed and trainable:
+            stats[class_name]["trainable_reviewed"] += 1
+        if eligible_reviewed:
+            stats[class_name]["eligible_reviewed"] += 1
+        if reviewed and source in MANUAL_REFERENCE_SOURCES:
+            stats[class_name]["manual_reviewed"] += 1
+        if reference_allowed:
+            stats[class_name]["reference"] += 1
+        if reviewed and holdout:
+            stats[class_name]["holdout"] += 1
+    return total_boxes
 
 
 def _status_row(class_name: str, counts: Counter[str]) -> dict[str, object]:
@@ -187,4 +266,5 @@ __all__ = [
     "STRONG_TRAIN_MIN_HOLDOUT",
     "STRONG_TRAIN_MIN_REVIEWED",
     "build_learn_now_status",
+    "build_selected_learn_now_status",
 ]

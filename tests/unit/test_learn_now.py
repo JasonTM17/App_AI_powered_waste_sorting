@@ -2,7 +2,8 @@ import json
 
 from PIL import Image
 
-from app.core.learn_now import build_learn_now_status
+from app.core.dataset_catalog import DatasetCatalog
+from app.core.learn_now import build_learn_now_status, build_selected_learn_now_status
 
 
 def _write_item(queue, name: str, cls_name: str, *, reviewed: bool = True, holdout: bool = False) -> None:
@@ -44,6 +45,28 @@ def test_learn_now_counts_reviewed_references_and_routes_pen(tmp_path):
     assert selected["priority"] == "P0"
     assert selected["ready_for_reference"] is True
     assert selected["ready_for_micro_train"] is True
+
+
+def test_selected_learn_now_uses_catalog_and_reads_only_selected_class(tmp_path):
+    queue = tmp_path / "queue"
+    queue.mkdir()
+    for index in range(6):
+        _write_item(queue, f"pen_{index}", "but bi")
+    for index in range(4):
+        _write_item(queue, f"textile_{index}", "Textile")
+    catalog_path = tmp_path / "dataset.db"
+    catalog = DatasetCatalog(catalog_path)
+    try:
+        catalog.index_queue(queue)
+    finally:
+        catalog.close()
+
+    status = build_selected_learn_now_status(queue, "Pen", catalog_path)
+
+    assert status["selected"]["class_name"] == "Pen"
+    assert status["selected"]["reviewed_count"] == 6
+    assert status["selected_images_scanned"] == 6
+    assert status["total_images"] == 10
 
 
 def test_learn_now_textile_aliases_route_and_unlock_candidate_readiness(tmp_path):

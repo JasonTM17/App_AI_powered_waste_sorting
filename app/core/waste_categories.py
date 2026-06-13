@@ -249,8 +249,11 @@ RECYCLABLE_CLASSES = frozenset(
         "Carton box",
         "Clean plastic cup",
         "Combined plastic",
+        "Dirty nylon bag",
+        "Disposable tableware",
         "Food can",
         "Foil",
+        "Foam food box",
         "Glass bottle",
         "Glass jar",
         "Iron utensils",
@@ -258,6 +261,7 @@ RECYCLABLE_CLASSES = frozenset(
         "Metal bottle cap",
         "Milk bottle",
         "Milk carton",
+        "Milk tea cup",
         "Newspaper",
         "Paper",
         "Paper bag",
@@ -272,12 +276,14 @@ RECYCLABLE_CLASSES = frozenset(
         "Plastic cup",
         "Plastic shaker",
         "Plastic shavings",
+        "Instant noodle cup",
         "Postal packaging",
         "Printing industry",
         "Scrap metal",
         "Shampoo bottle",
         "Soft drink can",
         "Stretch film",
+        "Styrofoam cup",
         "Tetra pack",
         "Tin",
         "Zip plastic bag",
@@ -345,6 +351,9 @@ def canonical_class_name(class_name: str) -> str:
     clean = str(class_name or "").strip()
     if not clean:
         return ""
+    for known in TRAINING_CLASS_ORDER_45:
+        if known.casefold() == clean.casefold():
+            return known
     from app.core.common_waste_catalog import COMMON_WASTE_ALIASES
 
     common_alias = COMMON_WASTE_ALIASES.get(clean.casefold())
@@ -353,9 +362,6 @@ def canonical_class_name(class_name: str) -> str:
     alias = VIETNAMESE_CLASS_ALIASES.get(clean.casefold())
     if alias:
         return alias
-    for known in TRAINING_CLASS_ORDER_45:
-        if known.casefold() == clean.casefold():
-            return known
     return clean
 
 
