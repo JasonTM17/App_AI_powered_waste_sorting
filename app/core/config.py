@@ -359,6 +359,18 @@ def _missing_default_config_fields(raw: object) -> bool:
     return False
 
 
+def _migrate_three_bin_classifier_mode(raw: object) -> bool:
+    if not isinstance(raw, dict):
+        return False
+    section = raw.get("three_bin_classifier")
+    if not isinstance(section, dict) or "mode" in section:
+        return False
+    section["mode"] = (
+        "route_consensus" if section.get("unknown_only") is False else "unknown_only"
+    )
+    return True
+
+
 def _repair_known_class_mappings(cfg: AppConfig) -> tuple[AppConfig, bool]:
     try:
         from app.core.waste_categories import (
@@ -414,10 +426,11 @@ def load_config(path: Path) -> AppConfig:
         return cfg
     try:
         raw = json.loads(path.read_text(encoding="utf-8-sig"))
+        migrated_mode = _migrate_three_bin_classifier_mode(raw)
         missing_default_fields = _missing_default_config_fields(raw)
         cfg = AppConfig.model_validate(raw)
         cfg, changed = _repair_config(cfg, path)
-        if changed or missing_default_fields:
+        if changed or missing_default_fields or migrated_mode:
             save_config(cfg, path)
         return cfg
     except Exception:

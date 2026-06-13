@@ -341,6 +341,7 @@ def test_load_config_persists_new_default_fields_for_legacy_file(tmp_path: Path)
         "warmup_frames": 6,
     }
     data["dispatch_guard"].pop("max_objects_per_dispatch")
+    data["three_bin_classifier"].pop("mode")
     cfg_path.write_text(json.dumps(data), encoding="utf-8")
 
     cfg = load_config(cfg_path)
@@ -348,10 +349,28 @@ def test_load_config_persists_new_default_fields_for_legacy_file(tmp_path: Path)
     assert cfg.speaker.voice_gender == "female"
     assert cfg.unknown_fallback.dispatch_enabled is False
     assert cfg.dispatch_guard.max_objects_per_dispatch == 1
+    assert cfg.three_bin_classifier.mode == "unknown_only"
     raw = json.loads(cfg_path.read_text(encoding="utf-8"))
     assert raw["speaker"]["voice_gender"] == "female"
     assert raw["unknown_fallback"]["dispatch_enabled"] is False
     assert raw["dispatch_guard"]["max_objects_per_dispatch"] == 1
+    assert raw["three_bin_classifier"]["mode"] == "unknown_only"
+
+
+def test_load_config_migrates_legacy_three_bin_all_class_mode(tmp_path: Path):
+    cfg_path = tmp_path / "config.json"
+    data = _default_dict()
+    data["three_bin_classifier"].pop("mode")
+    data["three_bin_classifier"]["unknown_only"] = False
+    cfg_path.write_text(json.dumps(data), encoding="utf-8")
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.three_bin_classifier.mode == "route_consensus"
+    assert cfg.three_bin_classifier.unknown_only is False
+    raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert raw["three_bin_classifier"]["mode"] == "route_consensus"
+    assert raw["three_bin_classifier"]["unknown_only"] is False
 
 
 def test_load_config_repairs_known_class_semantic_mappings(tmp_path: Path):
