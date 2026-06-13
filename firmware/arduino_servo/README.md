@@ -54,6 +54,9 @@ Open Serial Monitor at `9600` baud, line ending `Newline`.
 | `SORT:O:0.90` | firmware-mode same as `huuco` |
 | `SORT:R:0.90` | firmware-mode same as `voco` |
 | `SORT:I:0.90` | firmware-mode same as `taiche` |
+| `SORTSILENT:O` | move to Huu co angles without hardware sort audio, then `ACK:O` |
+| `SORTSILENT:R` | move to Vo co angles without hardware sort audio, then `ACK:R` |
+| `SORTSILENT:I` | move to Tai che angles without hardware sort audio, then `ACK:I` |
 | `AUDIO:5` | play Huu co sensor audio only, no servo, then `ACK:AUDIO:5` |
 | `AUDIO:6` | play Tai che sensor audio only, no servo, then `ACK:AUDIO:6` |
 | `AUDIO:7` | play Vo co sensor audio only, no servo, then `ACK:AUDIO:7` |

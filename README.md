@@ -422,7 +422,8 @@ The current real hardware profile follows the user-provided block diagram and re
 - Audio output defaults to the OPEN-SMART hardware speaker. Admin can switch
   Settings -> Am thanh / Loa phan loai to `Loa may tinh` and choose `Giong nu`
   or `Giong nam` for bundled MP3 playback. PC speech fires at UART send time,
-  not after ACK.
+  not after ACK. In PC-speaker mode the app sends `SORTSILENT:<O|R|I>` so the
+  firmware moves the servos without playing the hardware sort track.
 - Startup audio: OPEN-SMART track `1`.
 - OPEN-SMART Serial MP3 Player A wiring after real probe: Arduino TX `D5` to MP3 RX, Arduino RX `D4` from MP3 TX (`MP3:MODE:REVERSE`, `MP3RX` confirmed). Original D4/D5 primary mode remains available for diagnostics.
 - Audio protocol: select TF `7E 03 35 01 EF`, set volume `7E 03 31 <volume> EF`, play track `7E 04 41 00 <track> EF`.
