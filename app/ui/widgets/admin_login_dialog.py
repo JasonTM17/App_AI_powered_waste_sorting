@@ -25,6 +25,7 @@ class AdminLoginDialog(QDialog):
         self.token = ""
         self.identity: AuthIdentity | None = None
         self._worker: _LoginWorker | None = None
+        self._accept_after_worker_finished = False
         self.setWindowTitle("Đăng nhập Admin")
         self.setModal(True)
         self.setMinimumWidth(420)
@@ -79,17 +80,17 @@ class AdminLoginDialog(QDialog):
         self.btn_login.setText("Đang đăng nhập...")
         self.username.setEnabled(False)
         self.password.setEnabled(False)
+        self._accept_after_worker_finished = False
         worker = _LoginWorker(
             self.username.text(),
             self.password.text(),
         )
         self._worker = worker
         worker.finished_with_result.connect(self._finish_submit)
-        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(self._finish_worker)
         worker.start()
 
     def _finish_submit(self, result: DesktopAuthResult) -> None:
-        self._worker = None
         self.btn_login.setEnabled(True)
         self.btn_login.setText("Đăng nhập")
         self.username.setEnabled(True)
@@ -100,7 +101,19 @@ class AdminLoginDialog(QDialog):
             return
         self.token = result.token
         self.identity = result.identity
-        self.accept()
+        self._accept_after_worker_finished = True
+        if self._worker is None or not self._worker.isRunning():
+            self._accept_after_worker_finished = False
+            self.accept()
+
+    def _finish_worker(self) -> None:
+        worker = self._worker
+        self._worker = None
+        if worker is not None:
+            worker.deleteLater()
+        if self._accept_after_worker_finished:
+            self._accept_after_worker_finished = False
+            self.accept()
 
 
 class _LoginWorker(QThread):

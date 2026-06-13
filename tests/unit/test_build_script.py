@@ -16,3 +16,7 @@ def test_datas_returns_list(tmp_path, monkeypatch):
     icon_args = build_exe._icon_arg()
     assert icon_args[:1] == ["--icon"]
     assert icon_args[1].endswith("app.ico")
+    if sys.platform == "win32":
+        ssl_dlls = {path.name for path in build_exe._python_ssl_dlls()}
+        assert "libssl-3-x64.dll" in ssl_dlls
+        assert "libcrypto-3-x64.dll" in ssl_dlls

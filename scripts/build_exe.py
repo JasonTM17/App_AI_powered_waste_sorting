@@ -27,7 +27,7 @@ def _datas() -> list[str]:
             continue
         out.append(f"{src}{sep}{dst}")
     models = ROOT / "models"
-    if (models / "best.pt").exists():
+    if any(models.glob("*.pt")):
         out.append(f"{models}{sep}models")
     return out
 
@@ -37,6 +37,22 @@ def _icon_arg() -> list[str]:
     if icon.exists():
         return ["--icon", str(icon)]
     return []
+
+
+def _python_ssl_dlls() -> list[Path]:
+    dll_dir = Path(sys.base_prefix) / "DLLs"
+    return [p for p in (dll_dir / "libssl-3-x64.dll", dll_dir / "libcrypto-3-x64.dll") if p.exists()]
+
+
+def _repair_bundled_ssl_dlls() -> None:
+    """Keep Python's `_ssl.pyd` paired with the OpenSSL DLLs it was built for."""
+    target_dir = DIST / APP_NAME / "_internal"
+    if not target_dir.exists():
+        return
+    for src in _python_ssl_dlls():
+        dst = target_dir / src.name
+        shutil.copy2(src, dst)
+        print(f"[OK] bundled Python SSL DLL: {dst}")
 
 
 def main() -> int:
@@ -65,6 +81,7 @@ def main() -> int:
 
     print("PyInstaller args:", args)
     PyInstaller.__main__.run(args)
+    _repair_bundled_ssl_dlls()
     print(f"\n[OK] Build complete: {DIST / APP_NAME}")
 
     # Drop shortcuts at project root + Desktop so user doesn't have to

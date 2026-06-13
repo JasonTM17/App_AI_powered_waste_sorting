@@ -9,6 +9,7 @@ import numpy as np
 MIN_MEAN_BRIGHTNESS = 2.0
 MIN_NON_BLACK_RATIO = 0.01
 BLACK_PIXEL_THRESHOLD = 4.0
+MAX_QUALITY_SAMPLE_PIXELS = 160_000
 
 
 @dataclass(frozen=True)
@@ -34,10 +35,16 @@ def evaluate_frame_quality(frame: np.ndarray | None) -> FrameQuality:
     if width <= 0 or height <= 0:
         return FrameQuality(reason="invalid frame size")
 
-    if frame.ndim == 2:
-        gray = frame.astype(np.float32)
-    else:
-        gray = frame[..., :3].astype(np.float32).mean(axis=2)
+    try:
+        sample = _sample_frame_for_quality(frame)
+        if sample.ndim == 2:
+            gray = sample.astype(np.float32, copy=False)
+        else:
+            gray = sample[..., :3].astype(np.float32, copy=False).mean(axis=2)
+    except MemoryError:
+        return FrameQuality(width=width, height=height, reason="frame quality memory pressure")
+    except Exception as exc:
+        return FrameQuality(width=width, height=height, reason=f"frame quality error: {type(exc).__name__}")
 
     mean = float(gray.mean())
     variance = float(gray.var())
@@ -69,6 +76,15 @@ def evaluate_frame_quality(frame: np.ndarray | None) -> FrameQuality:
         usable=True,
         reason="ok",
     )
+
+
+def _sample_frame_for_quality(frame: np.ndarray) -> np.ndarray:
+    height, width = frame.shape[:2]
+    pixels = max(1, height * width)
+    if pixels <= MAX_QUALITY_SAMPLE_PIXELS:
+        return frame
+    stride = int(np.ceil(np.sqrt(pixels / MAX_QUALITY_SAMPLE_PIXELS)))
+    return frame[:: max(1, stride), :: max(1, stride)]
 
 
 def best_frame_quality(qualities: list[FrameQuality]) -> FrameQuality:

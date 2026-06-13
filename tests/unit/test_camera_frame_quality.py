@@ -20,3 +20,14 @@ def test_frame_quality_accepts_non_black_frame():
     assert quality.usable is True
     assert quality.mean_brightness > 2
     assert quality.non_black_ratio > 0.9
+
+
+def test_frame_quality_samples_large_frames():
+    frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+    frame[:, :, 1] = 160
+
+    quality = evaluate_frame_quality(frame)
+
+    assert quality.usable is True
+    assert quality.width == 1920
+    assert quality.height == 1080
