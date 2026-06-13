@@ -576,9 +576,10 @@
   "three_bin_classifier": {
     "enabled": false,
     "model_path": "models/three_bin_classifier.pt",
+    "mode": "route_consensus",
     "min_confidence": 0.72,
     "min_margin": 0.12,
-    "unknown_only": true,
+    "unknown_only": false,
     "min_crop_area_ratio": 0.003,
     "input_size": 224
   },

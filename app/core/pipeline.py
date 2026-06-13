@@ -812,7 +812,10 @@ class Pipeline:
                 for t in tracked:
                     self.tracker.mark_emitted(t.track_id)
             return detections_for_render
-        if self.cfg.three_bin_classifier.mode == "route_consensus":
+        if (
+            self.cfg.three_bin_classifier.enabled
+            and self.cfg.three_bin_classifier.mode == "route_consensus"
+        ):
             blocked_consensus = False
             for t in tracked:
                 if t.detection.route_consensus == "passed":
