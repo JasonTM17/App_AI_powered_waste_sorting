@@ -114,4 +114,6 @@ desktop.ini
 
 models/*.pt
 !models/.gitkeep
+!models/best.pt
+!models/new-class-specialist.pt
 .agents/
