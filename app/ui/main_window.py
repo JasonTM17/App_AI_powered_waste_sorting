@@ -25,8 +25,17 @@ from app.ui.widgets.empty_state import EmptyState
 from app.ui.widgets.sidebar import Sidebar
 from app.ui.widgets.title_bar import TitleBar
 
-NAV_ITEMS = ["Live", "Lịch sử", "Mapping", "Data", "Huấn luyện", "Nhật ký", "Cài đặt"]
-NAV_ICONS = ["recycle", "history", "mapping", "capture", "camera", "log", "settings"]
+NAV_ITEMS = [
+    "Live",
+    "Kiểm thử",
+    "Lịch sử",
+    "Mapping",
+    "Data",
+    "Huấn luyện",
+    "Nhật ký",
+    "Cài đặt",
+]
+NAV_ICONS = ["recycle", "snapshot", "history", "mapping", "capture", "camera", "log", "settings"]
 
 
 def _auto_heavy_page_load_enabled() -> bool:
@@ -83,11 +92,13 @@ class MainWindow(QMainWindow):
         body_layout.addWidget(self.title_bar)
 
         from app.ui.pages.live import LivePage
+        from app.ui.pages.recognition_test import RecognitionTestPage
         from app.ui.pages.system_log import SystemLogPage
 
         self.stack = QStackedWidget()
         self.stack.setObjectName("workspace")
         self.live_page = LivePage()
+        self.recognition_test_page = RecognitionTestPage()
         self.mapping_page = None
         self.history_page = None
         self.capture_page = None
@@ -95,27 +106,28 @@ class MainWindow(QMainWindow):
         self.settings_page = None
         self.system_log_page = SystemLogPage()
         self.stack.addWidget(self._stack_page(self.live_page))
-        for idx, label in enumerate(NAV_ITEMS[1:5], start=1):
-            if idx == 1 and history is not None:
+        self.stack.addWidget(self._stack_page(self.recognition_test_page))
+        for idx, label in enumerate(NAV_ITEMS[2:6], start=2):
+            if idx == 2 and history is not None:
                 from app.ui.pages.history import HistoryPage
 
                 self.history_page = HistoryPage(history)
                 self.stack.addWidget(self._stack_page(self.history_page))
-            elif idx == 2 and cfg is not None:
-                self._add_lazy_page(idx, label, "mapping_page", self._create_mapping_page)
             elif idx == 3 and cfg is not None:
-                self._add_lazy_page(idx, label, "capture_page", self._create_capture_page)
+                self._add_lazy_page(idx, label, "mapping_page", self._create_mapping_page)
             elif idx == 4 and cfg is not None:
+                self._add_lazy_page(idx, label, "capture_page", self._create_capture_page)
+            elif idx == 5 and cfg is not None:
                 self._add_lazy_page(idx, label, "training_page", self._create_training_page)
             else:
                 page = EmptyState("○", label, "Runtime chưa nạp đủ dữ liệu cho màn này.")
                 self.stack.addWidget(self._stack_page(page))
-        # tab 4 = system log (always available, doesn't need cfg)
+        # tab 6 = system log (always available, doesn't need cfg)
         self.stack.addWidget(self._stack_page(self.system_log_page))
         if cfg is not None:
-            self._add_lazy_page(6, NAV_ITEMS[6], "settings_page", self._create_settings_page)
+            self._add_lazy_page(7, NAV_ITEMS[7], "settings_page", self._create_settings_page)
         else:
-            page = EmptyState("⚙", NAV_ITEMS[6], "Runtime chưa nạp cấu hình, app vẫn chạy an toàn.")
+            page = EmptyState("⚙", NAV_ITEMS[7], "Runtime chưa nạp cấu hình, app vẫn chạy an toàn.")
             self.stack.addWidget(self._stack_page(page))
         self.sidebar.page_changed.connect(self.show_page)
         self.stack.currentChanged.connect(self._on_stack_changed)
@@ -264,12 +276,13 @@ class MainWindow(QMainWindow):
     def _page_for_index(self, index: int):
         return {
             0: self.live_page,
-            1: self.history_page,
-            2: self.mapping_page,
-            3: self.capture_page,
-            4: self.training_page,
-            5: self.system_log_page,
-            6: self.settings_page,
+            1: self.recognition_test_page,
+            2: self.history_page,
+            3: self.mapping_page,
+            4: self.capture_page,
+            5: self.training_page,
+            6: self.system_log_page,
+            7: self.settings_page,
         }.get(index)
 
     def _create_mapping_page(self):
@@ -303,9 +316,9 @@ class MainWindow(QMainWindow):
 
     def _load_page(self, index: int) -> None:
         page = self._page_for_index(index)
-        if index == 1 and page is not None:
+        if index == 2 and page is not None:
             page.request_reload()
-        elif index in {3, 4} and page is not None and _auto_heavy_page_load_enabled():
+        elif index in {4, 5} and page is not None and _auto_heavy_page_load_enabled():
             page.load_once()
 
     def _minimize_window(self) -> None:

@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
 
 from app.core.events import Detection
 from app.core.voice_pack import normalize_voice_gender, voice_pack_status
-from app.ui.widgets.recognition_test_panel import RecognitionTestPanel
 from app.ui.widgets.stat_card import StatCard
 from app.ui.widgets.video_view import VideoView
 from app.utils.paths import resource_path
@@ -69,10 +68,6 @@ class LivePage(QWidget):
     camera_toggled = Signal(bool)
     actuation_test_mode_toggled = Signal(bool)
     speaker_output_mode_changed = Signal(str)
-    recognition_test_start_requested = Signal(object)
-    recognition_test_pause_requested = Signal()
-    recognition_test_resume_requested = Signal()
-    recognition_test_abort_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -198,21 +193,6 @@ class LivePage(QWidget):
         self.speaker_status.setVisible(False)
         speaker_layout.addWidget(self.speaker_status, 1)
         root.addWidget(speaker_bar)
-
-        self.recognition_test_panel = RecognitionTestPanel()
-        self.recognition_test_panel.start_requested.connect(
-            self.recognition_test_start_requested.emit
-        )
-        self.recognition_test_panel.pause_requested.connect(
-            self.recognition_test_pause_requested.emit
-        )
-        self.recognition_test_panel.resume_requested.connect(
-            self.recognition_test_resume_requested.emit
-        )
-        self.recognition_test_panel.abort_requested.connect(
-            self.recognition_test_abort_requested.emit
-        )
-        root.addWidget(self.recognition_test_panel)
 
         self.warning = QLabel("")
         self.warning.setObjectName("warning-banner")
@@ -346,15 +326,6 @@ class LivePage(QWidget):
         message = str(text or "").strip()
         self.warning.setText(message)
         self.warning.setVisible(bool(message))
-
-    def set_recognition_test_state(self, payload: object) -> None:
-        self.recognition_test_panel.set_state(payload)
-
-    def set_recognition_test_trial(self, payload: object) -> None:
-        self.recognition_test_panel.set_trial(payload)
-
-    def set_recognition_test_action_result(self, ok: bool, message: str) -> None:
-        self.recognition_test_panel.set_action_result(ok, message)
 
     def set_speaker_output_mode(self, mode: str, emit: bool = False) -> None:
         normalized = "computer_speaker" if str(mode or "").strip() == "computer_speaker" else "hardware"

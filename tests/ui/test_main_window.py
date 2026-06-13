@@ -20,7 +20,7 @@ def test_main_window_no_runtime_data_uses_safe_empty_states(qtbot):
     window = MainWindow()
     qtbot.addWidget(window)
 
-    assert window.stack.count() == 7
+    assert window.stack.count() == 8
     assert len(window.findChildren(EmptyState)) == 5
     assert window.mapping_page is None
     assert window.capture_page is None
@@ -78,12 +78,13 @@ def test_main_window_exposes_manual_training_sidebar_when_config_ready(qtbot):
     qtbot.addWidget(window)
 
     assert "Huấn luyện" in NAV_ITEMS
+    assert "Kiểm thử" in NAV_ITEMS
     assert window.stack.count() == len(NAV_ITEMS)
     assert window.capture_page is None
     assert window.training_page is None
 
-    window.show_page(3)
     window.show_page(4)
+    window.show_page(5)
 
     assert isinstance(window.capture_page, CapturePage)
     assert isinstance(window.training_page, TrainingPage)
@@ -94,20 +95,20 @@ def test_training_sidebar_button_opens_manual_training_page(qtbot):
     window = MainWindow(cfg=AppConfig())
     qtbot.addWidget(window)
 
-    window.sidebar._buttons[4].click()
+    window.sidebar._buttons[5].click()
 
-    assert window.stack.currentIndex() == 4
+    assert window.stack.currentIndex() == 5
     assert isinstance(window.training_page, TrainingPage)
-    assert window.sidebar._buttons[4].isChecked() is True
+    assert window.sidebar._buttons[5].isChecked() is True
 
 
 def test_main_window_keeps_sidebar_active_when_stack_changes(qtbot):
     window = MainWindow(cfg=AppConfig())
     qtbot.addWidget(window)
 
-    window.stack.setCurrentIndex(3)
+    window.stack.setCurrentIndex(4)
 
-    assert window.sidebar._buttons[3].isChecked() is True
+    assert window.sidebar._buttons[4].isChecked() is True
 
     window.show_page(1)
 
@@ -137,11 +138,11 @@ def test_main_window_lazily_loads_data_and_training_pages(monkeypatch, qtbot):
     assert window.capture_page is None
     assert window.training_page is None
 
-    window.stack.setCurrentIndex(3)
+    window.stack.setCurrentIndex(4)
     assert calls == ["data"]
     assert isinstance(window.capture_page, CapturePage)
 
-    window.stack.setCurrentIndex(4)
+    window.stack.setCurrentIndex(5)
     assert calls == ["data", "training"]
     assert isinstance(window.training_page, TrainingPage)
 
@@ -152,12 +153,12 @@ def test_main_window_emits_page_created_for_lazy_operational_pages(qtbot):
     created: list[tuple[int, object]] = []
     window.page_created.connect(lambda index, page: created.append((index, page)))
 
-    window.show_page(2)
     window.show_page(3)
     window.show_page(4)
-    window.show_page(6)
+    window.show_page(5)
+    window.show_page(7)
 
-    assert [index for index, _page in created] == [2, 3, 4, 6]
+    assert [index for index, _page in created] == [3, 4, 5, 7]
     assert window.mapping_page is created[0][1]
     assert window.capture_page is created[1][1]
     assert window.training_page is created[2][1]
