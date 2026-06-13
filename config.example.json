@@ -437,8 +437,8 @@
     },
     {
       "class_name": "Dirty nylon bag",
-      "command": "R",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {
@@ -503,8 +503,8 @@
     },
     {
       "class_name": "Milk tea cup",
-      "command": "R",
-      "bin_index": 2,
+      "command": "I",
+      "bin_index": 3,
       "enabled": true
     },
     {

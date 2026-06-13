@@ -46,6 +46,7 @@ def test_category_examples_match_three_bin_rules():
     assert category_for_class("Styrofoam cup") == RECYCLABLE
     assert category_for_class("Face mask") == INORGANIC
     assert category_for_class("Milk tea cup") == RECYCLABLE
+    assert category_for_class("Dirty nylon bag") == RECYCLABLE
 
 
 def test_all_default_classes_are_known_for_config_repair():

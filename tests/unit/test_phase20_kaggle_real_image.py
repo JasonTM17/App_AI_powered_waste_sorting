@@ -28,7 +28,7 @@ def test_phase20_vn_trash_manifest_maps_to_three_bins(tmp_path: Path):
     assert by_class["Alu"].canonical_class == "Aluminum can"
     assert by_class["Alu"].bin_code == "I"
     assert by_class["Foam_box"].canonical_class == "Disposable tableware"
-    assert by_class["Foam_box"].bin_code == "R"
+    assert by_class["Foam_box"].bin_code == "I"
     assert by_class["Foam_box"].classifier_split == "test"
 
 

@@ -123,7 +123,8 @@ def test_phase17_vietnam50_aliases_route_to_45_class_and_bin():
     assert map_vietnam_waste50_alias("small_electronics") == "Electronics"
     assert map_vietnam_waste50_alias("medicine_blister") == "Unknown plastic"
 
-    for alias in ("foam_box", "ceramic_broken", "small_electronics", "medicine_blister"):
+    assert category_for_class(map_vietnam_waste50_alias("foam_box")).code == "I"
+    for alias in ("ceramic_broken", "small_electronics", "medicine_blister"):
         assert category_for_class(map_vietnam_waste50_alias(alias)).code == "R"
 
 

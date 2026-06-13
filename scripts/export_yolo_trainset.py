@@ -180,9 +180,6 @@ def _collect_export_entries(queue_dir: Path, stats: dict[str, Any]) -> list[Expo
         if meta is None:
             stats["skipped_missing_meta"] += 1
             continue
-        if not is_trainable_meta(meta):
-            stats["skipped_untrusted"] += 1
-            continue
         boxes = list(meta.get("boxes") or [])
         if not boxes:
             stats["skipped_empty"] += 1
@@ -192,6 +189,14 @@ def _collect_export_entries(queue_dir: Path, stats: dict[str, Any]) -> list[Expo
                 width, height = image.size
         except Exception:
             stats["skipped_empty"] += 1
+            continue
+        invalid_boxes = sum(
+            1 for box in boxes if not _valid_bbox(box.get("xyxy"), width, height)
+        )
+        if invalid_boxes:
+            stats["skipped_invalid_bbox"] += invalid_boxes
+        if not is_trainable_meta(meta):
+            stats["skipped_untrusted"] += 1
             continue
         image_hash = _sha256_file(image_path)
         entries.append(

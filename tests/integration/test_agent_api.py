@@ -1306,7 +1306,7 @@ def test_user_analytics_returns_range_chart_data_and_keeps_payload_safe(tmp_path
         assert top["cls_name"] == "Disposable tableware"
         assert top["count"] == 2
         route_counts = {item["command"]: item["count"] for item in body["route_totals"]}
-        assert route_counts == {"O": 0, "R": 2, "I": 1}
+        assert route_counts == {"O": 0, "R": 0, "I": 3}
         bin_three = next(item for item in body["bins"] if item["bin_index"] == 3)
         assert bin_three["percent"] == 42
         assert body["advisor_available"] is False

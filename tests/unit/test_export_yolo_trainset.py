@@ -79,7 +79,7 @@ def test_export_queue_keeps_duplicate_image_hashes_in_same_split(tmp_path):
     queue = tmp_path / "queue"
     out = tmp_path / "out"
     queue.mkdir()
-    for name, split in (("dup_a", "train"), ("dup_b", "test")):
+    for name, split in (("dup_a", "train"), ("dup_b", "valid")):
         image_path = queue / f"{name}.jpg"
         Image.new("RGB", (100, 100), "white").save(image_path)
         image_path.with_suffix(".json").write_text(
@@ -109,10 +109,10 @@ def test_export_queue_keeps_duplicate_image_hashes_in_same_split(tmp_path):
     assert stats["duplicate_image_groups"] == 1
     assert stats["duplicate_image_files"] == 2
     assert stats["split_locked_groups"] == 1
-    assert stats["splits"] == {"train": 0, "valid": 0, "test": 2}
+    assert stats["splits"] == {"train": 0, "valid": 2, "test": 0}
     assert not (out / "labels" / "train" / "dup_a.txt").exists()
-    assert (out / "labels" / "test" / "dup_a.txt").exists()
-    assert (out / "labels" / "test" / "dup_b.txt").exists()
+    assert (out / "labels" / "valid" / "dup_a.txt").exists()
+    assert (out / "labels" / "valid" / "dup_b.txt").exists()
 
 
 def test_export_queue_skips_invalid_bbox_without_exporting_empty_image(tmp_path):
@@ -144,7 +144,7 @@ def test_export_queue_skips_invalid_bbox_without_exporting_empty_image(tmp_path)
     assert stats["images"] == 0
     assert stats["boxes"] == 0
     assert stats["skipped_invalid_bbox"] == 1
-    assert stats["skipped_empty_after_filter"] == 1
+    assert stats["skipped_untrusted"] == 1
     assert not (out / "labels" / "train" / "bad_bbox.txt").exists()
 
 

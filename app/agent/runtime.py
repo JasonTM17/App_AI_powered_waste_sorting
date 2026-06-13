@@ -1794,6 +1794,7 @@ class AgentRuntime:
                     command,
                     detection.conf,
                     protocol=self.cfg.uart.protocol,
+                    silent=computer_speaker_enabled(self.cfg),
                 ).decode("utf-8").rstrip("\n")
             except ValueError:
                 serial_payload = None
