@@ -6103,7 +6103,7 @@ select option {
 @media (min-width: 761px) {
   .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar {
     align-items: center;
-    padding-inline: 12px;
+    padding-inline: 8px;
   }
 
   .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar .brand {
@@ -6118,10 +6118,11 @@ select option {
 
   .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar .nav-list {
     justify-items: center;
+    max-width: 52px;
     overflow-x: hidden;
     padding-right: 0;
     scrollbar-width: none;
-    width: 100%;
+    width: 52px;
   }
 
   .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar .nav-list::-webkit-scrollbar {
@@ -6135,11 +6136,12 @@ select option {
     border-radius: 12px;
     height: 54px;
     justify-content: center;
-    min-width: 56px;
+    max-width: 44px;
+    min-width: 44px;
     overflow: hidden;
     padding: 0;
     transform: none;
-    width: 56px;
+    width: 44px;
   }
 
   .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar .nav-item:hover,
