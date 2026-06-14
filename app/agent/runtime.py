@@ -1034,7 +1034,7 @@ class AgentRuntime:
             pipeline = self._pipeline
         if pipeline is not None:
             pipeline.set_hardware_dispatch_enabled(bool(enabled))
-            pipeline.reset_dispatch_state()
+            pipeline.reset_dispatch_state(arm_immediately=bool(enabled))
         state = "enabled" if enabled else "disabled"
         logger.info("actuation test mode {}", state)
         return self.actuation_test_mode()

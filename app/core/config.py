@@ -141,7 +141,7 @@ class UnknownObjectFallbackConfig(BaseModel):
 
 
 class DispatchGuardConfig(BaseModel):
-    min_sort_interval_seconds: float = Field(12.0, ge=0.0, le=300.0)
+    min_sort_interval_seconds: float = Field(0.0, ge=0.0, le=300.0)
     busy_settle_seconds: float = Field(1.0, ge=0.0, le=30.0)
     min_stable_frames: int = Field(3, ge=1, le=30)
     empty_rearm_seconds: float = Field(2.0, ge=0.0, le=60.0)
@@ -197,7 +197,7 @@ def default_unknown_object_fallback_config() -> UnknownObjectFallbackConfig:
 
 def default_dispatch_guard_config() -> DispatchGuardConfig:
     return DispatchGuardConfig(
-        min_sort_interval_seconds=12.0,
+        min_sort_interval_seconds=0.0,
         busy_settle_seconds=1.0,
         min_stable_frames=3,
         empty_rearm_seconds=2.0,

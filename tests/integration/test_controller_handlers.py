@@ -67,6 +67,7 @@ class _PipelineSpy:
         self.cfg = None
         self.dispatch_enabled = None
         self.reset_count = 0
+        self.reset_arm_immediately = None
 
     def set_uart(self, uart):
         self.uart = uart
@@ -80,8 +81,9 @@ class _PipelineSpy:
     def set_hardware_dispatch_enabled(self, enabled):
         self.dispatch_enabled = enabled
 
-    def reset_dispatch_state(self):
+    def reset_dispatch_state(self, *, arm_immediately=False):
         self.reset_count += 1
+        self.reset_arm_immediately = arm_immediately
 
 
 class _FakeUartWorker(QThread):
@@ -427,12 +429,14 @@ def test_actuation_test_mode_controls_pipeline_dispatch(tmp_path):
     assert controller.is_actuation_test_mode_enabled() is True
     assert spy.dispatch_enabled is True
     assert spy.reset_count == 1
+    assert spy.reset_arm_immediately is True
 
     controller.set_actuation_test_mode(False)
 
     assert controller.is_actuation_test_mode_enabled() is False
     assert spy.dispatch_enabled is False
     assert spy.reset_count == 2
+    assert spy.reset_arm_immediately is False
 
 
 def test_laptop_voice_warning_previews_warning_audio(tmp_path):

@@ -56,6 +56,7 @@ const unsigned long SENSOR_AUDIO_COOLDOWN_MS = 2000;
 const unsigned long CALIBRATION_HOLD_MS = 1800;
 const unsigned long PRE_SORT_HOME_SETTLE_MS = 0;
 const unsigned long RETURN_SETTLE_MS = 250;
+const unsigned long RETURN_STAGE_SETTLE_MS = 100;
 const unsigned long MP3_RESPONSE_WINDOW_MS = 260;
 const unsigned long SERVO_ATTACH_SETTLE_MS = 100;
 const int SERVO_MOVE_STEP_DEGREES = 2;
@@ -310,6 +311,19 @@ void move_to_wait() {
   move_servos_smooth(servoAWait, servoBWait);
 }
 
+void return_to_wait_staged() {
+  // Level the dump axis before rotating the route axis back to center. Moving
+  // both under load can twist the linkage and leave the tray visibly shifted.
+  move_servos_smooth(servoACurrent, servoBWait);
+  delay_with_sensor_polling(RETURN_STAGE_SETTLE_MS);
+  move_servos_smooth(servoAWait, servoBWait);
+  delay_with_sensor_polling(RETURN_SETTLE_MS);
+  servoA.write(servoAWait);
+  servoB.write(servoBWait);
+  servoACurrent = servoAWait;
+  servoBCurrent = servoBWait;
+}
+
 bool is_uint_string(const String &value) {
   if (value.length() == 0) {
     return false;
@@ -403,14 +417,15 @@ void run_sort(char cmd, bool playAudio) {
   }
   move_servos_smooth(servoAValue, servoBValue);
   delay_with_sensor_polling(SORT_HOLD_MS);
-  move_to_wait();
-  delay(RETURN_SETTLE_MS);
+  return_to_wait_staged();
   idle_servos();
   sortInProgress = false;
-  flush_pending_sensor_audio();
 
   Serial.print(F("ACK:"));
   Serial.println(cmd);
+  // ACK as soon as the tray is back at HOME. Deferred proximity audio can
+  // take another MP3 response window and must not consume the app ACK budget.
+  flush_pending_sensor_audio();
 }
 
 void run_angle_test(int servoAValue, int servoBValue) {
@@ -421,8 +436,7 @@ void run_angle_test(int servoAValue, int servoBValue) {
 
   move_servos_smooth(servoAValue, servoBValue);
   delay(CALIBRATION_HOLD_MS);
-  move_to_wait();
-  delay(RETURN_SETTLE_MS);
+  return_to_wait_staged();
   idle_servos();
 
   Serial.print(F("ACK:ANGLE:"));
@@ -456,8 +470,7 @@ void run_sort_angle_test(char cmd, int servoAValue, int servoBValue) {
   delay_with_sensor_polling(PRE_SORT_HOME_SETTLE_MS);
   move_servos_smooth(servoAValue, servoBValue);
   delay_with_sensor_polling(SORT_HOLD_MS);
-  move_to_wait();
-  delay(RETURN_SETTLE_MS);
+  return_to_wait_staged();
   idle_servos();
   sortInProgress = false;
   flush_pending_sensor_audio();

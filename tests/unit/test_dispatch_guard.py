@@ -65,6 +65,43 @@ def test_first_stable_object_dispatches_after_empty_rearm():
     assert guard.state == "DETECTING"
 
 
+def test_first_stable_object_dispatches_immediately_when_auto_sort_is_enabled():
+    guard = _guard()
+    guard.reset(arm_immediately=True)
+
+    decision = guard.evaluate(
+        track_id=1,
+        stable_frames=3,
+        in_roi=True,
+        roi_ready=True,
+        now=0.1,
+    )
+
+    assert decision.allowed is True
+    assert guard.state == "DETECTING"
+
+
+def test_immediate_first_dispatch_still_requires_empty_rearm_after_ack():
+    guard = _guard()
+    guard.reset(arm_immediately=True)
+    guard.begin_dispatch(track_id=1, now=0.1, ack_timeout_seconds=0)
+    guard.complete_dispatch(track_id=1, now=0.2)
+
+    for index in range(20):
+        guard.observe_frame(has_visible_object=True, roi_ready=True, now=1.3 + index * 0.25)
+
+    decision = guard.evaluate(
+        track_id=2,
+        stable_frames=3,
+        in_roi=True,
+        roi_ready=True,
+        now=10.0,
+    )
+
+    assert decision.allowed is False
+    assert decision.reason == "waiting empty tray"
+
+
 def test_busy_blocks_until_ack_timeout_and_settle():
     guard = _guard()
     _arm(guard)

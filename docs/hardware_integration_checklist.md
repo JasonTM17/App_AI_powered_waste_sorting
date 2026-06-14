@@ -148,8 +148,9 @@ Before using camera-driven actuation with real waste, confirm all items below:
 1. Enable Actuation Test Mode.
 2. In Settings, enable ROI and set `x/y/width/height` around only the tray.
    ROI width and height must be greater than zero.
-3. Start camera live with an empty tray and wait at least 2 seconds / 10 frames
-   so the dispatch guard can arm.
+3. Start camera live and enable automatic sorting. The first valid object may
+   already be on the tray; it dispatches after 3 stable frames. After every ACK,
+   later objects still require an empty tray for 2 seconds / 10 frames.
 4. Place one representative item at a time inside the ROI:
    - Huu co: `Organic`.
    - Tai che: `Plastic bottle`, `Paper`, `Disposable tableware`, dirty nylon,
@@ -167,7 +168,7 @@ Before using camera-driven actuation with real waste, confirm all items below:
 6. Verify the latest three history rows contain class, group, bin, command, payload, ACK, RTT, timestamp.
 7. Leave the object visible in the tray after the first dump. Confirm no second
    camera-driven UART command is sent until the tray is empty for the re-arm
-   period and the global 12 second cooldown has passed.
+   period has passed.
 8. Move the object outside the ROI while still visible in camera. Confirm Live
    may render it, but status shows a guard reason such as `outside ROI` and no
    UART command is sent.

@@ -914,8 +914,10 @@ class AppController(QObject):
     def _set_auto_sort_enabled(self, enabled: bool) -> None:
         self._actuation_test_enabled = bool(enabled)
         if self._pipeline is not None:
+            self._pipeline.reset_dispatch_state(
+                arm_immediately=self._actuation_test_enabled,
+            )
             self._configure_camera_dispatch()
-            self._pipeline.reset_dispatch_state()
         self.actuation_mode_changed.emit(self._actuation_test_enabled)
 
     def set_actuation_test_mode(self, enabled: bool) -> None:
@@ -950,8 +952,8 @@ class AppController(QObject):
         logger.info("desktop automatic sorting {}", state)
         msg = (
             f"Phân loại tự động đã {state}. "
-            "Khi trạng thái Sẵn sàng, đặt một vật vào ROI; app sẽ tự nhận diện, "
-            "phát âm thanh, đổ rác và chờ khay trống."
+            "Vật đang nằm trong ROI sẽ được đổ ngay sau khi nhận diện ổn định; "
+            "sau ACK app chờ servo về HOME và khay trống rồi tự mở lượt kế tiếp."
         )
         self.test_uart_result.emit(
             True,

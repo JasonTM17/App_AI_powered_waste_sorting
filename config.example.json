@@ -555,7 +555,7 @@
     "warmup_frames": 6
   },
   "dispatch_guard": {
-    "min_sort_interval_seconds": 12.0,
+    "min_sort_interval_seconds": 0.0,
     "busy_settle_seconds": 1.0,
     "min_stable_frames": 3,
     "empty_rearm_seconds": 2.0,

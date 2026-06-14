@@ -222,10 +222,10 @@ class Pipeline:
         self._foreground_warmup_frames = max(1, int(warmup_frames))
         self._reset_foreground_gate()
 
-    def reset_dispatch_state(self) -> None:
+    def reset_dispatch_state(self, *, arm_immediately: bool = False) -> None:
         self.tracker.reset()
         self._unknown_fallback.reset()
-        self._dispatch_guard.reset()
+        self._dispatch_guard.reset(arm_immediately=arm_immediately)
         self._track_to_row.clear()
         self._track_to_speech.clear()
         self._last_multi_class_warning_at = 0.0

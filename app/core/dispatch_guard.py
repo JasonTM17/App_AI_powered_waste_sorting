@@ -24,7 +24,7 @@ class DispatchGuard:
     def __init__(
         self,
         *,
-        min_sort_interval_seconds: float = 12.0,
+        min_sort_interval_seconds: float = 0.0,
         busy_settle_seconds: float = 1.0,
         min_stable_frames: int = 3,
         empty_rearm_seconds: float = 2.0,
@@ -54,15 +54,15 @@ class DispatchGuard:
         self.empty_rearm_seconds = max(0.0, float(empty_rearm_seconds))
         self.empty_rearm_frames = max(1, int(empty_rearm_frames))
 
-    def reset(self) -> None:
-        self._armed = False
+    def reset(self, *, arm_immediately: bool = False) -> None:
+        self._armed = bool(arm_immediately)
         self._empty_since: float | None = None
         self._empty_frames = 0
         self._last_dispatch_started_at: float | None = None
         self._busy_track_id: int | None = None
         self._busy_until = 0.0
-        self.state: AutoSortState = "WAITING_EMPTY"
-        self.last_reason = "waiting empty tray"
+        self.state: AutoSortState = "READY" if self._armed else "WAITING_EMPTY"
+        self.last_reason = "" if self._armed else "waiting empty tray"
 
     def observe_frame(self, *, has_visible_object: bool, roi_ready: bool, now: float) -> None:
         self._expire_busy(now)

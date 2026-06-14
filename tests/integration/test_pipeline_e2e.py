@@ -329,6 +329,21 @@ def test_pipeline_routes_unknown_with_legacy_common_reference_alias(tmp_path, mo
     assert uart.sent == [(1, "I", detections[0].conf)]
 
 
+def test_pipeline_dispatches_object_already_on_tray_when_auto_sort_is_enabled(tmp_path):
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, _OnePenInfer(), uart, tmp_path / "h.db")
+    p.reset_dispatch_state(arm_immediately=True)
+    frame = np.zeros((220, 320, 3), dtype=np.uint8)
+
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [d.cls_name for d in detections] == ["Pen"]
+    assert uart.sent == [(1, "R", detections[0].conf)]
+
+
 def test_pipeline_corrects_large_cardboard_cloth_to_textile_reference(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")

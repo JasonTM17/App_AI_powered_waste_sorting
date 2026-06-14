@@ -72,10 +72,12 @@ Open Serial Monitor at `9600` baud, line ending `Newline`.
 The firmware logs `MP3TX:<hex>` before each MP3 command and best-effort `MP3RX:<hex>` if the red board replies. Proximity sensors send `PROX:O`, `PROX:I`, or `PROX:R` and play tracks `5/6/7`. Track `8` is reserved for the app multi-object warning. They are edge-triggered with cooldown, do not call sort logic, and do not move D6/D7. If a sensor fires while sorting, prox audio is queued until the servo returns home.
 
 The firmware keeps `SERVO_DETACH_WHEN_IDLE=false`. Motion uses 2-degree steps
-at 10 ms intervals, including the return to HOME. The dump angle is held for
-1.8 seconds and HOME settles for 250 ms before ACK. The servos then keep holding
-HOME so the tray remains level. The full cycle stays below the desktop's
-4.5-second ACK timeout.
+at 10 ms intervals. On return, D7 first levels the dump axis, then D6 returns
+the route axis to center; both servos are written to the exact HOME pulse again
+before ACK and remain energized. This avoids twisting the loaded linkage and
+leaving the tray shifted. The full cycle stays below the desktop's 4.5-second
+ACK timeout. Any proximity audio queued during movement plays only after ACK so
+the MP3 response window cannot cause a false desktop timeout.
 
 App `plain_group` mode keeps command meaning aligned end-to-end: app `R` sends `voco\n` and expects firmware `ACK:R`; app `I` sends `taiche\n` and expects firmware `ACK:I`.
 
