@@ -91,7 +91,7 @@ PRE_SORT_HOME_SETTLE_MS = 0
 RETURN_SETTLE_MS = 250
 SERVO_MOVE_STEP_DEGREES = 2
 SERVO_MOVE_STEP_MS = 10
-SERVO_IDLE_POLICY = "detach"
+SERVO_IDLE_POLICY = "hold"
 
 _ROUTES_BY_COMMAND: dict[str, HardwareRoute] = {route.command: route for route in ROUTES}
 

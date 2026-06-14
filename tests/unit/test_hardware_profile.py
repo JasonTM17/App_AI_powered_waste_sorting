@@ -28,7 +28,7 @@ def test_hardware_profile_routes_are_exact():
         "return_settle_ms": 250,
         "move_step_degrees": 2,
         "move_step_ms": 10,
-        "idle_policy": "detach",
+        "idle_policy": "hold",
     }
     assert profile["routes"] == [
         {

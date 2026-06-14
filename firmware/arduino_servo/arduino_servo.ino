@@ -60,7 +60,8 @@ const unsigned long MP3_RESPONSE_WINDOW_MS = 260;
 const unsigned long SERVO_ATTACH_SETTLE_MS = 100;
 const int SERVO_MOVE_STEP_DEGREES = 2;
 const unsigned long SERVO_MOVE_STEP_MS = 10;
-const bool SERVO_DETACH_WHEN_IDLE = true;
+// Keep both servos energized at HOME so the tray cannot drift after a dump.
+const bool SERVO_DETACH_WHEN_IDLE = false;
 
 Servo servoA;
 Servo servoB;

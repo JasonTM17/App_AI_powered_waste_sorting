@@ -75,8 +75,9 @@ Close Serial Monitor before app tests.
 - Current firmware compiled and uploaded as `arduino:avr:uno`.
 - Hardware audio-only tracks `2`, `4`, `3`, and warning track `8` returned
   `MP3RX:*` plus their matching `ACK:AUDIO:<track>`.
-- Servo motion now uses 2-degree steps at 10ms intervals, including the return
-  to HOME, then settles for 250ms and detaches to reduce post-sort vibration.
+- Servo motion uses 2-degree steps at 10ms intervals, including the return to
+  HOME, then settles for 250ms. The current production firmware keeps both
+  servos energized at HOME so the tray cannot drift after a dump.
 - Measured full-cycle ACK times: `O=3500ms`, `R=3390ms`, `I=3500ms`, all below
   the desktop `4500ms` timeout.
 - Evidence: `audit/hardware/uart-audio-only-post-flash-20260613.json` and

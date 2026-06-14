@@ -474,7 +474,8 @@ The current real hardware profile follows the user-provided block diagram and re
 - If UART config is blank and exactly one USB/Arduino/CH340 port is found, the app auto-selects and saves it.
 - UART ACK timeout defaults to `4500ms`. Firmware holds the dump angle for
   `1800ms`, returns to HOME in 2-degree/10ms steps, settles for `250ms`, then
-  detaches the servos. Measured O/R/I ACK times remain below `3500ms`.
+  keeps both servos energized at HOME so the tray cannot drift. Measured O/R/I
+  ACK times remain below `3500ms`.
 - Admin desktop/web can test each bin and see payload, port, ACK/no ACK, and elapsed time.
 - Admin web also has raw D6/D7 calibration tests for replaying candidate positions before locking a production angle.
 - If UART is off, UI shows `UART OFF, khong gui xuong phan cung`.
