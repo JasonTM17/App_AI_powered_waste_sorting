@@ -10,7 +10,14 @@ from PySide6.QtWidgets import QAbstractScrollArea, QLabel, QPushButton, QSizePol
 
 from app.core.config import AppConfig
 from app.core.history import HistoryService
-from app.ui.main_window import NAV_ITEMS, MainWindow
+from app.ui.main_window import (
+    CAPTURE_PAGE_INDEX,
+    MAPPING_PAGE_INDEX,
+    NAV_ITEMS,
+    SETTINGS_PAGE_INDEX,
+    TRAINING_PAGE_INDEX,
+    MainWindow,
+)
 from app.ui.pages.capture import CapturePage
 from app.ui.pages.training import TrainingPage
 from app.ui.widgets.empty_state import EmptyState
@@ -153,12 +160,17 @@ def test_main_window_emits_page_created_for_lazy_operational_pages(qtbot):
     created: list[tuple[int, object]] = []
     window.page_created.connect(lambda index, page: created.append((index, page)))
 
-    window.show_page(3)
-    window.show_page(4)
-    window.show_page(5)
-    window.show_page(7)
+    window.show_page(MAPPING_PAGE_INDEX)
+    window.show_page(CAPTURE_PAGE_INDEX)
+    window.show_page(TRAINING_PAGE_INDEX)
+    window.show_page(SETTINGS_PAGE_INDEX)
 
-    assert [index for index, _page in created] == [3, 4, 5, 7]
+    assert [index for index, _page in created] == [
+        MAPPING_PAGE_INDEX,
+        CAPTURE_PAGE_INDEX,
+        TRAINING_PAGE_INDEX,
+        SETTINGS_PAGE_INDEX,
+    ]
     assert window.mapping_page is created[0][1]
     assert window.capture_page is created[1][1]
     assert window.training_page is created[2][1]

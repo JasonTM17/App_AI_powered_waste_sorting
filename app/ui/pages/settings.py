@@ -429,11 +429,7 @@ class SettingsPage(QWidget):
             btn = QPushButton(f"Test {display_label}")
             btn.setObjectName("secondary")
             btn.clicked.connect(
-                lambda _checked=False, cmd=route.command: self.test_hardware_requested.emit(
-                    self._current_uart_port(),
-                    int(self.uart_baud.currentText()),
-                    cmd,
-                )
+                lambda _checked=False, cmd=route.command: self._request_hardware_test(cmd)
             )
             row.addWidget(btn)
             row.addStretch()
@@ -660,6 +656,14 @@ class SettingsPage(QWidget):
     def set_uart_test_result(self, ok: bool, message: str) -> None:
         prefix = "OK" if ok else "LỖI"
         self.uart_test_result.setText(f"{prefix}: {message}")
+
+    def _request_hardware_test(self, command: str) -> None:
+        self.uart_test_result.setText(f"ĐANG GỬI: {command}...")
+        self.test_hardware_requested.emit(
+            self._current_uart_port(),
+            int(self.uart_baud.currentText()),
+            command,
+        )
 
     def set_actuation_test_mode(self, enabled: bool) -> None:
         self.actuation_mode.blockSignals(True)

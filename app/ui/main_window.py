@@ -36,6 +36,12 @@ NAV_ITEMS = [
     "Cài đặt",
 ]
 NAV_ICONS = ["recycle", "snapshot", "history", "mapping", "capture", "camera", "log", "settings"]
+HISTORY_PAGE_INDEX = 2
+MAPPING_PAGE_INDEX = 3
+CAPTURE_PAGE_INDEX = 4
+TRAINING_PAGE_INDEX = 5
+SYSTEM_LOG_PAGE_INDEX = 6
+SETTINGS_PAGE_INDEX = 7
 
 
 def _auto_heavy_page_load_enabled() -> bool:
@@ -108,16 +114,16 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self._stack_page(self.live_page))
         self.stack.addWidget(self._stack_page(self.recognition_test_page))
         for idx, label in enumerate(NAV_ITEMS[2:6], start=2):
-            if idx == 2 and history is not None:
+            if idx == HISTORY_PAGE_INDEX and history is not None:
                 from app.ui.pages.history import HistoryPage
 
                 self.history_page = HistoryPage(history)
                 self.stack.addWidget(self._stack_page(self.history_page))
-            elif idx == 3 and cfg is not None:
+            elif idx == MAPPING_PAGE_INDEX and cfg is not None:
                 self._add_lazy_page(idx, label, "mapping_page", self._create_mapping_page)
-            elif idx == 4 and cfg is not None:
+            elif idx == CAPTURE_PAGE_INDEX and cfg is not None:
                 self._add_lazy_page(idx, label, "capture_page", self._create_capture_page)
-            elif idx == 5 and cfg is not None:
+            elif idx == TRAINING_PAGE_INDEX and cfg is not None:
                 self._add_lazy_page(idx, label, "training_page", self._create_training_page)
             else:
                 page = EmptyState("○", label, "Runtime chưa nạp đủ dữ liệu cho màn này.")
@@ -125,9 +131,18 @@ class MainWindow(QMainWindow):
         # tab 6 = system log (always available, doesn't need cfg)
         self.stack.addWidget(self._stack_page(self.system_log_page))
         if cfg is not None:
-            self._add_lazy_page(7, NAV_ITEMS[7], "settings_page", self._create_settings_page)
+            self._add_lazy_page(
+                SETTINGS_PAGE_INDEX,
+                NAV_ITEMS[SETTINGS_PAGE_INDEX],
+                "settings_page",
+                self._create_settings_page,
+            )
         else:
-            page = EmptyState("⚙", NAV_ITEMS[7], "Runtime chưa nạp cấu hình, app vẫn chạy an toàn.")
+            page = EmptyState(
+                "⚙",
+                NAV_ITEMS[SETTINGS_PAGE_INDEX],
+                "Runtime chưa nạp cấu hình, app vẫn chạy an toàn.",
+            )
             self.stack.addWidget(self._stack_page(page))
         self.sidebar.page_changed.connect(self.show_page)
         self.stack.currentChanged.connect(self._on_stack_changed)
@@ -277,12 +292,12 @@ class MainWindow(QMainWindow):
         return {
             0: self.live_page,
             1: self.recognition_test_page,
-            2: self.history_page,
-            3: self.mapping_page,
-            4: self.capture_page,
-            5: self.training_page,
-            6: self.system_log_page,
-            7: self.settings_page,
+            HISTORY_PAGE_INDEX: self.history_page,
+            MAPPING_PAGE_INDEX: self.mapping_page,
+            CAPTURE_PAGE_INDEX: self.capture_page,
+            TRAINING_PAGE_INDEX: self.training_page,
+            SYSTEM_LOG_PAGE_INDEX: self.system_log_page,
+            SETTINGS_PAGE_INDEX: self.settings_page,
         }.get(index)
 
     def _create_mapping_page(self):

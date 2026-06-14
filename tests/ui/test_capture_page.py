@@ -7,6 +7,7 @@ import numpy as np
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QPushButton
 
 from app.core.config import AppConfig, ClassMapping
@@ -200,6 +201,47 @@ def test_capture_page_uses_catalog_stats_without_rescanning_all_metadata(
 
     assert page.grid.count() == 1
     assert "1 ảnh" in page.counter.text()
+
+
+def test_capture_page_populates_and_applies_source_and_class_filters(tmp_path, qtbot):
+    dataset_root = tmp_path / "dataset"
+    paper = _make_queue_item(
+        dataset_root,
+        stem="manual_paper",
+        source="manual_import",
+        cls_name="Paper",
+        reviewed=True,
+    )
+    _make_queue_item(
+        dataset_root,
+        stem="auto_can",
+        source="auto_low_conf",
+        cls_id=1,
+        cls_name="Aluminum can",
+        reviewed=False,
+    )
+    catalog_path = tmp_path / "dataset.db"
+    catalog = DatasetCatalog(catalog_path)
+    try:
+        catalog.index_queue(dataset_root / "low_conf_queue")
+    finally:
+        catalog.close()
+
+    page = CapturePage(_config_for_dataset(dataset_root))
+    page._catalog_path = catalog_path
+    qtbot.addWidget(page)
+    page.reload()
+    qtbot.waitUntil(lambda: not page._pending_visible_files, timeout=5000)
+
+    assert page.filter_source.findData("manual_import") >= 0
+    assert page.filter_class.findData("Paper") >= 0
+
+    page.filter_source.setCurrentIndex(page.filter_source.findData("manual_import"))
+    page.filter_class.setCurrentIndex(page.filter_class.findData("Paper"))
+    qtbot.waitUntil(lambda: not page._pending_visible_files, timeout=5000)
+
+    assert page.grid.count() == 1
+    assert page.grid.item(0).data(Qt.ItemDataRole.UserRole) == str(paper)
 
 
 def test_capture_page_does_not_expose_manual_training_controls(tmp_path, qtbot):

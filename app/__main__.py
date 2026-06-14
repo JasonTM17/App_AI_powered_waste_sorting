@@ -14,7 +14,13 @@ from app.core.config import load_config, save_config, startup_hardware_speaker_c
 from app.core.history import HistoryService
 from app.ui.controller import AppController
 from app.ui.live_status import live_ack_status_text, multi_object_warning_text
-from app.ui.main_window import MainWindow
+from app.ui.main_window import (
+    CAPTURE_PAGE_INDEX,
+    MAPPING_PAGE_INDEX,
+    SETTINGS_PAGE_INDEX,
+    TRAINING_PAGE_INDEX,
+    MainWindow,
+)
 from app.ui.widgets.theme import apply_theme
 from app.utils.logging import logger, setup_logging
 from app.utils.paths import config_path, db_path, example_config_path
@@ -286,6 +292,10 @@ def main(*, require_admin_login: bool = True) -> int:
             from datetime import datetime
 
             from app.core.config import ClassMapping
+            from app.core.three_bin_classifier import (
+                parse_three_bin_class_name,
+                three_bin_display_name,
+            )
             from app.core.uart_protocol import encode_sort
             from app.core.waste_categories import (
                 category_for_command,
@@ -294,10 +304,21 @@ def main(*, require_admin_login: bool = True) -> int:
 
             ts = datetime.now().strftime("%H:%M:%S")
             for d in detections:
+                display_name = three_bin_display_name(d.cls_name)
+                three_bin_command = parse_three_bin_class_name(d.cls_name)
                 mapping = next(
                     (m for m in controller.cfg.mappings if m.enabled and m.class_name == d.cls_name),
                     None,
                 )
+                if mapping is None and three_bin_command is not None:
+                    category = category_for_command(three_bin_command)
+                    if category is not None:
+                        mapping = ClassMapping(
+                            class_name=d.cls_name,
+                            command=category.code,
+                            bin_index=category.bin_index,
+                            enabled=True,
+                        )
                 fallback = controller.cfg.unknown_fallback
                 if mapping is None and d.cls_name == fallback.class_name:
                     mapping = ClassMapping(
@@ -334,7 +355,9 @@ def main(*, require_admin_login: bool = True) -> int:
                         f"{mode}; {category.name}; bin {bin_index}; "
                         f"payload {payload}; ACK {ack}"
                     )
-                window.live_page.append_detection(d.cls_name, d.conf, ts, detail)
+                    if three_bin_command is not None:
+                        detail = f"Phân loại dự phòng 3 thùng; {detail}"
+                window.live_page.append_detection(display_name, d.conf, ts, detail)
 
     controller.frame_processed.connect(_on_frame)
     window.live_page.snapshot_requested.connect(controller.take_snapshot)
@@ -427,13 +450,13 @@ def main(*, require_admin_login: bool = True) -> int:
         )
 
     def _wire_lazy_page(index: int, page) -> None:
-        if index == 2:
+        if index == MAPPING_PAGE_INDEX:
             _wire_mapping_page(page)
-        elif index == 3:
+        elif index == CAPTURE_PAGE_INDEX:
             _wire_capture_page(page)
-        elif index == 4:
+        elif index == TRAINING_PAGE_INDEX:
             _wire_training_page(page)
-        elif index == 6:
+        elif index == SETTINGS_PAGE_INDEX:
             _wire_settings_page(page)
 
     window.page_created.connect(_wire_lazy_page)

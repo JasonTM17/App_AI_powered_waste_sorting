@@ -318,6 +318,7 @@ class CapturePage(QWidget):
 
     def _update_stats(self, displayed: int | None = None) -> None:
         summary, catalog_total = self._summary_for_stats()
+        self._refresh_filter_options(summary)
         catalog_text = f"CSDL: {catalog_total} bản ghi"
         if catalog_total != summary["images"]:
             catalog_text += " (lệch, bấm Đồng bộ CSDL)"
@@ -550,7 +551,41 @@ class CapturePage(QWidget):
 
     def _invalidate_display_cache_and_reload(self) -> None:
         self._display_files_cache = None
-        self._update_grid_ui()
+        self.reload()
+
+    def _refresh_filter_options(self, summary: dict) -> None:
+        sources = [
+            (f"{name} ({count})", name)
+            for name, count in sorted((summary.get("sources_dict") or {}).items())
+        ]
+        classes = [
+            (f"{name} ({count})", name)
+            for name, count in sorted((summary.get("classes") or {}).items())
+        ]
+        self._replace_filter_items(self.filter_source, "Tất cả nguồn", sources)
+        self._replace_filter_items(self.filter_class, "Tất cả nhãn", classes)
+
+    @staticmethod
+    def _replace_filter_items(
+        combo: SafeComboBox,
+        default_label: str,
+        items: list[tuple[str, str]],
+    ) -> None:
+        current = str(combo.currentData() or "")
+        expected_values = ["", *(value for _label, value in items)]
+        actual_values = [str(combo.itemData(index) or "") for index in range(combo.count())]
+        if actual_values == expected_values:
+            return
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItem(default_label, "")
+            for label, value in items:
+                combo.addItem(label, value)
+            selected = combo.findData(current)
+            combo.setCurrentIndex(selected if selected >= 0 else 0)
+        finally:
+            combo.blockSignals(False)
 
     def _display_files(self, qdir: Path) -> list[Path]:
         key_path = qdir.resolve()

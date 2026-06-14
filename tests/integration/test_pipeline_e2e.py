@@ -11,7 +11,11 @@ from app.core.config import MULTI_CLASS_WARNING_TEXT, AppConfig, ClassMapping
 from app.core.events import Detection
 from app.core.inference import YOLO_SPECIALIST_SOURCE
 from app.core.pipeline import Pipeline
-from app.core.three_bin_classifier import THREE_BIN_SOURCE, ThreeBinPrediction
+from app.core.three_bin_classifier import (
+    THREE_BIN_SOURCE,
+    ThreeBinPrediction,
+    three_bin_display_name,
+)
 from app.core.waste_categories import category_for_command
 
 
@@ -447,6 +451,36 @@ def test_pipeline_routes_unknown_with_kaggle_three_bin_classifier(tmp_path, monk
 
     assert [d.cls_name for d in detections] == ["Kaggle 3-bin I"]
     assert detections[0].source == THREE_BIN_SOURCE
+    assert uart.sent == [(1, "I", detections[0].conf)]
+
+
+def test_three_bin_display_name_does_not_claim_an_exact_class():
+    assert three_bin_display_name("Kaggle 3-bin I") == "Rác tái chế (chưa xác định loại)"
+    assert three_bin_display_name("Plastic bottle") == "Plastic bottle"
+
+
+def test_three_bin_can_override_a_low_confidence_primary_route(tmp_path, monkeypatch):
+    class _LowConfidenceOrganicInfer:
+        class_names: ClassVar[dict[int, str]] = {0: "Organic"}
+
+        def predict(self, _frame):
+            return [Detection(0, "Organic", 0.4, (10, 10, 100, 100))]
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config()
+    cfg.model.conf_threshold = 0.3
+    cfg.three_bin_classifier.enabled = True
+    cfg.three_bin_classifier.unknown_only = True
+    cfg.three_bin_classifier.max_primary_confidence = 0.45
+    uart = _StubUart()
+    p = Pipeline(cfg, _LowConfidenceOrganicInfer(), uart, tmp_path / "h.db")
+    p._three_bin_classifier = _StubThreeBinClassifier("I")
+    frame = np.zeros((120, 120, 3), dtype=np.uint8)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [d.cls_name for d in detections] == ["Kaggle 3-bin I"]
     assert uart.sent == [(1, "I", detections[0].conf)]
 
 

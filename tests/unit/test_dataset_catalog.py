@@ -115,6 +115,32 @@ def test_catalog_lists_items_when_class_is_not_the_first_box(tmp_path: Path):
         catalog.close()
 
 
+def test_catalog_combines_box_class_source_and_trust_state_filters(tmp_path: Path):
+    qdir = tmp_path / "queue"
+    expected = _make_item(
+        qdir,
+        "manual_multi",
+        source="manual_import",
+        multi_box=True,
+        reviewed=True,
+    )
+    _make_item(qdir, "other_source", source="roboflow", multi_box=True, reviewed=True)
+
+    catalog = DatasetCatalog(tmp_path / "dataset.db")
+    try:
+        catalog.index_queue(qdir)
+        rows, total = catalog.list_items(
+            source="manual_import",
+            cls_name="Plastic",
+            trust_state="quarantine",
+        )
+
+        assert total == 1
+        assert [row["image_path"] for row in rows] == [str(expected.resolve())]
+    finally:
+        catalog.close()
+
+
 def test_catalog_class_query_deduplicates_repeated_boxes(tmp_path: Path):
     qdir = tmp_path / "queue"
     image_path = _make_item(qdir, "manual_repeat", reviewed=True)

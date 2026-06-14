@@ -127,7 +127,15 @@ class DatasetCatalog:
         if source:
             conditions.append(dataset_items.c.source == source)
         if cls_name:
-            conditions.append(dataset_items.c.cls_name == cls_name)
+            matching_names = self._matching_box_class_names(cls_name)
+            conditions.append(
+                select(dataset_boxes.c.id)
+                .where(
+                    dataset_boxes.c.item_id == dataset_items.c.item_id,
+                    dataset_boxes.c.cls_name.in_(matching_names),
+                )
+                .exists()
+            )
         if trusted is True:
             conditions.append(dataset_items.c.trusted == 1)
         elif trusted is False:

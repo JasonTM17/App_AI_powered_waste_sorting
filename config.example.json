@@ -580,6 +580,7 @@
     "min_confidence": 0.72,
     "min_margin": 0.12,
     "unknown_only": false,
+    "max_primary_confidence": 0.0,
     "min_crop_area_ratio": 0.003,
     "input_size": 224
   },

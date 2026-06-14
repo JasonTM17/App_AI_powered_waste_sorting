@@ -155,6 +155,7 @@ class ThreeBinClassifierConfig(BaseModel):
     min_confidence: float = Field(0.72, ge=0.0, le=1.0)
     min_margin: float = Field(0.12, ge=0.0, le=1.0)
     unknown_only: bool = True
+    max_primary_confidence: float = Field(0.0, ge=0.0, le=1.0)
     min_crop_area_ratio: float = Field(0.003, ge=0.0, le=1.0)
     input_size: int = Field(224, ge=64, le=640)
 
@@ -214,6 +215,7 @@ def default_three_bin_classifier_config() -> ThreeBinClassifierConfig:
         min_confidence=0.72,
         min_margin=0.12,
         unknown_only=True,
+        max_primary_confidence=0.0,
         min_crop_area_ratio=0.003,
         input_size=224,
     )

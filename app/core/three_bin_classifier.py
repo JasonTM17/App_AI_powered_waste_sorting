@@ -21,6 +21,11 @@ THREE_BIN_CLASS_NAMES = {
     "R": "Kaggle 3-bin R",
     "I": "Kaggle 3-bin I",
 }
+THREE_BIN_DISPLAY_NAMES = {
+    "O": "Rác hữu cơ (chưa xác định loại)",
+    "R": "Rác vô cơ (chưa xác định loại)",
+    "I": "Rác tái chế (chưa xác định loại)",
+}
 THREE_BIN_CLASS_IDS = {"O": -301, "R": -302, "I": -303}
 THREE_BIN_SOURCE = "kaggle_three_bin_classifier"
 
@@ -232,6 +237,11 @@ def three_bin_route(command: str):
     return category_for_command(command.strip().upper())
 
 
+def three_bin_display_name(cls_name: str) -> str:
+    command = parse_three_bin_class_name(cls_name)
+    return THREE_BIN_DISPLAY_NAMES.get(command, cls_name)
+
+
 def _resolve_model_path(path: Path) -> Path:
     return path if path.is_absolute() else resource_path(path)
 
@@ -256,9 +266,11 @@ __all__ = [
     "THREE_BIN_CLASS_IDS",
     "THREE_BIN_CLASS_NAMES",
     "THREE_BIN_COMMANDS",
+    "THREE_BIN_DISPLAY_NAMES",
     "THREE_BIN_SOURCE",
     "ThreeBinClassifier",
     "ThreeBinPrediction",
     "parse_three_bin_class_name",
+    "three_bin_display_name",
     "three_bin_route",
 ]

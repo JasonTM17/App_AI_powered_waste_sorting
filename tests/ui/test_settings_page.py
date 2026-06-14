@@ -290,5 +290,6 @@ def test_settings_hardware_test_button_emits_command(qtbot):
     button.click()
 
     assert captured == [("COM8", 9600, "O")]
+    assert page.uart_test_result.text() == "ĐANG GỬI: O..."
     page.set_uart_test_result(True, "ACK:O")
     assert "ACK:O" in page.uart_test_result.text()

@@ -656,7 +656,13 @@ class Pipeline:
         fallback_name = self.cfg.unknown_fallback.class_name
         out: list[Detection] = []
         for detection in detections:
-            if cfg.unknown_only and detection.cls_name != fallback_name:
+            is_unknown = detection.cls_name == fallback_name
+            low_confidence_primary = (
+                cfg.max_primary_confidence > 0
+                and detection.source == "YOLO"
+                and detection.conf <= cfg.max_primary_confidence
+            )
+            if cfg.unknown_only and not is_unknown and not low_confidence_primary:
                 out.append(detection)
                 continue
             prediction = classifier.classify_bgr(frame_bgr, detection.xyxy)
@@ -674,7 +680,8 @@ class Pipeline:
             )
             self.dispatch_status = f"Kaggle 3-bin {prediction.command}"
             logger.info(
-                "three-bin classifier routed unknown as {} confidence={:.3f} margin={:.3f} backend={}",
+                "three-bin classifier routed {} as {} confidence={:.3f} margin={:.3f} backend={}",
+                detection.cls_name,
                 prediction.command,
                 prediction.confidence,
                 prediction.margin,

@@ -497,6 +497,31 @@ def test_auto_sort_rejects_enable_until_camera_uart_and_roi_are_ready(tmp_path):
     assert results and results[-1][0] is False
 
 
+def test_auto_sort_rejects_roi_outside_configured_camera_frame(tmp_path):
+    cfg = AppConfig()
+    cfg.camera.width = 640
+    cfg.camera.height = 480
+    cfg.roi.enabled = True
+    cfg.roi.x = 260
+    cfg.roi.y = 80
+    cfg.roi.width = 820
+    cfg.roi.height = 360
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    spy = _PipelineSpy()
+    controller._pipeline = spy
+    controller.is_camera_running = lambda: True  # type: ignore[method-assign]
+    controller.is_uart_connected = lambda: True  # type: ignore[method-assign]
+    results = []
+    controller.test_uart_result.connect(lambda ok, msg: results.append((ok, msg)))
+
+    controller.set_actuation_test_mode(True)
+
+    assert controller.is_actuation_test_mode_enabled() is False
+    assert spy.dispatch_enabled is False
+    assert results and results[-1][0] is False
+    assert "ROI" in results[-1][1]
+
+
 def test_capture_reviewed_camera_sample_writes_trainable_item(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = AppConfig()

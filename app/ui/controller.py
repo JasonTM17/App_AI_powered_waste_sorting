@@ -932,8 +932,12 @@ class AppController(QObject):
                 not self.cfg.roi.enabled
                 or self.cfg.roi.width <= 0
                 or self.cfg.roi.height <= 0
+                or self.cfg.roi.x < 0
+                or self.cfg.roi.y < 0
+                or self.cfg.roi.x + self.cfg.roi.width > self.cfg.camera.width
+                or self.cfg.roi.y + self.cfg.roi.height > self.cfg.camera.height
             ):
-                reason = "ROI chưa hợp lệ."
+                reason = "ROI chưa nằm trọn trong khung hình camera."
             if reason:
                 self._set_auto_sort_enabled(False)
                 self.test_uart_result.emit(
@@ -1185,8 +1189,12 @@ class AppController(QObject):
             not self.cfg.roi.enabled
             or self.cfg.roi.width <= 0
             or self.cfg.roi.height <= 0
+            or self.cfg.roi.x < 0
+            or self.cfg.roi.y < 0
+            or self.cfg.roi.x + self.cfg.roi.width > self.cfg.camera.width
+            or self.cfg.roi.y + self.cfg.roi.height > self.cfg.camera.height
         ):
-            return "Vòng servo cần ROI hợp lệ quanh bệ."
+            return "Vòng servo cần ROI nằm trọn trong khung hình camera."
         return ""
 
     def _on_recognition_test_state(self, state: dict) -> None:
