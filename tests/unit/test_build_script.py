@@ -37,3 +37,23 @@ def test_shortcuts_include_obvious_launch_locations(monkeypatch):
     targets = make_shortcuts._shortcut_targets()
     assert make_shortcuts.ROOT / make_shortcuts.NAME in targets
     assert make_shortcuts.ROOT / "dist" / make_shortcuts.NAME in targets
+
+
+def test_demo_builder_uses_separate_output_and_writes_handoff_guide(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    import build_demo_exe
+
+    calls = []
+    monkeypatch.setattr(build_demo_exe, "ROOT", tmp_path)
+    monkeypatch.setattr(build_demo_exe, "BUILD", tmp_path / "build")
+    monkeypatch.setattr(
+        build_demo_exe,
+        "build",
+        lambda **kwargs: calls.append(kwargs) or 0,
+    )
+
+    assert build_demo_exe.main() == 0
+    assert calls[0]["app_name"] == "TrashSorterProDemo"
+    assert calls[0]["create_shortcuts"] is False
+    guide = tmp_path / "dist" / "TrashSorterProDemo" / "HUONG-DAN-MO-DEMO.txt"
+    assert "khong can dang nhap" in guide.read_text(encoding="utf-8")

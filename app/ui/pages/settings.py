@@ -281,7 +281,7 @@ class SettingsPage(QWidget):
             "Bật ROI và đặt vùng khay trước khi bật chế độ test cơ cấu. "
             "Nếu ROI tắt hoặc rỗng, camera vẫn hiện box nhưng không gửi UART."
         )
-        self.roi_hint.setWordWrap(True)
+        _configure_wrapped_hint(self.roi_hint, minimum_lines=3)
         self.roi_hint.setObjectName("muted")
         roi_form.addRow("", self.roi_enabled)
         roi_form.addRow("X", self.roi_x)
@@ -395,16 +395,23 @@ class SettingsPage(QWidget):
 
         hw_box, hw_form = _section("Mapping phần cứng")
         hw_form.addRow("Profile", QLabel(PROFILE_ID))
-        hw_form.addRow(
-            "GD5800",
-            QLabel(f"Startup track {GD5800_STARTUP_TRACK}; TX {GD5800_TX_PIN}; RX {GD5800_RX_PIN}"),
+        gd5800_hint = QLabel(
+            f"Startup track {GD5800_STARTUP_TRACK}; TX {GD5800_TX_PIN}; RX {GD5800_RX_PIN}"
         )
+        _configure_wrapped_hint(gd5800_hint)
+        hw_form.addRow("GD5800", gd5800_hint)
         wait = ", ".join(f"{pin}={angle}" for pin, angle in SERVO_WAIT_POSITIONS.items())
-        hw_form.addRow("Servo wait", QLabel(wait))
+        servo_wait_hint = QLabel(wait)
+        _configure_wrapped_hint(servo_wait_hint)
+        hw_form.addRow("Servo wait", servo_wait_hint)
         for pins in PROXIMITY_SENSORS:
+            proximity_hint = QLabel(
+                f"pin {pins.pin}, active {pins.active_level}, track {pins.gd5800_track}"
+            )
+            _configure_wrapped_hint(proximity_hint)
             hw_form.addRow(
                 f"Tiệm cận {pins.label}",
-                QLabel(f"pin {pins.pin}, active {pins.active_level}, track {pins.gd5800_track}"),
+                proximity_hint,
             )
         for route in ROUTES:
             row = QHBoxLayout()
@@ -412,13 +419,13 @@ class SettingsPage(QWidget):
                 f"{pin}={angle}" for pin, angle in route.servo_positions.items()
             )
             display_label = _route_display_label(route.label)
-            row.addWidget(
-                QLabel(
-                    f"{display_label}: {route.command} -> {route.serial_payload}\\n -> "
-                    f"thùng {route.bin_index}, servo {route.servo_pin} ({positions}), "
-                    f"track {route.gd5800_track}"
-                )
+            route_hint = QLabel(
+                f"{display_label}: {route.command} -> {route.serial_payload}\n"
+                f"Thùng {route.bin_index}, servo {route.servo_pin} ({positions}), "
+                f"track {route.gd5800_track}"
             )
+            _configure_wrapped_hint(route_hint, minimum_lines=2)
+            row.addWidget(route_hint, 1)
             btn = QPushButton(f"Test {display_label}")
             btn.setObjectName("secondary")
             btn.clicked.connect(
@@ -434,14 +441,14 @@ class SettingsPage(QWidget):
             row_w.setLayout(row)
             hw_form.addRow("", row_w)
         self.uart_test_result = QLabel("Chưa test phần cứng.")
-        self.uart_test_result.setWordWrap(True)
+        _configure_wrapped_hint(self.uart_test_result)
         self.uart_test_result.setObjectName("muted")
         hw_form.addRow("Kết quả", self.uart_test_result)
         self.actuation_mode = QCheckBox("Bật phân loại tự động")
         self.actuation_mode_hint = QLabel(
             "Đang tắt. Bật camera và chờ UART sẵn sàng trước khi bật tự động."
         )
-        self.actuation_mode_hint.setWordWrap(True)
+        _configure_wrapped_hint(self.actuation_mode_hint, minimum_lines=2)
         self.actuation_mode_hint.setObjectName("muted")
         self.actuation_mode.toggled.connect(self._on_actuation_mode_toggled)
         hw_form.addRow("", self.actuation_mode)

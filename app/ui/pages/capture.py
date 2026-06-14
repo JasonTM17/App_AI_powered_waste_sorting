@@ -9,7 +9,7 @@ from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -49,6 +49,7 @@ from app.utils.dataset_import import import_yolo_dataset_to_queue, label_map_for
 from app.utils.paths import dataset_db_path, resource_path
 
 DISPLAY_LIMIT = 120
+THUMBNAIL_BATCH_SIZE = 12
 
 class CapturePage(QWidget):
     mode_changed = Signal(str)
@@ -73,6 +74,8 @@ class CapturePage(QWidget):
         self._label_cache: dict[str, tuple[int, str]] = {}
         self._icon_cache: dict[str, tuple[int, QIcon]] = {}
         self._loaded = False
+        self._reload_generation = 0
+        self._pending_visible_files: list[Path] = []
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 20, 24, 24)
         outer.setSpacing(16)
@@ -277,19 +280,41 @@ class CapturePage(QWidget):
 
     def reload(self) -> None:
         self._loaded = True
+        self._reload_generation += 1
+        generation = self._reload_generation
+        self._pending_visible_files = []
         self.grid.clear()
         qdir = self._queue_dir()
         if not qdir.exists():
             self._update_stats()
             return
         files = self._display_files(qdir)
-        visible_files = files[:DISPLAY_LIMIT]
-        for f in visible_files:
+        self._pending_visible_files = list(files[:DISPLAY_LIMIT])
+        self.counter.setText(f"Đang tải {len(self._pending_visible_files)} ảnh…")
+        self.stats.setText("Đang chuẩn bị dữ liệu hiển thị…")
+        QTimer.singleShot(0, lambda: self._load_thumbnail_batch(generation, len(files)))
+
+    def _load_thumbnail_batch(self, generation: int, total_files: int) -> None:
+        if generation != self._reload_generation:
+            return
+        batch = self._pending_visible_files[:THUMBNAIL_BATCH_SIZE]
+        del self._pending_visible_files[:THUMBNAIL_BATCH_SIZE]
+        for f in batch:
             item = QListWidgetItem(self._icon_for_image(f), self._label_for_image(f))
             item.setData(Qt.ItemDataRole.UserRole, str(f))
             self.grid.addItem(item)
+        if self._pending_visible_files:
+            self.counter.setText(
+                f"Đang tải {self.grid.count()}/{min(total_files, DISPLAY_LIMIT)} ảnh…"
+            )
+            QTimer.singleShot(0, lambda: self._load_thumbnail_batch(generation, total_files))
+            return
+        visible_files = [
+            Path(str(self.grid.item(index).data(Qt.ItemDataRole.UserRole)))
+            for index in range(self.grid.count())
+        ]
         self._prune_image_caches(visible_files)
-        self._update_stats(displayed=min(len(files), DISPLAY_LIMIT))
+        self._update_stats(displayed=min(total_files, DISPLAY_LIMIT))
 
     def _update_stats(self, displayed: int | None = None) -> None:
         summary, catalog_total = self._summary_for_stats()
@@ -453,12 +478,22 @@ class CapturePage(QWidget):
         catalog_summary = self._catalog_summary()
         catalog_total = int(catalog_summary["images"]) if catalog_summary is not None else 0
         queue_images = self._queue_image_count(qdir)
-        if catalog_summary is not None and catalog_total > 0 and catalog_total == queue_images:
-            queue_summary = summarize_queue(qdir)
-            catalog_summary["trainable"] = queue_summary.get("trainable", 0)
-            catalog_summary["needs_review"] = queue_summary.get("needs_review", 0)
-            return catalog_summary, catalog_total
-        return summarize_queue(qdir), catalog_total
+        if catalog_summary is not None:
+            summary = dict(catalog_summary)
+        else:
+            summary = {
+                "images": 0,
+                "boxes": 0,
+                "classes": Counter(),
+                "auto": 0,
+                "manual": 0,
+                "roboflow": 0,
+                "untrusted": 0,
+                "trainable": 0,
+                "needs_review": 0,
+            }
+        summary["images"] = queue_images
+        return summary, catalog_total
 
     def _catalog_summary(self) -> dict | None:
         mtime_ns = _safe_mtime_ns(self._catalog_path)

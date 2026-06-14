@@ -90,6 +90,30 @@ def test_settings_camera_selector_expands_and_hint_does_not_overlap(qtbot):
     assert hint_bottom <= width_top
 
 
+def test_settings_wrapped_hints_keep_enough_height_at_laptop_width(qtbot):
+    page = SettingsPage(AppConfig())
+    qtbot.addWidget(page)
+    page.resize(900, 4200)
+    page.show()
+    QApplication.processEvents()
+
+    wrapped_labels = [
+        page.roi_hint,
+        page.uart_hint,
+        page.uart_test_result,
+        page.actuation_mode_hint,
+        *[
+            label
+            for label in page.findChildren(type(page.roi_hint))
+            if label.text().startswith(("Startup track", "Hữu cơ:", "Vô cơ:", "Tái chế:"))
+        ],
+    ]
+
+    assert page.roi_hint.minimumHeight() >= page.roi_hint.fontMetrics().lineSpacing() * 3
+    assert all(label.wordWrap() for label in wrapped_labels)
+    assert all(label.height() >= label.minimumHeight() for label in wrapped_labels)
+
+
 def test_settings_collect_saves_roi_fields(qtbot):
     cfg = AppConfig()
     page = SettingsPage(cfg)

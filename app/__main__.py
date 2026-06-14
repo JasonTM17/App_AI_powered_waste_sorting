@@ -37,7 +37,7 @@ def _seed_config_if_missing() -> None:
     logger.info("seeded config from {}", seed)
 
 
-def main() -> int:
+def main(*, require_admin_login: bool = True) -> int:
     setup_logging()
     startup_t0 = time.perf_counter()
 
@@ -46,7 +46,7 @@ def main() -> int:
 
     logger.info("starting app")
     app = QApplication(sys.argv)
-    app.setApplicationName("Trash Sorter Pro")
+    app.setApplicationName("Trash Sorter Pro" if require_admin_login else "Trash Sorter Pro Demo")
     app.setOrganizationName("TrashSorter")
     app.setWindowIcon(_app_icon())
 
@@ -64,17 +64,19 @@ def main() -> int:
 
     install_translator(app, cfg.language)
 
-    from app.utils.local_web import apply_local_auth_environment
-
-    applied_auth_env = apply_local_auth_environment(allow_dev_defaults=True)
-    if applied_auth_env:
-        logger.info("desktop auth env loaded keys={}", sorted(applied_auth_env))
-
-    from app.agent.auth_service import prewarm_auth_schema_async
     from app.agent.operations_store import prewarm_operations_schema_async
     from app.utils.paths import operations_db_path
 
-    prewarm_auth_schema_async()
+    if require_admin_login:
+        from app.agent.auth_service import prewarm_auth_schema_async
+        from app.utils.local_web import apply_local_auth_environment
+
+        applied_auth_env = apply_local_auth_environment(allow_dev_defaults=True)
+        if applied_auth_env:
+            logger.info("desktop auth env loaded keys={}", sorted(applied_auth_env))
+        prewarm_auth_schema_async()
+    else:
+        logger.warning("desktop demo mode enabled; admin login skipped")
     prewarm_operations_schema_async(
         operations_db_path(),
         device_defaults={
@@ -86,15 +88,19 @@ def main() -> int:
     )
     _log_startup("auth_env_and_schema_prewarm_started")
 
-    from app.ui.widgets.admin_login_dialog import AdminLoginDialog
+    if require_admin_login:
+        from app.ui.widgets.admin_login_dialog import AdminLoginDialog
 
-    login = AdminLoginDialog()
-    _log_startup("login_dialog_created")
-    if login.exec() != 1:
-        logger.info("desktop admin login cancelled")
-        return 0
-    logger.info("desktop admin login accepted user={}", login.identity.username if login.identity else "")
-    _log_startup("desktop_admin_login_accepted")
+        login = AdminLoginDialog()
+        _log_startup("login_dialog_created")
+        if login.exec() != 1:
+            logger.info("desktop admin login cancelled")
+            return 0
+        logger.info(
+            "desktop admin login accepted user={}",
+            login.identity.username if login.identity else "",
+        )
+        _log_startup("desktop_admin_login_accepted")
 
     from app.ui.widgets.splash import Splash
 

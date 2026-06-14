@@ -45,9 +45,9 @@ def _python_ssl_dlls() -> list[Path]:
     return [p for p in (dll_dir / "libssl-3-x64.dll", dll_dir / "libcrypto-3-x64.dll") if p.exists()]
 
 
-def _repair_bundled_ssl_dlls() -> None:
+def _repair_bundled_ssl_dlls(app_name: str = APP_NAME) -> None:
     """Keep Python's `_ssl.pyd` paired with the OpenSSL DLLs it was built for."""
-    target_dir = DIST / APP_NAME / "_internal"
+    target_dir = DIST / app_name / "_internal"
     if not target_dir.exists():
         return
     for src in _python_ssl_dlls():
@@ -56,11 +56,17 @@ def _repair_bundled_ssl_dlls() -> None:
         print(f"[OK] bundled Python SSL DLL: {dst}")
 
 
-def main() -> int:
-    # Don't pre-delete dist/build — if a previous build's exe is still
-    # running it locks the folder. PyInstaller's --noconfirm overwrites
-    # files in place; --clean wipes the PyInstaller work cache only.
-    for d in (DIST, BUILD):
+def build(
+    *,
+    app_name: str = APP_NAME,
+    entrypoint: Path | None = None,
+    workpath: Path | None = None,
+    create_shortcuts: bool = True,
+) -> int:
+    entrypoint = entrypoint or (ROOT / "app" / "__main__.py")
+    workpath = workpath or PYINSTALLER_BUILD
+    # Delete only this variant so production and demo builds can coexist.
+    for d in (DIST / app_name, workpath):
         if not d.exists():
             continue
         try:
@@ -69,33 +75,38 @@ def main() -> int:
             print(f"warn: could not remove {d} (probably locked): {e}")
             print("      proceeding — PyInstaller will overwrite reachable files")
 
-    PYINSTALLER_BUILD.mkdir(parents=True, exist_ok=True)
+    workpath.mkdir(parents=True, exist_ok=True)
     args = [
-        "--name", APP_NAME,
+        "--name", app_name,
         "--noconsole",
         "--noconfirm",
         "--clean",
         "--distpath", str(DIST),
-        "--workpath", str(PYINSTALLER_BUILD),
-        "--specpath", str(PYINSTALLER_BUILD),
+        "--workpath", str(workpath),
+        "--specpath", str(workpath),
     ]
     for d in _datas():
         args.extend(["--add-data", d])
     args.extend(_icon_arg())
-    args.append(str(ROOT / "app" / "__main__.py"))
+    args.append(str(entrypoint))
 
     print("PyInstaller args:", args)
     PyInstaller.__main__.run(args)
-    _repair_bundled_ssl_dlls()
-    print(f"\n[OK] Build complete: {DIST / APP_NAME}")
+    _repair_bundled_ssl_dlls(app_name)
+    print(f"\n[OK] Build complete: {DIST / app_name}")
 
-    # Keep one obvious root launcher plus copies in dist and on Desktop.
-    try:
-        from scripts.make_shortcuts import main as _make_shortcuts
-        _make_shortcuts()
-    except Exception as e:
-        print(f"warn: shortcut creation failed: {e}")
+    if create_shortcuts:
+        # Keep one obvious root launcher plus copies in dist and on Desktop.
+        try:
+            from scripts.make_shortcuts import main as _make_shortcuts
+            _make_shortcuts()
+        except Exception as e:
+            print(f"warn: shortcut creation failed: {e}")
     return 0
+
+
+def main() -> int:
+    return build()
 
 
 if __name__ == "__main__":

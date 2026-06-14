@@ -63,6 +63,7 @@ def test_capture_page_warns_when_catalog_is_out_of_sync(tmp_path, qtbot):
     qtbot.addWidget(page)
 
     page.reload()
+    qtbot.waitUntil(lambda: not page._pending_visible_files, timeout=5000)
 
     text = page.stats.text()
     assert "CSDL: 0" in text
@@ -135,6 +136,7 @@ def test_capture_page_prioritizes_trusted_items_and_marks_pending_items(tmp_path
     qtbot.addWidget(page)
 
     page.reload()
+    qtbot.waitUntil(lambda: not page._pending_visible_files, timeout=5000)
 
     first = page.grid.item(0).text()
     texts = [page.grid.item(i).text() for i in range(page.grid.count())]
@@ -167,9 +169,37 @@ def test_capture_page_marks_hard_negative_as_not_trainable(tmp_path, qtbot):
     qtbot.addWidget(page)
 
     page.reload()
+    qtbot.waitUntil(lambda: not page._pending_visible_files, timeout=5000)
 
     assert page.grid.count() == 1
     assert "Hard negative" in page.grid.item(0).text()
+
+
+def test_capture_page_uses_catalog_stats_without_rescanning_all_metadata(
+    tmp_path, qtbot, monkeypatch
+):
+    dataset_root = tmp_path / "dataset"
+    item = _make_queue_item(dataset_root, reviewed=True)
+    catalog_path = tmp_path / "dataset.db"
+    catalog = DatasetCatalog(catalog_path)
+    try:
+        catalog.upsert_item(item, json.loads(item.with_suffix(".json").read_text(encoding="utf-8")))
+    finally:
+        catalog.close()
+
+    def fail_full_scan(*_args, **_kwargs):
+        raise AssertionError("Data page must not rescan every metadata file for summary stats")
+
+    monkeypatch.setattr("app.ui.pages.capture.summarize_queue", fail_full_scan)
+    page = CapturePage(_config_for_dataset(dataset_root))
+    page._catalog_path = catalog_path
+    qtbot.addWidget(page)
+
+    page.reload()
+    qtbot.waitUntil(lambda: not page._pending_visible_files, timeout=5000)
+
+    assert page.grid.count() == 1
+    assert "1 ảnh" in page.counter.text()
 
 
 def test_capture_page_does_not_expose_manual_training_controls(tmp_path, qtbot):
