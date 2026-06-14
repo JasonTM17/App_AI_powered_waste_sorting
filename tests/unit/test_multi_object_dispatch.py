@@ -126,6 +126,25 @@ def test_foreground_component_outside_yolo_box_still_counts_as_second_object():
     assert decision.unmatched_foreground_count == 1
 
 
+def test_nearby_glossy_fragment_is_grouped_with_reference_object():
+    frame = np.full((240, 320, 3), 245, dtype=np.uint8)
+    frame[50:190, 70:180] = (35, 35, 35)
+    frame[80:150, 195:205] = (210, 85, 35)
+
+    decision = evaluate_foreground_multi_object_dispatch(
+        frame,
+        roi=_roi(),
+        max_objects=1,
+        min_area_ratio=0.002,
+        reference_boxes=((65, 45, 190, 195),),
+    )
+
+    assert decision.allowed is True
+    assert decision.object_count == 1
+    assert decision.foreground_count == 2
+    assert decision.unmatched_foreground_count == 0
+
+
 def test_two_yolo_boxes_stay_blocked_even_when_foreground_merges_cleanly():
     decision = evaluate_foreground_multi_object_dispatch(
         _two_object_frame(),

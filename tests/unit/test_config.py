@@ -95,6 +95,7 @@ def test_app_config_parses_default_dict():
     assert c.model.conf_threshold == 0.4
     assert c.model.specialist.enabled is True
     assert c.model.specialist.class_thresholds["Pen"] == 0.15
+    assert c.model.class_thresholds["Plastic bottle"] == 0.08
     assert c.uart.port == ""
     assert c.uart.protocol == "plain_group"
     assert c.speaker.enabled is False

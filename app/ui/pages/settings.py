@@ -171,7 +171,7 @@ def _configure_wrapped_hint(label: QLabel, *, minimum_lines: int = 2) -> None:
     label.setWordWrap(True)
     label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
     label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-    label.setMinimumHeight(label.fontMetrics().lineSpacing() * minimum_lines + 4)
+    label.setMinimumHeight(label.fontMetrics().lineSpacing() * minimum_lines + 12)
 
 
 class SettingsPage(QWidget):

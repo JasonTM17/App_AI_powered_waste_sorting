@@ -10,6 +10,11 @@
     "path": "models/best.pt",
     "device": "auto",
     "conf_threshold": 0.4,
+    "class_thresholds": {
+      "Plastic bottle": 0.08,
+      "Glass bottle": 0.1,
+      "Milk bottle": 0.1
+    },
     "iou_threshold": 0.45,
     "input_size": 640,
     "half_precision": false,

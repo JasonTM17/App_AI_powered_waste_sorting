@@ -78,6 +78,11 @@ Mặc định:
 - Dataset training: `dataset_v2/low_conf_queue`
 - Export YOLO: `dataset_v2/yolo_trainset`
 
+Nhóm chai/lọ dùng ngưỡng class riêng trong `model.class_thresholds` để giữ lại
+dự đoán Tái chế có confidence thấp trên camera thật. Pipeline khử các bbox chồng
+lấn của cùng một vật trước tracker; classifier 3 thùng chỉ xử lý `Unknown` và
+không được ghi đè route của class YOLO đã biết.
+
 ## Web Login And Roles
 
 The web dashboard now uses username/password login. For production, store accounts

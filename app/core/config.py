@@ -58,10 +58,31 @@ class ModelConfig(BaseModel):
     path: str = "models/best.pt"
     device: Literal["auto", "cpu", "cuda"] = "auto"
     conf_threshold: float = Field(0.4, ge=0.0, le=1.0)
+    class_thresholds: dict[str, float] = Field(
+        default_factory=lambda: {
+            "Plastic bottle": 0.08,
+            "Glass bottle": 0.10,
+            "Milk bottle": 0.10,
+        }
+    )
     iou_threshold: float = Field(0.45, ge=0.0, le=1.0)
     input_size: int = 640
     half_precision: bool = False
     specialist: SpecialistModelConfig = Field(default_factory=SpecialistModelConfig)
+
+    @field_validator("class_thresholds")
+    @classmethod
+    def validate_class_thresholds(cls, value: dict[str, float]) -> dict[str, float]:
+        clean: dict[str, float] = {}
+        for raw_name, raw_threshold in value.items():
+            name = str(raw_name).strip()
+            threshold = float(raw_threshold)
+            if not name:
+                raise ValueError("model class names must not be empty")
+            if not 0.0 <= threshold <= 1.0:
+                raise ValueError("model class thresholds must be between 0 and 1")
+            clean[name] = threshold
+        return clean
 
 
 class UartConfig(BaseModel):

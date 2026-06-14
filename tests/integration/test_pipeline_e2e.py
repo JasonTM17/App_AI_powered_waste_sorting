@@ -459,7 +459,7 @@ def test_three_bin_display_name_does_not_claim_an_exact_class():
     assert three_bin_display_name("Plastic bottle") == "Plastic bottle"
 
 
-def test_three_bin_can_override_a_low_confidence_primary_route(tmp_path, monkeypatch):
+def test_three_bin_does_not_override_a_known_primary_route(tmp_path, monkeypatch):
     class _LowConfidenceOrganicInfer:
         class_names: ClassVar[dict[int, str]] = {0: "Organic"}
 
@@ -480,7 +480,31 @@ def test_three_bin_can_override_a_low_confidence_primary_route(tmp_path, monkeyp
     _arm_dispatch(p)
     detections = p.process_frame(frame, datetime.now(UTC))
 
-    assert [d.cls_name for d in detections] == ["Kaggle 3-bin I"]
+    assert [d.cls_name for d in detections] == ["Organic"]
+    assert uart.sent == [(1, "O", detections[0].conf)]
+
+
+def test_pipeline_uses_lower_threshold_for_plastic_bottle(tmp_path, monkeypatch):
+    class _LowConfidenceBottleInfer:
+        class_names: ClassVar[dict[int, str]] = {0: "Organic", 1: "Plastic bottle"}
+
+        def predict(self, _frame):
+            return [
+                Detection(0, "Organic", 0.22, (10, 10, 100, 100)),
+                Detection(1, "Plastic bottle", 0.085, (10, 10, 100, 100)),
+            ]
+
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config()
+    cfg.model.conf_threshold = 0.39
+    uart = _StubUart()
+    p = Pipeline(cfg, _LowConfidenceBottleInfer(), uart, tmp_path / "h.db")
+    frame = np.zeros((120, 120, 3), dtype=np.uint8)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [d.cls_name for d in detections] == ["Plastic bottle"]
     assert uart.sent == [(1, "I", detections[0].conf)]
 
 

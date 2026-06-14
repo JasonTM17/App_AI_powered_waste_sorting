@@ -20,6 +20,7 @@ from app.core.config import (
     computer_speaker_enabled,
     normalize_multi_class_warning_text,
 )
+from app.core.detection_filtering import suppress_overlapping_detections
 from app.core.dispatch_guard import DispatchGuard
 from app.core.events import Detection, TrackedDetection
 from app.core.hardware_profile import route_for_command
@@ -657,12 +658,7 @@ class Pipeline:
         out: list[Detection] = []
         for detection in detections:
             is_unknown = detection.cls_name == fallback_name
-            low_confidence_primary = (
-                cfg.max_primary_confidence > 0
-                and detection.source == "YOLO"
-                and detection.conf <= cfg.max_primary_confidence
-            )
-            if cfg.unknown_only and not is_unknown and not low_confidence_primary:
+            if cfg.unknown_only and not is_unknown:
                 out.append(detection)
                 continue
             prediction = classifier.classify_bgr(frame_bgr, detection.xyxy)
@@ -749,11 +745,23 @@ class Pipeline:
             for detection in raw
             if detection.conf
             >= (
-                float(threshold_for_detection(detection))
-                if callable(threshold_for_detection)
-                else self.cfg.model.conf_threshold
+                self.cfg.model.class_thresholds.get(
+                    detection.cls_name,
+                    (
+                        float(threshold_for_detection(detection))
+                        if callable(threshold_for_detection)
+                        else self.cfg.model.conf_threshold
+                    ),
+                )
+                if detection.source == "YOLO"
+                else (
+                    float(threshold_for_detection(detection))
+                    if callable(threshold_for_detection)
+                    else self.cfg.model.conf_threshold
+                )
             )
         ]
+        filtered = suppress_overlapping_detections(filtered)
         filtered_in_roi = [d for d in filtered if self._in_roi(d.xyxy)]
         unknown = self._unknown_detection(frame_bgr, raw, filtered_in_roi)
         if unknown is not None:

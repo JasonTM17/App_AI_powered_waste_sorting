@@ -156,8 +156,11 @@ def _foreground_belongs_to_reference(
     rx1, ry1, rx2, ry2 = reference
     reference_width = max(0, rx2 - rx1)
     reference_height = max(0, ry2 - ry1)
-    expand_x = max(2, round(reference_width * 0.04))
-    expand_y = max(2, round(reference_height * 0.04))
+    # Transparent or glossy objects often produce disconnected highlights just
+    # outside the detector box. Keep a bounded halo so those fragments still
+    # belong to the detected object without absorbing a clearly separate item.
+    expand_x = min(32, max(4, round(reference_width * 0.10)))
+    expand_y = min(32, max(4, round(reference_height * 0.10)))
     center_x = (fx1 + fx2) / 2.0
     center_y = (fy1 + fy2) / 2.0
     center_inside = (
