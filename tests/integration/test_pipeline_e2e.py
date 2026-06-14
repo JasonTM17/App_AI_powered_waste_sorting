@@ -344,6 +344,21 @@ def test_pipeline_dispatches_object_already_on_tray_when_auto_sort_is_enabled(tm
     assert uart.sent == [(1, "R", detections[0].conf)]
 
 
+def test_pipeline_dispatches_next_new_object_after_ack_without_empty_frame(tmp_path):
+    cfg = _dispatch_ready_config()
+    uart = _StubUart()
+    p = Pipeline(cfg, _SequenceInfer(), uart, tmp_path / "h.db")
+    p.reset_dispatch_state(arm_immediately=True)
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+    p.process_frame(frame, datetime.now(UTC))
+    first_track, first_command, _ = uart.sent[0]
+    p.on_ack(first_track, first_command, "ok", 3200)
+    p.process_frame(frame, datetime.now(UTC))
+
+    assert [item[1] for item in uart.sent] == ["O", "I"]
+
+
 def test_pipeline_corrects_large_cardboard_cloth_to_textile_reference(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")

@@ -69,7 +69,7 @@ Open Serial Monitor at `9600` baud, line ending `Newline`.
 | `SORTTEST:R:90:0` | play app Vo co track, test candidate dump angle, return home, then `ACK:SORTTEST:R:90:0` |
 | `HOME` | attach servos, return to wait position, hold HOME, then `ACK:HOME` |
 
-The firmware logs `MP3TX:<hex>` before each MP3 command and best-effort `MP3RX:<hex>` if the red board replies. Proximity sensors send `PROX:O`, `PROX:I`, or `PROX:R` and play tracks `5/6/7`. Track `8` is reserved for the app multi-object warning. They are edge-triggered with cooldown, do not call sort logic, and do not move D6/D7. If a sensor fires while sorting, prox audio is queued until the servo returns home.
+The firmware logs `MP3TX:<hex>` before each MP3 command and best-effort `MP3RX:*` if the red board replies. Proximity sensors must remain active LOW continuously for 2 seconds before they send `PROX:O`, `PROX:I`, or `PROX:R` and play tracks `5/6/7`. A triggered sensor must remain clear for 1 second before it can re-arm, and the same sensor has a 15-second audio cooldown. Brief hand/object passes therefore stay silent. Track `8` is reserved for the app multi-object warning. Sensors do not call sort logic or move D6/D7. If a confirmed sensor event occurs while sorting, its audio is queued until the servo returns home.
 
 The firmware keeps `SERVO_DETACH_WHEN_IDLE=false`. Motion uses 2-degree steps
 at 10 ms intervals. On return, D7 first levels the dump axis, then D6 returns

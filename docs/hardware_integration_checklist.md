@@ -57,7 +57,10 @@ Open Serial Monitor at `9600`, newline:
 10. `voco` -> track 4, D6=90/D7=0, hold 1800ms, smooth return, `ACK:R`.
 11. `HOME:90:85`, `HOME:90:83`, `HOME:90:87`, `HOME:88:85`, `HOME:92:85` -> choose the upright tray candidate.
 12. `SORTTEST:R:90:0`, `145:180`, `180:180`, `0:180`, `180:0`, `0:0`, `45:180`, `180:45` -> choose the Vo co direction that fully dumps toward the indicated bin.
-13. Trigger D10/D11/D12 sensors and confirm `PROX:O/I/R` plus tracks 5/6/7 without servo movement.
+13. Sweep quickly across D10/D11/D12 and confirm no sound. Then hold each sensor
+    active for at least 2 seconds and confirm `PROX:O/I/R` plus tracks 5/6/7
+    without servo movement. Clear it for at least 1 second before repeating;
+    the same sensor must not announce more than once every 15 seconds.
 
 Close Serial Monitor before app tests.
 
@@ -149,8 +152,9 @@ Before using camera-driven actuation with real waste, confirm all items below:
 2. In Settings, enable ROI and set `x/y/width/height` around only the tray.
    ROI width and height must be greater than zero.
 3. Start camera live and enable automatic sorting. The first valid object may
-   already be on the tray; it dispatches after 3 stable frames. After every ACK,
-   later objects still require an empty tray for 2 seconds / 10 frames.
+   already be on the tray; it dispatches after 3 stable frames. After every ACK
+   and HOME settle, the next new tracked object can dispatch immediately without
+   waiting for 10 empty frames. The previously emitted track remains blocked.
 4. Place one representative item at a time inside the ROI:
    - Huu co: `Organic`.
    - Tai che: `Plastic bottle`, `Paper`, `Disposable tableware`, dirty nylon,

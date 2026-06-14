@@ -52,7 +52,9 @@ const int SERVO_A_WAIT_DEFAULT = 90;
 const int SERVO_B_WAIT_DEFAULT = 85;
 const uint8_t DEFAULT_VOLUME = 30;
 const unsigned long SORT_HOLD_MS = 1800;
-const unsigned long SENSOR_AUDIO_COOLDOWN_MS = 2000;
+const unsigned long SENSOR_TRIGGER_HOLD_MS = 2000;
+const unsigned long SENSOR_RELEASE_HOLD_MS = 1000;
+const unsigned long SENSOR_AUDIO_COOLDOWN_MS = 15000;
 const unsigned long CALIBRATION_HOLD_MS = 1800;
 const unsigned long PRE_SORT_HOME_SETTLE_MS = 0;
 const unsigned long RETURN_SETTLE_MS = 250;
@@ -77,15 +79,18 @@ struct SensorRuntime {
   uint8_t pin;
   char cmd;
   uint8_t track;
-  bool wasLow;
+  bool rawLow;
+  bool alertLatched;
   bool pendingAudio;
+  unsigned long lowSince;
+  unsigned long highSince;
   unsigned long lastAudioAt;
 };
 
 SensorRuntime sensors[] = {
-  {SENSOR_HUUCO_PIN, 'O', 5, false, false, 0},
-  {SENSOR_TAICHE_PIN, 'I', 6, false, false, 0},
-  {SENSOR_VOCO_PIN, 'R', 7, false, false, 0},
+  {SENSOR_HUUCO_PIN, 'O', 5, false, false, false, 0, 0, 0},
+  {SENSOR_TAICHE_PIN, 'I', 6, false, false, false, 0, 0, 0},
+  {SENSOR_VOCO_PIN, 'R', 7, false, false, false, 0, 0, 0},
 };
 
 const uint8_t SENSOR_COUNT = sizeof(sensors) / sizeof(sensors[0]);
@@ -518,19 +523,45 @@ void publish_profile() {
 void handle_sensor(SensorRuntime &sensor, bool allowAudioNow) {
   bool isLow = digitalRead(sensor.pin) == LOW;
   unsigned long now = millis();
-  if (isLow && !sensor.wasLow && now - sensor.lastAudioAt >= SENSOR_AUDIO_COOLDOWN_MS) {
-    sensor.lastAudioAt = now;
-    Serial.print(F("PROX:"));
-    Serial.println(sensor.cmd);
-    if (allowAudioNow && !sortInProgress) {
-      play_track_logged(sensor.track, sensor.cmd, "prox");
-    } else {
-      sensor.pendingAudio = true;
-      Serial.print(F("LOG:prox audio queued "));
-      Serial.println(sensor.cmd);
+  if (isLow) {
+    sensor.highSince = 0;
+    if (!sensor.rawLow) {
+      sensor.rawLow = true;
+      sensor.lowSince = now;
     }
+    if (
+      !sensor.alertLatched
+      && now - sensor.lowSince >= SENSOR_TRIGGER_HOLD_MS
+      && now - sensor.lastAudioAt >= SENSOR_AUDIO_COOLDOWN_MS
+    ) {
+      sensor.alertLatched = true;
+      sensor.lastAudioAt = now;
+      Serial.print(F("PROX:"));
+      Serial.println(sensor.cmd);
+      if (allowAudioNow && !sortInProgress) {
+        play_track_logged(sensor.track, sensor.cmd, "prox");
+      } else {
+        sensor.pendingAudio = true;
+        Serial.print(F("LOG:prox audio queued "));
+        Serial.println(sensor.cmd);
+      }
+    }
+    return;
   }
-  sensor.wasLow = isLow;
+
+  sensor.lowSince = 0;
+  if (sensor.rawLow) {
+    sensor.rawLow = false;
+    sensor.highSince = now;
+  }
+  if (
+    sensor.alertLatched
+    && sensor.highSince > 0
+    && now - sensor.highSince >= SENSOR_RELEASE_HOLD_MS
+  ) {
+    sensor.alertLatched = false;
+    sensor.highSince = 0;
+  }
 }
 
 void poll_sensors(bool allowAudioNow) {
@@ -807,7 +838,10 @@ void setup() {
   pinMode(SENSOR_VOCO_PIN, INPUT_PULLUP);
   pinMode(SENSOR_TAICHE_PIN, INPUT_PULLUP);
   for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
-    sensors[i].wasLow = digitalRead(sensors[i].pin) == LOW;
+    sensors[i].rawLow = digitalRead(sensors[i].pin) == LOW;
+    sensors[i].alertLatched = false;
+    sensors[i].lowSince = millis();
+    sensors[i].highSince = 0;
     sensors[i].lastAudioAt = millis() - SENSOR_AUDIO_COOLDOWN_MS;
   }
 

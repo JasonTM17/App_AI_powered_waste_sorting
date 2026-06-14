@@ -81,25 +81,25 @@ def test_first_stable_object_dispatches_immediately_when_auto_sort_is_enabled():
     assert guard.state == "DETECTING"
 
 
-def test_immediate_first_dispatch_still_requires_empty_rearm_after_ack():
+def test_ack_rearms_after_return_settle_without_empty_frames():
     guard = _guard()
+    guard.min_sort_interval_seconds = 0
     guard.reset(arm_immediately=True)
     guard.begin_dispatch(track_id=1, now=0.1, ack_timeout_seconds=0)
     guard.complete_dispatch(track_id=1, now=0.2)
 
-    for index in range(20):
-        guard.observe_frame(has_visible_object=True, roi_ready=True, now=1.3 + index * 0.25)
+    guard.observe_frame(has_visible_object=True, roi_ready=True, now=1.3)
 
     decision = guard.evaluate(
         track_id=2,
         stable_frames=3,
         in_roi=True,
         roi_ready=True,
-        now=10.0,
+        now=1.3,
     )
 
-    assert decision.allowed is False
-    assert decision.reason == "waiting empty tray"
+    assert decision.allowed is True
+    assert guard.state == "DETECTING"
 
 
 def test_busy_blocks_until_ack_timeout_and_settle():
@@ -141,7 +141,7 @@ def test_guard_reports_ready_sorting_returning_and_waiting_states():
     assert guard.state == "RETURNING"
 
     guard.observe_frame(has_visible_object=False, roi_ready=True, now=5.1)
-    assert guard.state == "WAITING_EMPTY"
+    assert guard.state == "READY"
 
 
 def test_cooldown_blocks_back_to_back_sorts_after_rearm():
@@ -164,21 +164,18 @@ def test_cooldown_blocks_back_to_back_sorts_after_rearm():
     assert decision.reason == "cooldown"
 
 
-def test_same_visible_object_does_not_rearm_after_dispatch():
+def test_dispatch_does_not_rearm_before_return_settle_finishes():
     guard = _guard()
     _arm(guard)
     guard.begin_dispatch(track_id=1, now=3.0, ack_timeout_seconds=0)
     guard.complete_dispatch(track_id=1, now=3.0)
-    for index in range(20):
-        guard.observe_frame(has_visible_object=True, roi_ready=True, now=4.1 + index * 0.25)
-
     decision = guard.evaluate(
         track_id=2,
         stable_frames=3,
         in_roi=True,
         roi_ready=True,
-        now=20.0,
+        now=3.5,
     )
 
     assert decision.allowed is False
-    assert decision.reason == "waiting empty tray"
+    assert decision.reason == "sort busy"

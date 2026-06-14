@@ -953,7 +953,7 @@ class AppController(QObject):
         msg = (
             f"Phân loại tự động đã {state}. "
             "Vật đang nằm trong ROI sẽ được đổ ngay sau khi nhận diện ổn định; "
-            "sau ACK app chờ servo về HOME và khay trống rồi tự mở lượt kế tiếp."
+            "sau ACK app chờ servo về HOME rồi tự nhận vật mới tiếp theo."
         )
         self.test_uart_result.emit(
             True,
