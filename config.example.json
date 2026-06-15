@@ -262,8 +262,8 @@
     },
     {
       "class_name": "Disposable tableware",
-      "command": "I",
-      "bin_index": 3,
+      "command": "R",
+      "bin_index": 2,
       "enabled": true
     },
     {

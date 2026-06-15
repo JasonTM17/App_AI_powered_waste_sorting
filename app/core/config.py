@@ -165,13 +165,13 @@ class ManualReferenceRecognitionConfig(BaseModel):
     cache_refresh_seconds: float = Field(30.0, ge=0.0, le=300.0)
     query_cache_seconds: float = Field(1.0, ge=0.0, le=30.0)
     correctable_yolo_classes: list[str] = Field(
-        default_factory=lambda: ["Cardboard", "Glass bottle"]
+        default_factory=lambda: ["Cardboard", "Glass bottle", "Pen"]
     )
     correction_target_classes: list[str] = Field(
-        default_factory=lambda: ["Textile", "Organic", "Wood"]
+        default_factory=lambda: ["Textile", "Organic", "Wood", "Disposable tableware"]
     )
     min_correction_area_ratio: float = Field(0.25, ge=0.0, le=1.0)
-    max_correction_confidence: float = Field(0.30, ge=0.0, le=1.0)
+    max_correction_confidence: float = Field(0.80, ge=0.0, le=1.0)
 
 
 class ThreeBinClassifierConfig(BaseModel):
@@ -227,10 +227,10 @@ def default_manual_reference_recognition_config() -> ManualReferenceRecognitionC
         max_references_per_class=30,
         cache_refresh_seconds=30.0,
         query_cache_seconds=1.0,
-        correctable_yolo_classes=["Cardboard", "Glass bottle"],
-        correction_target_classes=["Textile", "Organic", "Wood"],
+        correctable_yolo_classes=["Cardboard", "Glass bottle", "Pen"],
+        correction_target_classes=["Textile", "Organic", "Wood", "Disposable tableware"],
         min_correction_area_ratio=0.25,
-        max_correction_confidence=0.30,
+        max_correction_confidence=0.80,
     )
 
 
@@ -259,9 +259,7 @@ class AppConfig(BaseModel):
     device: DeviceConfig = Field(default_factory=lambda: DeviceConfig())
     mappings: list[ClassMapping] = Field(default_factory=list)
     roi: RoiConfig = Field(default_factory=lambda: RoiConfig())
-    capture: CaptureConfig = Field(
-        default_factory=lambda: CaptureConfig(low_conf_threshold=0.6)
-    )
+    capture: CaptureConfig = Field(default_factory=lambda: CaptureConfig(low_conf_threshold=0.6))
     speaker: SpeakerConfig = Field(
         default_factory=lambda: SpeakerConfig(
             enabled=False,
@@ -394,9 +392,7 @@ def _migrate_three_bin_classifier_mode(raw: object) -> bool:
     section = raw.get("three_bin_classifier")
     if not isinstance(section, dict) or "mode" in section:
         return False
-    section["mode"] = (
-        "route_consensus" if section.get("unknown_only") is False else "unknown_only"
-    )
+    section["mode"] = "route_consensus" if section.get("unknown_only") is False else "unknown_only"
     return True
 
 

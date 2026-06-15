@@ -40,6 +40,7 @@ from app.core.three_bin_classifier import (
     THREE_BIN_SOURCE,
     ThreeBinClassifier,
     parse_three_bin_class_name,
+    three_bin_display_name,
 )
 from app.core.tracker import Tracker
 from app.core.uart_protocol import encode_sort
@@ -462,6 +463,8 @@ class Pipeline:
         det = tracked.detection
         category = category_for_command(mapping.command)
         category_name = category.name if category is not None else f"Thùng {mapping.bin_index}"
+        generic_three_bin = parse_three_bin_class_name(det.cls_name) is not None
+        object_name = det.operator_label or three_bin_display_name(det.cls_name)
         now = datetime.now()
         uid = f"{now:%Y%m%d-%H%M%S-%f}-t{tracked.track_id}-{uuid.uuid4().hex[:6]}"
         out_dir = detection_captures_dir() / f"{now:%Y-%m-%d}"
@@ -479,7 +482,10 @@ class Pipeline:
         width, height = annotated.size
         x1, y1, x2, y2 = _clamp_box(det.xyxy, width, height)
         font = _load_label_font()
-        label = f"{det.cls_name} {det.conf:.0%} | {category_name} | Thùng {int(mapping.bin_index)}"
+        label = (
+            f"{object_name} {det.conf:.0%} | {category_name} | "
+            f"Thùng {int(mapping.bin_index)}"
+        )
         stroke = (16, 185, 129)
         fill = (4, 54, 38)
         draw.rectangle((x1, y1, x2, y2), outline=stroke, width=4)
@@ -501,6 +507,9 @@ class Pipeline:
             "track_id": tracked.track_id,
             "cls_id": det.cls_id,
             "cls_name": det.cls_name,
+            "operator_label": det.operator_label,
+            "display_name": object_name,
+            "source": det.source,
             "confidence": det.conf,
             "bbox": [x1, y1, x2, y2],
             "route_label": category_name,
@@ -508,6 +517,12 @@ class Pipeline:
             "uart_command": mapping.command,
             "image_path": str(raw_path),
             "annotated_path": str(annotated_path),
+            "review_required": generic_three_bin,
+            "needs_annotation": generic_three_bin,
+            "training_excluded": generic_three_bin,
+            "training_exclusion_reason": (
+                "generic_three_bin_requires_exact_label" if generic_three_bin else ""
+            ),
         }
         meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
         return {
@@ -595,8 +610,9 @@ class Pipeline:
                 mode = "unknown"
             elif detection.cls_name in correctable_classes:
                 area_ratio = _box_area_ratio(detection.xyxy, width, height)
+                confidence_limited_classes = {"Glass bottle", "Pen"}
                 confidence_ok = (
-                    detection.cls_name != "Glass bottle"
+                    detection.cls_name not in confidence_limited_classes
                     or detection.conf <= ref_cfg.max_correction_confidence
                 )
                 if area_ratio >= ref_cfg.min_correction_area_ratio and confidence_ok:
@@ -836,7 +852,8 @@ class Pipeline:
         ]
         filtered = suppress_overlapping_detections(filtered)
         filtered_in_roi = [d for d in filtered if self._in_roi(d.xyxy)]
-        unknown = self._unknown_detection(frame_bgr, raw, filtered_in_roi)
+        unknown_candidate = self._unknown_detection(frame_bgr, raw, filtered_in_roi)
+        unknown = None if low_detail_empty else unknown_candidate
         if unknown is not None:
             filtered.append(unknown)
         filtered = self._apply_manual_references(frame_bgr, filtered)
@@ -883,6 +900,9 @@ class Pipeline:
             now=now_mono,
         )
         self.dispatch_status = self._dispatch_guard.last_reason
+        if low_detail_empty and not tracked:
+            self.dispatch_status = "waiting empty tray"
+            return detections_for_render
         multi_class = evaluate_single_class_dispatch(
             tracked,
             in_roi=lambda xyxy: bool(roi_ready and self._in_roi(xyxy)),

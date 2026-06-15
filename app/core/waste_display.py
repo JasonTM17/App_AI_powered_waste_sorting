@@ -35,6 +35,7 @@ WASTE_DISPLAY_NAMES = {
     "Paper bag": "Túi giấy",
     "Leaf": "Lá cây",
     "Wooden spoon": "Thìa gỗ",
+    "Plastic fork": "Nĩa nhựa dùng một lần",
 }
 
 

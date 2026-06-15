@@ -48,7 +48,11 @@ def main(*, require_admin_login: bool = True) -> int:
     startup_t0 = time.perf_counter()
 
     def _log_startup(marker: str) -> None:
-        logger.info("startup_timing marker={} elapsed_ms={:.0f}", marker, (time.perf_counter() - startup_t0) * 1000)
+        logger.info(
+            "startup_timing marker={} elapsed_ms={:.0f}",
+            marker,
+            (time.perf_counter() - startup_t0) * 1000,
+        )
 
     logger.info("starting app")
     app = QApplication(sys.argv)
@@ -179,9 +183,7 @@ def main(*, require_admin_login: bool = True) -> int:
         window.recognition_test_page.set_recognition_test_action_result
     )
     if window.history_page is not None:
-        window.history_page.qa_promote_requested.connect(
-            controller.promote_recognition_trial
-        )
+        window.history_page.qa_promote_requested.connect(controller.promote_recognition_trial)
         controller.recognition_test_trial_saved.connect(
             lambda _trial: window.history_page.refresh_qa()
         )
@@ -225,7 +227,9 @@ def main(*, require_admin_login: bool = True) -> int:
                 QDesktopServices.openUrl(QUrl(final_url))
 
         worker.done.connect(_done)
-        worker.finished.connect(lambda: web_launchers.remove(worker) if worker in web_launchers else None)
+        worker.finished.connect(
+            lambda: web_launchers.remove(worker) if worker in web_launchers else None
+        )
         worker.finished.connect(worker.deleteLater)
         worker.start()
 
@@ -235,11 +239,13 @@ def main(*, require_admin_login: bool = True) -> int:
         from PySide6.QtCore import QPoint
 
         from app.ui.widgets.toast import Toast
+
         t = Toast(window, msg, level="warn", duration_ms=5000)
         tr = window.mapToGlobal(QPoint(window.width(), 0))
         t.show_at(window.mapFromGlobal(tr))
 
     controller.camera_error.connect(_on_camera_error)
+
     def _on_config_saved(new_cfg):
         apply_theme(app, new_cfg.theme)
         window.sidebar.set_theme(new_cfg.theme)
@@ -307,7 +313,11 @@ def main(*, require_admin_login: bool = True) -> int:
                 display_name = d.operator_label or waste_display_name(d.cls_name)
                 three_bin_command = parse_three_bin_class_name(d.cls_name)
                 mapping = next(
-                    (m for m in controller.cfg.mappings if m.enabled and m.class_name == d.cls_name),
+                    (
+                        m
+                        for m in controller.cfg.mappings
+                        if m.enabled and m.class_name == d.cls_name
+                    ),
                     None,
                 )
                 if mapping is None and three_bin_command is not None:
@@ -336,11 +346,15 @@ def main(*, require_admin_login: bool = True) -> int:
                     command = category.code
                     bin_index = category.bin_index
                     try:
-                        payload = encode_sort(
-                            command,
-                            d.conf,
-                            protocol=controller.cfg.uart.protocol,
-                        ).decode("utf-8").strip()
+                        payload = (
+                            encode_sort(
+                                command,
+                                d.conf,
+                                protocol=controller.cfg.uart.protocol,
+                            )
+                            .decode("utf-8")
+                            .strip()
+                        )
                     except ValueError:
                         payload = "-"
                     test_mode_enabled = controller.is_actuation_test_mode_enabled()
@@ -352,11 +366,10 @@ def main(*, require_admin_login: bool = True) -> int:
                     )
                     mode = "TEST ON" if test_mode_enabled else "TEST OFF"
                     detail = (
-                        f"{mode}; {category.name}; bin {bin_index}; "
-                        f"payload {payload}; ACK {ack}"
+                        f"{mode}; {category.name}; bin {bin_index}; payload {payload}; ACK {ack}"
                     )
                     if three_bin_command is not None:
-                        detail = f"Phân loại dự phòng 3 thùng; {detail}"
+                        detail = f"Phân loại dự phòng, cần duyệt lại vật cụ thể; {detail}"
                 current_rows.append((display_name, d.conf, ts, detail))
             window.live_page.set_current_detections(current_rows)
         else:

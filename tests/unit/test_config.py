@@ -122,14 +122,16 @@ def test_app_config_parses_default_dict():
     assert c.manual_reference_recognition.correctable_yolo_classes == [
         "Cardboard",
         "Glass bottle",
+        "Pen",
     ]
     assert c.manual_reference_recognition.correction_target_classes == [
         "Textile",
         "Organic",
         "Wood",
+        "Disposable tableware",
     ]
     assert c.manual_reference_recognition.min_correction_area_ratio == 0.25
-    assert c.manual_reference_recognition.max_correction_confidence == 0.30
+    assert c.manual_reference_recognition.max_correction_confidence == 0.80
     assert c.three_bin_classifier.enabled is False
     assert c.three_bin_classifier.model_path == "models/three_bin_classifier.pt"
     assert c.three_bin_classifier.mode == "unknown_only"
@@ -411,7 +413,7 @@ def test_load_config_repairs_known_class_semantic_mappings(tmp_path: Path):
     assert (
         by_name["Disposable tableware"].command,
         by_name["Disposable tableware"].bin_index,
-    ) == ("I", 3)
+    ) == ("R", 2)
     assert (by_name["Organic"].command, by_name["Organic"].bin_index) == ("O", 1)
     assert (by_name["Pen"].command, by_name["Pen"].bin_index) == ("R", 2)
     assert (by_name["Milk tea cup"].command, by_name["Milk tea cup"].bin_index) == ("I", 3)
@@ -423,7 +425,7 @@ def test_load_config_repairs_known_class_semantic_mappings(tmp_path: Path):
     saved = json.loads(cfg_path.read_text(encoding="utf-8"))
     saved_by_name = {mapping["class_name"]: mapping for mapping in saved["mappings"]}
     assert saved_by_name["Paper"]["command"] == "I"
-    assert saved_by_name["Disposable tableware"]["command"] == "I"
+    assert saved_by_name["Disposable tableware"]["command"] == "R"
     assert saved_by_name["Milk tea cup"]["command"] == "I"
     assert saved_by_name["Dirty nylon bag"]["command"] == "I"
 

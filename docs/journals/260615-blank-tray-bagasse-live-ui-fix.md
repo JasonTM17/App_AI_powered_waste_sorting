@@ -73,3 +73,21 @@
 
 - Exact bagasse recognition still needs reviewed bagasse samples and a future trained class
   if the operator wants a label more specific than `Organic`.
+
+## Fork, Spoon, And Generic-Group Follow-up
+
+- Reviewed live references now correct the observed `Pen` result to
+  `Disposable tableware / Nĩa nhựa dùng một lần`.
+- `Disposable tableware` is routed to Vô cơ, bin 2, instead of Tái chế.
+- The existing wooden-spoon references correct an unknown or low-confidence
+  `Glass bottle` result to `Wood / Thìa gỗ`, routed to Hữu cơ, bin 1.
+- Empty low-detail frames update the foreground baseline but discard any fallback
+  candidate, clear the current result, and return to `waiting empty tray`.
+- Generic three-bin results still dispatch to the predicted group as requested.
+  Their capture metadata is marked `review_required`, `needs_annotation`, and
+  `training_excluded` until an operator assigns the exact object label.
+- Labeled captures store both the canonical class and the exact operator/display
+  label, so recognition-only references do not lose their Vietnamese object name.
+- Real-image acceptance with the active model produced
+  `Nĩa nhựa dùng một lần` at 0.9295 and `Thìa gỗ` at 0.9922; the blank tray
+  produced no detection.

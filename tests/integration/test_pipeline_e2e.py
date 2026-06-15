@@ -112,7 +112,21 @@ class _LowConfidenceGlassBottleInfer:
     class_names: ClassVar[dict[int, str]] = {12: "Glass bottle"}
 
     def predict(self, frame):
-        return [Detection(12, "Glass bottle", 0.10, (5, 10, 75, 35))]
+        return [Detection(12, "Glass bottle", 0.68, (5, 10, 75, 35))]
+
+
+class _ForkAsPenInfer:
+    class_names: ClassVar[dict[int, str]] = {42: "Pen"}
+
+    def predict(self, frame):
+        return [Detection(42, "Pen", 0.68, (5, 8, 75, 36))]
+
+
+class _HighConfidencePenInfer:
+    class_names: ClassVar[dict[int, str]] = {42: "Pen"}
+
+    def predict(self, frame):
+        return [Detection(42, "Pen", 0.95, (5, 8, 75, 36))]
 
 
 class _StubUart:
@@ -304,13 +318,15 @@ def _write_manual_reference(
             "recognition_enabled": True,
             "recognition_only": recognition_only,
             "training_excluded": recognition_only,
-            "boxes": [{
-                "cls_id": cls_id,
-                "cls_name": cls_name,
-                "operator_label": operator_label,
-                "conf": 1.0,
-                "xyxy": [15, 12, 65, 28],
-            }],
+            "boxes": [
+                {
+                    "cls_id": cls_id,
+                    "cls_name": cls_name,
+                    "operator_label": operator_label,
+                    "conf": 1.0,
+                    "xyxy": [15, 12, 65, 28],
+                }
+            ],
         }
         img_path.with_suffix(".json").write_text(json.dumps(meta), encoding="utf-8")
 
@@ -344,9 +360,7 @@ def test_pipeline_routes_bagasse_ambiguity_to_organic(tmp_path):
     _arm_dispatch(p)
     detections = p.process_frame(frame, datetime.now(UTC))
 
-    assert [(item.cls_name, item.source) for item in detections] == [
-        ("Organic", THREE_BIN_SOURCE)
-    ]
+    assert [(item.cls_name, item.source) for item in detections] == [("Organic", THREE_BIN_SOURCE)]
     assert uart.sent == [(1, "O", detections[0].conf)]
     p.close()
 
@@ -538,7 +552,7 @@ def test_pipeline_rejects_non_textile_reference_for_cardboard_correction(
     assert uart.sent == []
 
 
-def test_pipeline_corrects_low_confidence_glass_bottle_to_wooden_spoon(
+def test_pipeline_corrects_glass_bottle_to_wooden_spoon(
     tmp_path,
     monkeypatch,
 ):
@@ -570,6 +584,68 @@ def test_pipeline_corrects_low_confidence_glass_bottle_to_wooden_spoon(
     assert uart.sent == [(1, "O", detections[0].conf)]
 
 
+def test_pipeline_corrects_pen_to_disposable_fork(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
+    cfg = _dispatch_ready_config()
+    cfg.capture.output_dir = str(tmp_path / "dataset_v2")
+    cfg.model.conf_threshold = 0.05
+    cfg.manual_reference_recognition.min_similarity = 0.9
+    cfg.manual_reference_recognition.min_correction_area_ratio = 0.2
+    _write_manual_reference(
+        Path(cfg.capture.output_dir) / "low_conf_queue",
+        cls_name="Disposable tableware",
+        cls_id=8,
+        rgb_color=(60, 60, 60),
+        operator_label="Nĩa nhựa dùng một lần",
+        recognition_only=True,
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, _ForkAsPenInfer(), uart, tmp_path / "h.db")
+    frame = np.full((40, 80, 3), 220, dtype=np.uint8)
+    frame[8:36, 5:75] = (60, 60, 60)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(d.cls_name, d.operator_label) for d in detections] == [
+        ("Disposable tableware", "Nĩa nhựa dùng một lần")
+    ]
+    assert uart.sent == [(1, "R", detections[0].conf)]
+    rows = p.history.query(limit=1)
+    meta = json.loads(Path(rows[0].meta_path).read_text(encoding="utf-8"))
+    assert meta["display_name"] == "Nĩa nhựa dùng một lần"
+    assert meta["review_required"] is False
+    p.close()
+
+
+def test_pipeline_keeps_high_confidence_pen_despite_fork_reference(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
+    cfg = _dispatch_ready_config()
+    cfg.capture.output_dir = str(tmp_path / "dataset_v2")
+    cfg.model.conf_threshold = 0.05
+    _write_manual_reference(
+        Path(cfg.capture.output_dir) / "low_conf_queue",
+        cls_name="Disposable tableware",
+        cls_id=8,
+        rgb_color=(60, 60, 60),
+        operator_label="Nĩa nhựa dùng một lần",
+        recognition_only=True,
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, _HighConfidencePenInfer(), uart, tmp_path / "h.db")
+    frame = np.full((40, 80, 3), 220, dtype=np.uint8)
+    frame[8:36, 5:75] = (60, 60, 60)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(d.cls_name, d.operator_label) for d in detections] == [("Pen", "")]
+    assert uart.sent == [(1, "R", 0.95)]
+    p.close()
+
+
 def test_pipeline_routes_unknown_with_kaggle_three_bin_classifier(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config()
@@ -587,6 +663,14 @@ def test_pipeline_routes_unknown_with_kaggle_three_bin_classifier(tmp_path, monk
     assert [d.cls_name for d in detections] == ["Kaggle 3-bin I"]
     assert detections[0].source == THREE_BIN_SOURCE
     assert uart.sent == [(1, "I", detections[0].conf)]
+    rows = p.history.query(limit=1)
+    assert len(rows) == 1
+    assert rows[0].cls_name == "Kaggle 3-bin I"
+    meta = json.loads(Path(rows[0].meta_path).read_text(encoding="utf-8"))
+    assert meta["display_name"] == "Nhóm Tái chế (chưa xác định vật cụ thể)"
+    assert meta["review_required"] is True
+    assert meta["training_excluded"] is True
+    p.close()
 
 
 def test_pipeline_keeps_generic_three_bin_organic_non_specific(tmp_path, monkeypatch):
@@ -603,16 +687,23 @@ def test_pipeline_keeps_generic_three_bin_organic_non_specific(tmp_path, monkeyp
     _arm_dispatch(p)
     detections = p.process_frame(frame, datetime.now(UTC))
 
-    assert [(item.cls_id, item.cls_name) for item in detections] == [
-        (-301, "Kaggle 3-bin O")
-    ]
+    assert [(item.cls_id, item.cls_name) for item in detections] == [(-301, "Kaggle 3-bin O")]
     assert uart.sent == [(1, "O", detections[0].conf)]
+    rows = p.history.query(limit=1)
+    assert len(rows) == 1
+    assert rows[0].cls_name == "Kaggle 3-bin O"
     p.close()
 
 
 def test_three_bin_display_name_does_not_claim_an_exact_class():
-    assert three_bin_display_name("Kaggle 3-bin O") == "Nhóm Hữu cơ (AI chưa xác định vật cụ thể)"
-    assert three_bin_display_name("Kaggle 3-bin I") == "Nhóm Tái chế (AI chưa xác định vật cụ thể)"
+    assert (
+        three_bin_display_name("Kaggle 3-bin O")
+        == "Nhóm Hữu cơ (chưa xác định vật cụ thể)"
+    )
+    assert (
+        three_bin_display_name("Kaggle 3-bin I")
+        == "Nhóm Tái chế (chưa xác định vật cụ thể)"
+    )
     assert three_bin_display_name("Plastic bottle") == "Plastic bottle"
 
 
@@ -815,7 +906,7 @@ def test_pipeline_routes_three_representative_classes_to_three_bins(tmp_path, mo
         mappings=[
             ClassMapping(class_name="Organic", command="O", bin_index=1),
             ClassMapping(class_name="Plastic bottle", command="R", bin_index=2),
-            ClassMapping(class_name="Disposable tableware", command="I", bin_index=3),
+            ClassMapping(class_name="Disposable tableware", command="R", bin_index=2),
         ]
     )
     cfg.speaker.output_mode = "computer_speaker"
@@ -834,32 +925,35 @@ def test_pipeline_routes_three_representative_classes_to_three_bins(tmp_path, mo
     for index in range(3):
         _arm_dispatch(p)
         p.process_frame(frame, ts=datetime(2026, 6, 2, 8, index, tzinfo=UTC))
-        assert speaker.spoken[index] == [
-            ("O", 1, "Organic", 0.92),
-            ("I", 3, "Plastic bottle", 0.91),
-            ("I", 3, "Disposable tableware", 0.9),
-        ][index]
+        assert (
+            speaker.spoken[index]
+            == [
+                ("O", 1, "Organic", 0.92),
+                ("I", 3, "Plastic bottle", 0.91),
+                ("R", 2, "Disposable tableware", 0.9),
+            ][index]
+        )
         track_id, command, _conf = uart.silent_sent[-1]
         p.on_ack(track_id, command, "ok", 15)
 
     assert uart.sent == []
-    assert [item[1] for item in uart.silent_sent] == ["O", "I", "I"]
+    assert [item[1] for item in uart.silent_sent] == ["O", "I", "R"]
     rows = list(reversed(p.history.query(limit=10)))
     expected_route_names = [
         category_for_command(command).name
-        for command in ("O", "I", "I")
+        for command in ("O", "I", "R")
         if category_for_command(command) is not None
     ]
     assert [(row.cls_name, row.route_label, row.bin_index, row.uart_command) for row in rows] == [
         ("Organic", expected_route_names[0], 1, "O"),
         ("Plastic bottle", expected_route_names[1], 3, "I"),
-        ("Disposable tableware", expected_route_names[2], 3, "I"),
+        ("Disposable tableware", expected_route_names[2], 2, "R"),
     ]
     assert [row.ack_status for row in rows] == ["ok", "ok", "ok"]
     assert [(item[0], item[1], item[2]) for item in speaker.spoken] == [
         ("O", 1, "Organic"),
         ("I", 3, "Plastic bottle"),
-        ("I", 3, "Disposable tableware"),
+        ("R", 2, "Disposable tableware"),
     ]
     rows_after_ack = list(reversed(p.history.query(limit=10)))
     assert [row.ack_status for row in rows_after_ack] == ["ok", "ok", "ok"]
@@ -1243,7 +1337,9 @@ def test_pipeline_dispatches_unknown_only_with_explicit_mapping(tmp_path, monkey
     p.close()
 
 
-def test_pipeline_detects_unknown_when_yolo_returns_no_boxes_without_dispatch(tmp_path, monkeypatch):
+def test_pipeline_detects_unknown_when_yolo_returns_no_boxes_without_dispatch(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config()
     cfg.unknown_fallback.warmup_frames = 1
@@ -1256,13 +1352,15 @@ def test_pipeline_detects_unknown_when_yolo_returns_no_boxes_without_dispatch(tm
     p.process_frame(blank, ts=datetime.now(UTC))
     first = p.process_frame(with_object, ts=datetime.now(UTC))
     second = p.process_frame(with_object, ts=datetime.now(UTC))
+    after_removal = [p.process_frame(blank, ts=datetime.now(UTC)) for _ in range(3)]
 
     assert first == []
     assert len(second) == 1
     assert second[0].cls_name == "Unknown object"
+    assert after_removal == [[], [], []]
     assert p.uart.sent == []
     assert p.history.query(limit=1) == []
-    assert p.dispatch_status == "unknown object review required"
+    assert p.dispatch_status == "waiting empty tray"
     p.close()
 
 

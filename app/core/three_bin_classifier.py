@@ -22,9 +22,9 @@ THREE_BIN_CLASS_NAMES = {
     "I": "Kaggle 3-bin I",
 }
 THREE_BIN_DISPLAY_NAMES = {
-    "O": "Nhóm Hữu cơ (AI chưa xác định vật cụ thể)",
-    "R": "Nhóm Vô cơ (AI chưa xác định vật cụ thể)",
-    "I": "Nhóm Tái chế (AI chưa xác định vật cụ thể)",
+    "O": "Nhóm Hữu cơ (chưa xác định vật cụ thể)",
+    "R": "Nhóm Vô cơ (chưa xác định vật cụ thể)",
+    "I": "Nhóm Tái chế (chưa xác định vật cụ thể)",
 }
 THREE_BIN_CLASS_IDS = {"O": -301, "R": -302, "I": -303}
 THREE_BIN_SOURCE = "kaggle_three_bin_classifier"

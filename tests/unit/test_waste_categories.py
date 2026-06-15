@@ -40,8 +40,8 @@ def test_category_examples_match_three_bin_rules():
     assert category_for_class("Leftover food") == ORGANIC
     assert category_for_class("Beer can") == RECYCLABLE
     assert category_for_class("Milk carton") == RECYCLABLE
-    assert category_for_class("Foam food box") == RECYCLABLE
-    assert category_for_class("Disposable tableware") == RECYCLABLE
+    assert category_for_class("Foam food box") == INORGANIC
+    assert category_for_class("Disposable tableware") == INORGANIC
     assert category_for_class("Instant noodle cup") == RECYCLABLE
     assert category_for_class("Styrofoam cup") == RECYCLABLE
     assert category_for_class("Face mask") == INORGANIC
