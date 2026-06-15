@@ -80,6 +80,40 @@ const LEARN_NOW = {
   reference_total: 0
 };
 
+const LEARN_NOW_READY = {
+  ...LEARN_NOW,
+  selected_class: "Textile",
+  selected: {
+    class_name: "Textile",
+    class_id: 37,
+    command: "R",
+    bin_index: 2,
+    route_label: "Vô cơ",
+    priority: "P0",
+    images: 6,
+    trainable_count: 6,
+    reviewed_count: 6,
+    manual_reviewed_count: 6,
+    reference_count: 6,
+    holdout_count: 0,
+    generated_count: 0,
+    augmented_count: 0,
+    generated_cap: 1,
+    generated_over_cap: false,
+    source_issue_count: 0,
+    missing_for_reference: 0,
+    missing_for_micro_train: 0,
+    missing_for_strong_train: 18,
+    missing_holdout_for_strong: 6,
+    ready_for_reference: true,
+    ready_for_micro_train: true,
+    ready_for_strong_train: false,
+    recommended_action: "micro_train",
+    message: "Ready for fast candidate micro-train."
+  },
+  classes: []
+};
+
 const CAPTURE_SESSION = {
   active: false,
   session_id: "",
@@ -191,6 +225,45 @@ describe("DashboardClient training annotation", () => {
     await userEvent.click(screen.getByRole("button", { name: /phone/i }));
 
     await expect(screen.findByTestId("training-annotation-selected-class")).resolves.toHaveTextContent("Textile");
+  });
+
+  it("can add phone images and start fast candidate training", async () => {
+    window.history.replaceState(null, "", "/admin?tab=training");
+    window.localStorage.setItem("trash-sorter-session-token", "qa-token");
+    agentFetchMock.mockImplementation(async (path: string) => {
+      if (path.startsWith("/api/learn-now/status")) {
+        return LEARN_NOW_READY;
+      }
+      if (path === "/api/learn-now/micro-train/start") {
+        return { ok: true, count: 1, message: "Started micro candidate training for Textile (pid 123)." };
+      }
+      return responseFor(path);
+    });
+
+    const { container } = render(<DashboardClient />);
+
+    await waitFor(() => {
+      expect(container.querySelector('input[list="manual-training-label-options"]')).not.toBeNull();
+    });
+    const labelInput = container.querySelector<HTMLInputElement>('input[list="manual-training-label-options"]');
+    fireEvent.change(labelInput!, { target: { value: "Textile" } });
+
+    const fileInput = container.querySelector<HTMLInputElement>('input[type="file"]');
+    await userEvent.upload(fileInput!, [
+      new File(["image-1"], "cloth-1.jpg", { type: "image/jpeg" }),
+      new File(["image-2"], "cloth-2.jpg", { type: "image/jpeg" }),
+      new File(["image-3"], "cloth-3.jpg", { type: "image/jpeg" })
+    ]);
+    await userEvent.click(screen.getByRole("button", { name: /Thêm ảnh phone/i }));
+
+    const trainButton = await screen.findByRole("button", { name: /Train nhanh candidate/i });
+    await waitFor(() => expect(trainButton).toBeEnabled());
+    await userEvent.click(trainButton);
+
+    const trainCall = agentFetchMock.mock.calls.find(([path]) => path === "/api/learn-now/micro-train/start");
+    expect(trainCall).toBeTruthy();
+    expect(JSON.parse(String(trainCall?.[1]?.body))).toEqual({ cls_name: "Textile", profile: "micro" });
+    await expect(screen.findByText(/Started micro candidate training/)).resolves.toBeVisible();
   });
 
   it("shows camera capture failures as a notice instead of an unhandled error", async () => {

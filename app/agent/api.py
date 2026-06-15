@@ -199,7 +199,7 @@ from app.core.dataset_review import (
 )
 from app.core.dataset_trust import classify_dataset_item
 from app.core.history import HistoryService
-from app.core.learn_now import build_learn_now_status
+from app.core.learn_now import build_learn_now_status, build_selected_learn_now_status
 from app.core.learn_now_training import (
     build_training_status,
     start_learn_now_training,
@@ -965,7 +965,7 @@ def create_app(
 
     @router.get("/learn-now/status", response_model=LearnNowStatusResponse)
     def learn_now_status(cls_name: str = "") -> LearnNowStatusResponse:
-        return LearnNowStatusResponse(**build_learn_now_status(_queue_dir(rt), cls_name))
+        return LearnNowStatusResponse(**_learn_now_status(rt, cls_name))
 
     @router.get("/dataset/source-quality", response_model=SourceQualityResponse)
     def dataset_source_quality() -> SourceQualityResponse:
@@ -974,7 +974,7 @@ def create_app(
     @router.post("/learn-now/refresh-references", response_model=LearnNowStatusResponse)
     def learn_now_refresh_references(cls_name: str = "") -> LearnNowStatusResponse:
         rt.refresh_manual_references()
-        return LearnNowStatusResponse(**build_learn_now_status(_queue_dir(rt), cls_name))
+        return LearnNowStatusResponse(**_learn_now_status(rt, cls_name))
 
     @router.post("/learn-now/unknown/capture", response_model=UnknownLearnResponse)
     def learn_now_unknown_capture(payload: UnknownLearnRequest) -> UnknownLearnResponse:
@@ -1007,7 +1007,7 @@ def create_app(
         finally:
             catalog.close()
         selected = suggestions[0].get("canonical_class") if suggestions and isinstance(suggestions[0], dict) else ""
-        status = build_learn_now_status(_queue_dir(rt), str(selected or class_name))
+        status = _learn_now_status(rt, str(selected or class_name))
         return UnknownLearnResponse(
             ok=True,
             message=f"Learn capture saved: {img_path.name}. Review bbox before reference/train.",
@@ -1032,7 +1032,7 @@ def create_app(
             )
         if _training_processes():
             raise HTTPException(status_code=409, detail="A training process is already running.")
-        status = build_learn_now_status(_queue_dir(rt), class_name)
+        status = _learn_now_status(rt, class_name)
         selected = status.get("selected")
         if not isinstance(selected, dict) or not selected.get("ready_for_micro_train"):
             detail = str(selected.get("message") if isinstance(selected, dict) else "")
@@ -2016,6 +2016,17 @@ def _log_summary() -> dict[str, int]:
 
 def _queue_dir(runtime: AgentRuntime) -> Path:
     return resolve_data_path(runtime.cfg.capture.output_dir) / "low_conf_queue"
+
+
+def _learn_now_status(runtime: AgentRuntime, cls_name: str = "") -> dict[str, object]:
+    class_name = canonical_class_name(cls_name)
+    if class_name:
+        return build_selected_learn_now_status(
+            _queue_dir(runtime),
+            class_name,
+            runtime.dataset_file,
+        )
+    return build_learn_now_status(_queue_dir(runtime), cls_name)
 
 
 def _project_root() -> Path:

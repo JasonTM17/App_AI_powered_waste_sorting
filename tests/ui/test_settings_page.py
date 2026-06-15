@@ -293,3 +293,18 @@ def test_settings_hardware_test_button_emits_command(qtbot):
     assert page.uart_test_result.text() == "ĐANG GỬI: O..."
     page.set_uart_test_result(True, "ACK:O")
     assert "ACK:O" in page.uart_test_result.text()
+
+
+def test_settings_hardware_test_buttons_use_equal_dimensions(qtbot):
+    page = SettingsPage(AppConfig())
+    qtbot.addWidget(page)
+    buttons = [
+        btn
+        for btn in page.findChildren(QPushButton)
+        if btn.text() in {"Test Hữu cơ", "Test Vô cơ", "Test Tái chế"}
+        and not _is_descendant(btn, page.audio_section)
+    ]
+
+    assert len(buttons) == 3
+    assert {button.width() for button in buttons} == {buttons[0].width()}
+    assert {button.height() for button in buttons} == {buttons[0].height()}

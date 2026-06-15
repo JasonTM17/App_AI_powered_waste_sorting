@@ -413,6 +413,7 @@ class SettingsPage(QWidget):
                 f"Tiệm cận {pins.label}",
                 proximity_hint,
             )
+        hardware_test_buttons: list[QPushButton] = []
         for route in ROUTES:
             row = QHBoxLayout()
             positions = ", ".join(
@@ -431,11 +432,17 @@ class SettingsPage(QWidget):
             btn.clicked.connect(
                 lambda _checked=False, cmd=route.command: self._request_hardware_test(cmd)
             )
+            hardware_test_buttons.append(btn)
             row.addWidget(btn)
             row.addStretch()
             row_w = QWidget()
             row_w.setLayout(row)
             hw_form.addRow("", row_w)
+        if hardware_test_buttons:
+            button_width = max(132, max(btn.sizeHint().width() for btn in hardware_test_buttons) + 12)
+            for btn in hardware_test_buttons:
+                btn.setFixedWidth(button_width)
+                btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.uart_test_result = QLabel("Chưa test phần cứng.")
         _configure_wrapped_hint(self.uart_test_result)
         self.uart_test_result.setObjectName("muted")

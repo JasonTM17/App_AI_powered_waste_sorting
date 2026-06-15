@@ -3045,6 +3045,53 @@ def test_learn_now_micro_train_start_invokes_candidate_script(tmp_path, monkeypa
         runtime.close()
 
 
+def test_learn_now_micro_train_start_uses_selected_status_builder(tmp_path, monkeypatch):
+    monkeypatch.delenv("TRASH_SORTER_AGENT_TOKEN", raising=False)
+    monkeypatch.setattr("app.agent.api._training_processes", lambda: [])
+    monkeypatch.setattr(
+        "app.agent.api.build_learn_now_status",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("full scan should not run")),
+    )
+    monkeypatch.setattr(
+        "app.agent.api.build_selected_learn_now_status",
+        lambda *_args, **_kwargs: {
+            "selected_class": "Pen",
+            "selected": {
+                "class_name": "Pen",
+                "ready_for_micro_train": True,
+                "ready_for_strong_train": False,
+            },
+            "classes": [],
+            "blocked_labels": {},
+            "total_images": 6,
+            "total_boxes": 6,
+            "queue_dir": str(tmp_path),
+        },
+    )
+    calls: list[dict[str, object]] = []
+
+    class FakeProcess:
+        pid = 4322
+
+    def fake_popen(command, **kwargs):
+        calls.append({"command": command, **kwargs})
+        return FakeProcess()
+
+    monkeypatch.setattr("app.agent.api.subprocess.Popen", fake_popen)
+    client, runtime = _client(tmp_path)
+    try:
+        res = client.post(
+            "/api/learn-now/micro-train/start",
+            json={"cls_name": "Pen", "profile": "micro"},
+        )
+
+        assert res.status_code == 200
+        assert res.json()["count"] == 1
+        assert calls
+    finally:
+        runtime.close()
+
+
 def test_dataset_import_accepts_source_name_and_remaps_ids(tmp_path, monkeypatch):
     monkeypatch.delenv("TRASH_SORTER_AGENT_TOKEN", raising=False)
     client, runtime = _client(tmp_path)

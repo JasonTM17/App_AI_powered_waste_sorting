@@ -77,6 +77,14 @@ export function ManualTrainingPanel({
   const canImport = Boolean(canonicalClass) && manualPhoneFileCount > 0;
   const canMicroTrain = Boolean(learnNowSelected?.ready_for_micro_train) && !training?.running;
   const canStrongTrain = Boolean(learnNowSelected?.ready_for_strong_train) && !training?.running;
+  const microTrainHint = training?.running
+    ? "Đang có training chạy."
+    : learnNowSelected?.message || "Làm mới reference để kiểm tra readiness.";
+  const strongTrainHint = training?.running
+    ? "Đang có training chạy."
+    : learnNowSelected?.ready_for_strong_train
+      ? "Sẵn sàng train mạnh candidate."
+      : `Train mạnh cần thêm ${learnNowSelected?.missing_for_strong_train ?? 24} mẫu train và ${learnNowSelected?.missing_holdout_for_strong ?? 6} holdout.`;
 
   return (
     <section className="content-grid data-grid">
@@ -137,7 +145,7 @@ export function ManualTrainingPanel({
           </label>
         </div>
 
-        <div className="button-row">
+        <div className="button-row training-action-row">
           <button className="primary-button" disabled={busy || !canImport} onClick={onImportPhoneData} type="button">
             <Upload size={17} />
             <span>Thêm ảnh phone</span>
@@ -150,17 +158,29 @@ export function ManualTrainingPanel({
             <RefreshCcw size={17} />
             <span>Làm mới reference</span>
           </button>
-          <button className="primary-button" disabled={busy || !canMicroTrain} onClick={() => onLearnNowTrain("micro")} type="button">
+          <button
+            className="primary-button"
+            disabled={busy || !canMicroTrain}
+            onClick={() => onLearnNowTrain("micro")}
+            title={microTrainHint}
+            type="button"
+          >
             <BrainCircuit size={17} />
             <span>Train nhanh candidate</span>
           </button>
-          <button className="secondary-button" disabled={busy || !canStrongTrain} onClick={() => onLearnNowTrain("strong")} type="button">
+          <button
+            className="secondary-button"
+            disabled={busy || !canStrongTrain}
+            onClick={() => onLearnNowTrain("strong")}
+            title={strongTrainHint}
+            type="button"
+          >
             <BrainCircuit size={17} />
             <span>Train mạnh candidate</span>
           </button>
         </div>
 
-        <div className="button-row">
+        <div className="button-row capture-session-action-row">
           <button
             className="secondary-button"
             disabled={busy || !canonicalClass || Boolean(captureSession?.active)}
