@@ -431,7 +431,7 @@ def test_pipeline_dispatches_object_already_on_tray_when_auto_sort_is_enabled(tm
     assert uart.sent == [(1, "R", detections[0].conf)]
 
 
-def test_pipeline_dispatches_next_new_object_after_ack_without_empty_frame(tmp_path):
+def test_pipeline_dispatches_next_new_object_after_ack_and_empty_tray(tmp_path):
     cfg = _dispatch_ready_config()
     uart = _StubUart()
     p = Pipeline(cfg, _SequenceInfer(), uart, tmp_path / "h.db")
@@ -441,6 +441,11 @@ def test_pipeline_dispatches_next_new_object_after_ack_without_empty_frame(tmp_p
     p.process_frame(frame, datetime.now(UTC))
     first_track, first_command, _ = uart.sent[0]
     p.on_ack(first_track, first_command, "ok", 3200)
+    p._dispatch_guard.observe_frame(
+        has_visible_object=False,
+        roi_ready=True,
+        now=time.monotonic(),
+    )
     p.process_frame(frame, datetime.now(UTC))
 
     assert [item[1] for item in uart.sent] == ["O", "I"]
@@ -1030,6 +1035,29 @@ def test_pipeline_warns_on_computer_speaker_when_selected(tmp_path, monkeypatch)
     assert speaker.texts == [
         (MULTI_CLASS_WARNING_TEXT, "multi_class_dispatch_blocked", 5.0),
     ]
+    p.close()
+
+
+def test_pipeline_suppresses_detection_and_warning_while_sort_is_busy(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config()
+    cfg.speaker.output_mode = "computer_speaker"
+    cfg.speaker.enabled = True
+    uart = _StubUart()
+    speaker = _StubSpeaker()
+    p = Pipeline(cfg, _StubInfer(), uart, tmp_path / "h.db", speaker=speaker)
+    p.reset_dispatch_state(arm_immediately=True)
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+    first = p.process_frame(frame, ts=datetime.now(UTC))
+    p.engine = _MultiClassInfer()
+    during_sort = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert [item.cls_name for item in first] == ["paper"]
+    assert during_sort == []
+    assert speaker.spoken == [("I", 3, "paper", 0.9)]
+    assert speaker.texts == []
+    assert len(uart.silent_sent) == 1
     p.close()
 
 

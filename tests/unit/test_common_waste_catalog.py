@@ -35,6 +35,7 @@ def test_common_aliases_canonicalize_to_training_classes():
     assert canonical_class_name("lon do hop") == "Tin"
     assert canonical_class_name("chai dau goi") == "Plastic bottle"
     assert canonical_class_name("hop xop") == "Disposable tableware"
+    assert canonical_class_name("muong kim loai") == "Iron utensils"
     assert canonical_class_name("vi thuoc") == "Unknown plastic"
     assert category_for_class(canonical_class_name("vo goi ban")) == INORGANIC
 

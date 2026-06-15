@@ -81,7 +81,7 @@ def test_first_stable_object_dispatches_immediately_when_auto_sort_is_enabled():
     assert guard.state == "DETECTING"
 
 
-def test_ack_rearms_after_return_settle_without_empty_frames():
+def test_ack_requires_empty_tray_after_return_settle():
     guard = _guard()
     guard.min_sort_interval_seconds = 0
     guard.reset(arm_immediately=True)
@@ -96,6 +96,24 @@ def test_ack_rearms_after_return_settle_without_empty_frames():
         in_roi=True,
         roi_ready=True,
         now=1.3,
+    )
+
+    assert decision.allowed is False
+    assert decision.reason == "waiting empty tray"
+
+    for index in range(10):
+        guard.observe_frame(
+            has_visible_object=False,
+            roi_ready=True,
+            now=1.4 + index * 0.25,
+        )
+
+    decision = guard.evaluate(
+        track_id=2,
+        stable_frames=3,
+        in_roi=True,
+        roi_ready=True,
+        now=3.7,
     )
 
     assert decision.allowed is True
@@ -141,6 +159,14 @@ def test_guard_reports_ready_sorting_returning_and_waiting_states():
     assert guard.state == "RETURNING"
 
     guard.observe_frame(has_visible_object=False, roi_ready=True, now=5.1)
+    assert guard.state == "WAITING_EMPTY"
+
+    for index in range(1, 10):
+        guard.observe_frame(
+            has_visible_object=False,
+            roi_ready=True,
+            now=5.1 + index * 0.25,
+        )
     assert guard.state == "READY"
 
 

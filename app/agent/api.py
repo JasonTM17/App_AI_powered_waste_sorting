@@ -217,7 +217,7 @@ from app.core.waste_categories import (
 )
 from app.core.web_source_discovery import discover_web_sources
 from app.utils.dataset_import import import_yolo_dataset_to_queue
-from app.utils.paths import config_path, dataset_db_path, db_path, logs_dir
+from app.utils.paths import config_path, dataset_db_path, db_path, logs_dir, resolve_data_path
 
 ALLOWED_ORIGINS_ENV = "TRASH_SORTER_ALLOWED_ORIGINS"
 LOGIN_RATE_LIMIT_ENV = "TRASH_SORTER_LOGIN_RATE_LIMIT"
@@ -2015,7 +2015,7 @@ def _log_summary() -> dict[str, int]:
 
 
 def _queue_dir(runtime: AgentRuntime) -> Path:
-    return Path(runtime.cfg.capture.output_dir) / "low_conf_queue"
+    return resolve_data_path(runtime.cfg.capture.output_dir) / "low_conf_queue"
 
 
 def _project_root() -> Path:

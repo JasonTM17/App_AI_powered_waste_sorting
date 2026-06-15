@@ -129,6 +129,7 @@ def test_app_config_parses_default_dict():
         "Organic",
         "Wood",
         "Disposable tableware",
+        "Iron utensils",
     ]
     assert c.manual_reference_recognition.min_correction_area_ratio == 0.25
     assert c.manual_reference_recognition.max_correction_confidence == 0.80
@@ -278,6 +279,31 @@ def test_load_config_replaces_legacy_multi_class_warning_text(tmp_path: Path):
     assert cfg.dispatch_guard.multi_class_warning_text == MULTI_CLASS_WARNING_TEXT
     raw = json.loads(cfg_path.read_text(encoding="utf-8"))
     assert raw["dispatch_guard"]["multi_class_warning_text"] == MULTI_CLASS_WARNING_TEXT
+
+
+def test_load_config_repairs_stale_manual_reference_class_lists(tmp_path: Path):
+    cfg_path = tmp_path / "config.json"
+    data = _default_dict()
+    data["manual_reference_recognition"] = {
+        "correctable_yolo_classes": ["Cardboard"],
+        "correction_target_classes": ["Textile"],
+    }
+    cfg_path.write_text(json.dumps(data), encoding="utf-8")
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.manual_reference_recognition.correctable_yolo_classes == [
+        "Cardboard",
+        "Glass bottle",
+        "Pen",
+    ]
+    assert cfg.manual_reference_recognition.correction_target_classes == [
+        "Textile",
+        "Organic",
+        "Wood",
+        "Disposable tableware",
+        "Iron utensils",
+    ]
 
 
 def test_load_config_keeps_legacy_enabled_speaker_on_hardware_default(tmp_path: Path):

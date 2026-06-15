@@ -53,7 +53,7 @@ from app.utils import serial_enum
 from app.utils.camera_frame_quality import evaluate_frame_quality
 from app.utils.camera_source import backend_hint, normalize_camera_source
 from app.utils.logging import logger
-from app.utils.paths import dataset_db_path
+from app.utils.paths import dataset_db_path, resolve_data_path
 from app.utils.runtime_lock import RuntimeLock, RuntimeLockError, acquire_runtime_lock
 from app.utils.shared_camera_stream import SharedFramePublisher
 
@@ -1540,7 +1540,7 @@ class AppController(QObject):
     def capture_camera_sample(self, cls_name: str) -> None:
         from app.core.dataset_queue import import_manual_camera_frame
         from app.core.waste_categories import default_class_id_for_name
-        from app.utils.paths import dataset_db_path, resource_path
+        from app.utils.paths import dataset_db_path
 
         cls_name = str(cls_name or "").strip()
         if not cls_name:
@@ -1557,12 +1557,7 @@ class AppController(QObject):
                     break
         if class_id is None:
             class_id = 0
-        output_path = Path(self.cfg.capture.output_dir).expanduser()
-        if output_path.is_absolute():
-            queue_dir = output_path / "low_conf_queue"
-        else:
-            candidate = Path.cwd() / output_path / "low_conf_queue"
-            queue_dir = candidate if candidate.exists() else resource_path(".") / output_path / "low_conf_queue"
+        queue_dir = resolve_data_path(self.cfg.capture.output_dir) / "low_conf_queue"
         try:
             img_path = import_manual_camera_frame(
                 self._last_frame,
@@ -1650,7 +1645,7 @@ class AppController(QObject):
 
     def capture_hard_negative_sample(self, reason: str) -> None:
         from app.core.hard_negative_dataset import capture_hard_negative_frame
-        from app.utils.paths import dataset_db_path, resource_path
+        from app.utils.paths import dataset_db_path
 
         reason = str(reason or "").strip()
         if not reason:
@@ -1659,12 +1654,7 @@ class AppController(QObject):
         if not self.is_camera_running() or self._last_frame is None:
             self.snapshot_saved.emit(False, "Bat camera va cho co frame truoc khi ghi hard negative.")
             return
-        output_path = Path(self.cfg.capture.output_dir).expanduser()
-        if output_path.is_absolute():
-            queue_dir = output_path / "low_conf_queue"
-        else:
-            candidate = Path.cwd() / output_path / "low_conf_queue"
-            queue_dir = candidate if candidate.exists() else resource_path(".") / output_path / "low_conf_queue"
+        queue_dir = resolve_data_path(self.cfg.capture.output_dir) / "low_conf_queue"
         try:
             img_path = capture_hard_negative_frame(
                 self._last_frame,
@@ -1682,13 +1672,7 @@ class AppController(QObject):
         self.refresh_learn_now_status("")
 
     def _capture_queue_dir(self) -> Path:
-        from app.utils.paths import resource_path
-
-        output_path = Path(self.cfg.capture.output_dir).expanduser()
-        if output_path.is_absolute():
-            return output_path / "low_conf_queue"
-        candidate = Path.cwd() / output_path / "low_conf_queue"
-        return candidate if candidate.exists() else resource_path(".") / output_path / "low_conf_queue"
+        return resolve_data_path(self.cfg.capture.output_dir) / "low_conf_queue"
 
     def _suggest_annotation_bbox(self, frame, cls_name: str) -> tuple[int, int, int, int]:
         from app.core.multi_object_dispatch import foreground_object_boxes

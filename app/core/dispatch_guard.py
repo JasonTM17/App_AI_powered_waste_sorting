@@ -61,7 +61,6 @@ class DispatchGuard:
         self._last_dispatch_started_at: float | None = None
         self._busy_track_id: int | None = None
         self._busy_until = 0.0
-        self._arm_after_busy = False
         self.state: AutoSortState = "READY" if self._armed else "WAITING_EMPTY"
         self.last_reason = "" if self._armed else "waiting empty tray"
 
@@ -130,7 +129,6 @@ class DispatchGuard:
 
     def begin_dispatch(self, *, track_id: int, now: float, ack_timeout_seconds: float) -> None:
         self._armed = False
-        self._arm_after_busy = False
         self._empty_since = None
         self._empty_frames = 0
         self._last_dispatch_started_at = now
@@ -145,7 +143,6 @@ class DispatchGuard:
             return
         self._busy_track_id = None
         self._busy_until = now + self.busy_settle_seconds
-        self._arm_after_busy = True
         self.state = "RETURNING" if self.busy_settle_seconds > 0 else "WAITING_EMPTY"
         self.last_reason = "sort busy" if self.busy_settle_seconds > 0 else "waiting empty tray"
         self._expire_busy(now)
@@ -167,9 +164,4 @@ class DispatchGuard:
         if self._busy_track_id is not None and now >= self._busy_until:
             self._busy_track_id = None
             self.state = "WAITING_EMPTY"
-            return
-        if self._busy_track_id is None and self._arm_after_busy and now >= self._busy_until:
-            self._arm_after_busy = False
-            self._armed = True
-            self.state = "READY"
-            self.last_reason = ""
+            self.last_reason = "waiting empty tray"

@@ -53,7 +53,7 @@ from app.core.waste_categories import (
     normalize_mapping_to_three_bins,
 )
 from app.utils.logging import logger
-from app.utils.paths import detection_captures_dir
+from app.utils.paths import detection_captures_dir, resolve_data_path
 
 
 def _make_thumbnail(frame_bgr: np.ndarray, max_size=(100, 75)) -> bytes:
@@ -252,7 +252,7 @@ class Pipeline:
         ref_cfg = self.cfg.manual_reference_recognition
         if not ref_cfg.enabled:
             return None
-        queue_dir = Path(self.cfg.capture.output_dir) / "low_conf_queue"
+        queue_dir = resolve_data_path(self.cfg.capture.output_dir) / "low_conf_queue"
         return ManualReferenceRecognizer(
             queue_dir,
             enabled=ref_cfg.enabled,
@@ -302,7 +302,7 @@ class Pipeline:
 
         import cv2
 
-        out_dir = Path(self.cfg.capture.output_dir) / "low_conf_queue"
+        out_dir = resolve_data_path(self.cfg.capture.output_dir) / "low_conf_queue"
         out_dir.mkdir(parents=True, exist_ok=True)
         uid = uuid.uuid4().hex[:12]
         img_path = out_dir / f"{uid}.jpg"
@@ -342,7 +342,7 @@ class Pipeline:
     ) -> str:
         import cv2
 
-        out_dir = Path(self.cfg.capture.output_dir) / "low_conf_queue"
+        out_dir = resolve_data_path(self.cfg.capture.output_dir) / "low_conf_queue"
         out_dir.mkdir(parents=True, exist_ok=True)
         uid = f"route_consensus_{uuid.uuid4().hex[:12]}"
         img_path = out_dir / f"{uid}.jpg"
@@ -900,6 +900,11 @@ class Pipeline:
             now=now_mono,
         )
         self.dispatch_status = self._dispatch_guard.last_reason
+        if self._hardware_dispatch_enabled and (
+            self._dispatch_guard.state in {"SORTING", "RETURNING"}
+            or (roi_ready and self._dispatch_guard.state == "WAITING_EMPTY")
+        ):
+            return []
         if low_detail_empty and not tracked:
             self.dispatch_status = "waiting empty tray"
             return detections_for_render

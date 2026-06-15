@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -72,6 +73,9 @@ class WasteSpeaker:
         self._lock = threading.Lock()
         self._last_spoken_at: dict[str, float] = {}
         self._completion_beeps: set[str] = set()
+        self._audio_queue: deque[tuple[str, str, Path | None]] = deque()
+        self._current_audio_key = ""
+        self._playback_active = False
 
     def configure(
         self,
@@ -202,19 +206,43 @@ class WasteSpeaker:
         clean_key = str(key or "").strip() or clean_text
         cooldown = self.cooldown_seconds if cooldown_seconds is None else max(0.0, float(cooldown_seconds))
         now = time.monotonic()
+        start_worker = False
         with self._lock:
             previous = self._last_spoken_at.get(clean_key, 0.0)
             if now - previous < cooldown:
                 return
+            if clean_key == self._current_audio_key:
+                return
+            if any(queued_key == clean_key for queued_key, _, _ in self._audio_queue):
+                return
             self._last_spoken_at[clean_key] = now
-        thread = threading.Thread(
-            target=self._play_background,
-            args=(clean_text, audio_path),
-            name="trash-sorter-speaker",
-            daemon=True,
-        )
-        thread.start()
+            self._audio_queue.append((clean_key, clean_text, audio_path))
+            if not self._playback_active:
+                self._playback_active = True
+                start_worker = True
+        if start_worker:
+            threading.Thread(
+                target=self._drain_audio_queue,
+                name="trash-sorter-speaker",
+                daemon=True,
+            ).start()
         logger.info("speaker queued key={} text={} audio={}", clean_key, clean_text, audio_path or "")
+
+    def _drain_audio_queue(self) -> None:
+        while True:
+            with self._lock:
+                if not self._audio_queue:
+                    self._current_audio_key = ""
+                    self._playback_active = False
+                    return
+                key, text, audio_path = self._audio_queue.popleft()
+                self._current_audio_key = key
+            try:
+                self._play_background(text, audio_path)
+            finally:
+                with self._lock:
+                    if self._current_audio_key == key:
+                        self._current_audio_key = ""
 
     def _play_background(self, text: str, audio_path: Path | None) -> None:
         if audio_path is not None and audio_path.exists():

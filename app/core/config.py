@@ -168,7 +168,13 @@ class ManualReferenceRecognitionConfig(BaseModel):
         default_factory=lambda: ["Cardboard", "Glass bottle", "Pen"]
     )
     correction_target_classes: list[str] = Field(
-        default_factory=lambda: ["Textile", "Organic", "Wood", "Disposable tableware"]
+        default_factory=lambda: [
+            "Textile",
+            "Organic",
+            "Wood",
+            "Disposable tableware",
+            "Iron utensils",
+        ]
     )
     min_correction_area_ratio: float = Field(0.25, ge=0.0, le=1.0)
     max_correction_confidence: float = Field(0.80, ge=0.0, le=1.0)
@@ -228,7 +234,13 @@ def default_manual_reference_recognition_config() -> ManualReferenceRecognitionC
         cache_refresh_seconds=30.0,
         query_cache_seconds=1.0,
         correctable_yolo_classes=["Cardboard", "Glass bottle", "Pen"],
-        correction_target_classes=["Textile", "Organic", "Wood", "Disposable tableware"],
+        correction_target_classes=[
+            "Textile",
+            "Organic",
+            "Wood",
+            "Disposable tableware",
+            "Iron utensils",
+        ],
         min_correction_area_ratio=0.25,
         max_correction_confidence=0.80,
     )
@@ -350,6 +362,22 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     if cfg.manual_reference_recognition.cache_refresh_seconds == 3.0:
         cfg.manual_reference_recognition.cache_refresh_seconds = 30.0
         changed = True
+    required_correctable = ("Cardboard", "Glass bottle", "Pen")
+    for class_name in required_correctable:
+        if class_name not in cfg.manual_reference_recognition.correctable_yolo_classes:
+            cfg.manual_reference_recognition.correctable_yolo_classes.append(class_name)
+            changed = True
+    required_targets = (
+        "Textile",
+        "Organic",
+        "Wood",
+        "Disposable tableware",
+        "Iron utensils",
+    )
+    for class_name in required_targets:
+        if class_name not in cfg.manual_reference_recognition.correction_target_classes:
+            cfg.manual_reference_recognition.correction_target_classes.append(class_name)
+            changed = True
     normalized_warning = normalize_multi_class_warning_text(
         cfg.dispatch_guard.multi_class_warning_text
     )

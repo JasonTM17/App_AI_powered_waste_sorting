@@ -1,3 +1,6 @@
+import threading
+import time
+
 import app.core.speaker as speaker_module
 from app.core.speaker import WasteSpeaker
 from app.core.voice_pack import AUDIO_EVENT_LABELS
@@ -88,3 +91,43 @@ def test_completion_beep_plays_exactly_once_per_trial(monkeypatch):
     assert speaker.play_completion_beep("trial-1") is False
     assert speaker.play_completion_beep("trial-2") is True
     assert events == ["beep", "beep"]
+
+
+def test_waste_speaker_serializes_different_announcements(monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    order: list[str] = []
+    active = 0
+    max_active = 0
+    state_lock = threading.Lock()
+
+    speaker = WasteSpeaker(enabled=True, cooldown_seconds=0.0)
+
+    def play(text, _audio_path):
+        nonlocal active, max_active
+        with state_lock:
+            active += 1
+            max_active = max(max_active, active)
+            order.append(text)
+        if len(order) == 1:
+            started.set()
+            assert release.wait(2)
+        with state_lock:
+            active -= 1
+            if len(order) == 2:
+                finished.set()
+
+    monkeypatch.setattr(speaker, "_play_background", play)
+    speaker.speak_text(text="first", key="first", cooldown_seconds=0)
+    assert started.wait(2)
+    speaker.speak_text(text="second", key="second", cooldown_seconds=0)
+    time.sleep(0.05)
+
+    assert max_active == 1
+    assert order == ["first"]
+
+    release.set()
+    assert finished.wait(2)
+    assert order == ["first", "second"]
+    assert max_active == 1

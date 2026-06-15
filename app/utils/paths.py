@@ -33,6 +33,24 @@ def resource_path(rel: str | Path) -> Path:
     return bundle_dir() / p
 
 
+def resolve_data_path(rel: str | Path) -> Path:
+    """Resolve mutable project data for source runs and packaged desktop builds."""
+    path = Path(rel).expanduser()
+    if path.is_absolute():
+        return path
+
+    candidates = [Path.cwd() / path, bundle_dir() / path]
+    if getattr(sys, "frozen", False):
+        executable_root = Path(sys.executable).resolve().parent
+        project_root = executable_root.parent.parent
+        candidates.append(project_root / path)
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return app_data_dir() / path
+
+
 def app_data_dir() -> Path:
     if sys.platform == "win32":
         base = os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming"))

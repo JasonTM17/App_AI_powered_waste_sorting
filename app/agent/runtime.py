@@ -60,7 +60,7 @@ from app.utils.camera_frame_quality import (
 )
 from app.utils.camera_source import backend_hint, normalize_camera_source
 from app.utils.logging import logger
-from app.utils.paths import resource_path
+from app.utils.paths import resolve_data_path, resource_path
 from app.utils.runtime_lock import RuntimeLock, RuntimeLockError, acquire_runtime_lock
 from app.utils.serial_enum import (
     is_eligible_usb_serial_port,
@@ -1512,13 +1512,7 @@ class AgentRuntime:
 
     @staticmethod
     def _queue_dir_for_config(cfg: AppConfig) -> Path:
-        output_path = Path(cfg.capture.output_dir).expanduser()
-        if output_path.is_absolute():
-            return output_path / "low_conf_queue"
-        candidate = Path.cwd() / output_path / "low_conf_queue"
-        if candidate.exists():
-            return candidate
-        return resource_path(".") / output_path / "low_conf_queue"
+        return resolve_data_path(cfg.capture.output_dir) / "low_conf_queue"
 
     def _device_snapshot(self) -> tuple[list[dict], list[dict]]:
         now = time.monotonic()

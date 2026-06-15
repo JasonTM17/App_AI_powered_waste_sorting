@@ -576,7 +576,21 @@
     "min_votes": 3,
     "max_references_per_class": 30,
     "cache_refresh_seconds": 30.0,
-    "query_cache_seconds": 1.0
+    "query_cache_seconds": 1.0,
+    "correctable_yolo_classes": [
+      "Cardboard",
+      "Glass bottle",
+      "Pen"
+    ],
+    "correction_target_classes": [
+      "Textile",
+      "Organic",
+      "Wood",
+      "Disposable tableware",
+      "Iron utensils"
+    ],
+    "min_correction_area_ratio": 0.25,
+    "max_correction_confidence": 0.8
   },
   "three_bin_classifier": {
     "enabled": true,
