@@ -19,7 +19,7 @@ def test_video_view_accepts_frame_and_detections(qtbot):
     assert len(v._detections) == 1
 
 
-def test_video_view_fills_available_camera_area(qtbot):
+def test_video_view_keeps_camera_aspect_ratio(qtbot):
     v = VideoView()
     qtbot.addWidget(v)
     v.resize(900, 400)
@@ -28,4 +28,5 @@ def test_video_view_fills_available_camera_area(qtbot):
     scaled = v._ensure_scaled()
 
     assert scaled is not None
-    assert scaled.size() == v.size()
+    assert scaled.width() == 533
+    assert scaled.height() == 400

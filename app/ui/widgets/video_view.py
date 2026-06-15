@@ -62,7 +62,7 @@ class VideoView(QWidget):
             return self._scaled
         self._scaled = self._pixmap.scaled(
             self.size(),
-            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.FastTransformation,
         )
         self._scaled_for_size = size

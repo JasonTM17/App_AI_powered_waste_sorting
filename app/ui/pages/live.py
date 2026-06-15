@@ -81,8 +81,8 @@ class LivePage(QWidget):
         self._display_stabilizer = DetectionDisplayStabilizer()
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(12, 12, 12, 14)
-        root.setSpacing(10)
+        root.setContentsMargins(24, 20, 24, 24)
+        root.setSpacing(16)
 
         header = QVBoxLayout()
         header.setSpacing(10)
@@ -200,15 +200,15 @@ class LivePage(QWidget):
 
         body = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self._body_layout = body
-        body.setSpacing(8)
+        body.setSpacing(16)
 
         video_card = QFrame()
         video_card.setObjectName("card")
         video_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._video_card = video_card
         video_layout = QVBoxLayout(video_card)
-        video_layout.setContentsMargins(6, 6, 6, 6)
-        video_layout.setSpacing(6)
+        video_layout.setContentsMargins(16, 14, 16, 16)
+        video_layout.setSpacing(12)
         video_title = QLabel("LIVE CAMERA")
         video_title.setObjectName("mono")
         video_layout.addWidget(video_title)
@@ -231,17 +231,16 @@ class LivePage(QWidget):
         self._video_stack.setCurrentWidget(self.placeholder)
         video_layout.addWidget(video_container, 1)
 
-        body.addWidget(video_card, 8)
+        body.addWidget(video_card, 4)
 
         stream_card = QFrame()
         stream_card.setObjectName("card")
-        stream_card.setMinimumWidth(200)
-        stream_card.setMaximumWidth(240)
+        stream_card.setMinimumWidth(220)
         stream_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self._stream_card = stream_card
         stream_layout = QVBoxLayout(stream_card)
-        stream_layout.setContentsMargins(10, 8, 10, 10)
-        stream_layout.setSpacing(8)
+        stream_layout.setContentsMargins(16, 14, 16, 16)
+        stream_layout.setSpacing(12)
         stream_title = QLabel("KẾT QUẢ HIỆN TẠI")
         stream_title.setObjectName("mono")
         stream_layout.addWidget(stream_title)
@@ -291,7 +290,7 @@ class LivePage(QWidget):
         if self._body_layout.direction() != direction:
             self._body_layout.setDirection(direction)
         self._stream_card.setMaximumHeight(260 if narrow else 16777215)
-        self._stream_card.setMaximumWidth(16777215 if narrow else 240)
+        self._stream_card.setMaximumWidth(16777215)
 
     def _toggle_camera(self) -> None:
         self._cam_on = not self._cam_on

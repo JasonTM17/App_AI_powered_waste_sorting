@@ -48,6 +48,12 @@
 - At a 1500 px page width, the rendered camera card occupies 1268 px and the result card
   occupies 200 px.
 
+## Balanced Camera Follow-up
+
+- Operator review restored the balanced `4:1` Live layout and the wider result panel.
+- The camera image now preserves its source aspect ratio inside the card, so objects are
+  not stretched or visually over-zoomed and surrounding tray space remains visible.
+
 ## Unresolved Questions
 
 - Exact bagasse recognition still needs reviewed bagasse samples and a future trained class
