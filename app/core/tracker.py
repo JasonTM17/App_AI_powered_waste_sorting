@@ -6,6 +6,8 @@ import time
 from dataclasses import dataclass, field
 
 from app.core.events import TrackedDetection
+from app.core.three_bin_classifier import parse_three_bin_class_name
+from app.core.waste_categories import category_for_known_class
 
 
 def _iou(a, b):
@@ -28,6 +30,7 @@ def _iou(a, b):
 class _Track:
     track_id: int
     cls_id: int
+    route_family: str
     xyxy: tuple
     age: int = 0
     stable_frames: int = 1
@@ -50,8 +53,6 @@ class Tracker:
             best_id = None
             best_iou = self._iou_th
             for tid, t in self._tracks.items():
-                if t.cls_id != det.cls_id:
-                    continue
                 score = _iou(det.xyxy, t.xyxy)
                 if score > best_iou:
                     best_iou = score
@@ -59,12 +60,23 @@ class Tracker:
             if best_id is None:
                 tid = self._next_id
                 self._next_id += 1
-                self._tracks[tid] = _Track(track_id=tid, cls_id=det.cls_id, xyxy=det.xyxy)
+                self._tracks[tid] = _Track(
+                    track_id=tid,
+                    cls_id=det.cls_id,
+                    route_family=_route_family(det.cls_name),
+                    xyxy=det.xyxy,
+                )
                 t = self._tracks[tid]
             else:
                 t = self._tracks[best_id]
                 t.age = 0
-                t.stable_frames += 1
+                route_family = _route_family(det.cls_name)
+                if route_family == t.route_family:
+                    t.stable_frames += 1
+                else:
+                    t.stable_frames = 1
+                    t.route_family = route_family
+                t.cls_id = det.cls_id
                 t.xyxy = det.xyxy
             out.append(
                 TrackedDetection(
@@ -90,3 +102,13 @@ class Tracker:
         self._tracks.clear()
         self._emitted.clear()
         self._next_id = 1
+
+
+def _route_family(class_name: str) -> str:
+    command = parse_three_bin_class_name(class_name)
+    if command is not None:
+        return f"route:{command}"
+    category = category_for_known_class(class_name)
+    if category is not None:
+        return f"route:{category.code}"
+    return f"class:{class_name}"

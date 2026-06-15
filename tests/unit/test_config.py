@@ -34,7 +34,7 @@ def _default_dict():
                 "enabled": True,
                 "path": "models/new-class-specialist.pt",
                 "class_thresholds": {
-                    "Pen": 0.15,
+                    "Pen": 0.45,
                     "Battery": 0.3,
                     "Toothbrush": 0.25,
                 },
@@ -94,8 +94,8 @@ def test_app_config_parses_default_dict():
     assert c.camera.rotation == 0
     assert c.model.conf_threshold == 0.4
     assert c.model.specialist.enabled is True
-    assert c.model.specialist.class_thresholds["Pen"] == 0.15
-    assert c.model.class_thresholds["Plastic bottle"] == 0.08
+    assert c.model.specialist.class_thresholds["Pen"] == 0.45
+    assert c.model.class_thresholds["Plastic bottle"] == 0.30
     assert c.uart.port == ""
     assert c.uart.protocol == "plain_group"
     assert c.speaker.enabled is False
@@ -113,16 +113,19 @@ def test_app_config_parses_default_dict():
     assert c.dispatch_guard.multi_class_warning_text == MULTI_CLASS_WARNING_TEXT
     assert c.dispatch_guard.multi_class_warning_audio_track == 8
     assert c.manual_reference_recognition.enabled is True
-    assert c.manual_reference_recognition.min_similarity == 0.82
-    assert c.manual_reference_recognition.min_consensus_similarity == 0.55
-    assert c.manual_reference_recognition.min_votes == 3
-    assert c.manual_reference_recognition.top_k == 5
+    assert c.manual_reference_recognition.allow_unknown_matches is False
+    assert c.manual_reference_recognition.min_similarity == 0.88
+    assert c.manual_reference_recognition.min_consensus_similarity == 0.72
+    assert c.manual_reference_recognition.min_votes == 4
+    assert c.manual_reference_recognition.top_k == 7
     assert c.manual_reference_recognition.cache_refresh_seconds == 30.0
     assert c.manual_reference_recognition.query_cache_seconds == 1.0
     assert c.manual_reference_recognition.correctable_yolo_classes == [
         "Cardboard",
         "Glass bottle",
         "Pen",
+        "Plastic cup",
+        "Aluminum can",
     ]
     assert c.manual_reference_recognition.correction_target_classes == [
         "Textile",
@@ -130,6 +133,7 @@ def test_app_config_parses_default_dict():
         "Wood",
         "Disposable tableware",
         "Iron utensils",
+        "Plastic bottle",
     ]
     assert c.manual_reference_recognition.min_correction_area_ratio == 0.25
     assert c.manual_reference_recognition.max_correction_confidence == 0.80
@@ -296,6 +300,8 @@ def test_load_config_repairs_stale_manual_reference_class_lists(tmp_path: Path):
         "Cardboard",
         "Glass bottle",
         "Pen",
+        "Plastic cup",
+        "Aluminum can",
     ]
     assert cfg.manual_reference_recognition.correction_target_classes == [
         "Textile",
@@ -303,6 +309,7 @@ def test_load_config_repairs_stale_manual_reference_class_lists(tmp_path: Path):
         "Wood",
         "Disposable tableware",
         "Iron utensils",
+        "Plastic bottle",
     ]
 
 

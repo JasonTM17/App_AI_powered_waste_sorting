@@ -78,7 +78,16 @@ class LivePage(QWidget):
         self._auto_sort_state = "WAITING_EMPTY"
         self._speaker_output_mode = "hardware"
         self._speaker_voice_gender = "female"
-        self._display_stabilizer = DetectionDisplayStabilizer()
+        self._display_stabilizer = DetectionDisplayStabilizer(
+            window_size=9,
+            acquire_frames=3,
+            switch_frames=6,
+            switch_consecutive_frames=3,
+            group_by_route=True,
+            exact_acquire_frames=4,
+            exact_switch_frames=6,
+            exact_switch_consecutive_frames=3,
+        )
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 24)

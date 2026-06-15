@@ -68,3 +68,30 @@ def test_display_stabilizer_clears_after_empty_frames():
     assert stabilizer.update([])[0].cls_name == "Organic"
     assert stabilizer.update([])[0].cls_name == "Organic"
     assert stabilizer.update([]) == []
+
+
+def test_route_stabilizer_keeps_route_when_exact_recyclable_label_jumps():
+    stabilizer = DetectionDisplayStabilizer(
+        group_by_route=True,
+        exact_acquire_frames=4,
+    )
+    bottle = _detection(24, "Plastic bottle", 0.65)
+    can = _detection(1, "Aluminum can", 0.7)
+
+    stabilizer.update([bottle])
+    stabilizer.update([can])
+    visible = stabilizer.update([bottle])
+
+    assert visible[0].cls_name == "Kaggle 3-bin I"
+
+
+def test_route_stabilizer_requires_sustained_route_before_switching():
+    stabilizer = DetectionDisplayStabilizer(group_by_route=True)
+    bottle = _detection(24, "Plastic bottle", 0.7)
+    organic = _detection(17, "Organic", 0.8)
+    for _ in range(4):
+        visible = stabilizer.update([bottle])
+
+    visible = stabilizer.update([organic])
+
+    assert visible[0].cls_name == "Plastic bottle"

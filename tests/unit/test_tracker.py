@@ -44,3 +44,27 @@ def test_already_emitted_filter():
     assert tr.should_emit(out.track_id) is True
     tr.mark_emitted(out.track_id)
     assert tr.should_emit(out.track_id) is False
+
+
+def test_same_object_keeps_stability_when_exact_label_changes_within_route():
+    tr = Tracker()
+    bottle = Detection(24, "Plastic bottle", 0.7, (10, 10, 100, 100))
+    can = Detection(1, "Aluminum can", 0.7, (12, 12, 102, 102))
+
+    first = tr.update([bottle])[0]
+    second = tr.update([can])[0]
+
+    assert second.track_id == first.track_id
+    assert second.stable_frames == 2
+
+
+def test_same_object_resets_stability_when_route_changes():
+    tr = Tracker()
+    bottle = Detection(24, "Plastic bottle", 0.7, (10, 10, 100, 100))
+    organic = Detection(17, "Organic", 0.7, (12, 12, 102, 102))
+
+    first = tr.update([bottle])[0]
+    second = tr.update([organic])[0]
+
+    assert second.track_id == first.track_id
+    assert second.stable_frames == 1

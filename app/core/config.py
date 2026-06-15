@@ -31,7 +31,7 @@ class SpecialistModelConfig(BaseModel):
     path: str = "models/new-class-specialist.pt"
     class_thresholds: dict[str, float] = Field(
         default_factory=lambda: {
-            "Pen": 0.15,
+            "Pen": 0.45,
             "Battery": 0.30,
             "Toothbrush": 0.25,
         }
@@ -60,9 +60,9 @@ class ModelConfig(BaseModel):
     conf_threshold: float = Field(0.4, ge=0.0, le=1.0)
     class_thresholds: dict[str, float] = Field(
         default_factory=lambda: {
-            "Plastic bottle": 0.08,
-            "Glass bottle": 0.10,
-            "Milk bottle": 0.10,
+            "Plastic bottle": 0.30,
+            "Glass bottle": 0.30,
+            "Milk bottle": 0.30,
         }
     )
     iou_threshold: float = Field(0.45, ge=0.0, le=1.0)
@@ -156,16 +156,23 @@ class DispatchGuardConfig(BaseModel):
 
 class ManualReferenceRecognitionConfig(BaseModel):
     enabled: bool = True
-    min_similarity: float = Field(0.82, ge=0.0, le=1.0)
-    min_consensus_similarity: float = Field(0.55, ge=0.0, le=1.0)
-    min_margin: float = Field(0.04, ge=0.0, le=1.0)
-    top_k: int = Field(5, ge=1, le=25)
-    min_votes: int = Field(3, ge=1, le=25)
+    allow_unknown_matches: bool = False
+    min_similarity: float = Field(0.88, ge=0.0, le=1.0)
+    min_consensus_similarity: float = Field(0.72, ge=0.0, le=1.0)
+    min_margin: float = Field(0.08, ge=0.0, le=1.0)
+    top_k: int = Field(7, ge=1, le=25)
+    min_votes: int = Field(4, ge=1, le=25)
     max_references_per_class: int = Field(30, ge=1, le=500)
     cache_refresh_seconds: float = Field(30.0, ge=0.0, le=300.0)
     query_cache_seconds: float = Field(1.0, ge=0.0, le=30.0)
     correctable_yolo_classes: list[str] = Field(
-        default_factory=lambda: ["Cardboard", "Glass bottle", "Pen"]
+        default_factory=lambda: [
+            "Cardboard",
+            "Glass bottle",
+            "Pen",
+            "Plastic cup",
+            "Aluminum can",
+        ]
     )
     correction_target_classes: list[str] = Field(
         default_factory=lambda: [
@@ -174,7 +181,17 @@ class ManualReferenceRecognitionConfig(BaseModel):
             "Wood",
             "Disposable tableware",
             "Iron utensils",
+            "Plastic bottle",
         ]
+    )
+    correction_targets_by_yolo_class: dict[str, list[str]] = Field(
+        default_factory=lambda: {
+            "Cardboard": ["Textile", "Organic"],
+            "Glass bottle": ["Iron utensils", "Wood"],
+            "Pen": ["Disposable tableware", "Iron utensils"],
+            "Plastic cup": ["Organic"],
+            "Aluminum can": ["Plastic bottle"],
+        }
     )
     min_correction_area_ratio: float = Field(0.25, ge=0.0, le=1.0)
     max_correction_confidence: float = Field(0.80, ge=0.0, le=1.0)
@@ -225,21 +242,29 @@ def default_dispatch_guard_config() -> DispatchGuardConfig:
 def default_manual_reference_recognition_config() -> ManualReferenceRecognitionConfig:
     return ManualReferenceRecognitionConfig(
         enabled=True,
-        min_similarity=0.82,
-        min_consensus_similarity=0.55,
-        min_margin=0.04,
-        top_k=5,
-        min_votes=3,
+        allow_unknown_matches=False,
+        min_similarity=0.88,
+        min_consensus_similarity=0.72,
+        min_margin=0.08,
+        top_k=7,
+        min_votes=4,
         max_references_per_class=30,
         cache_refresh_seconds=30.0,
         query_cache_seconds=1.0,
-        correctable_yolo_classes=["Cardboard", "Glass bottle", "Pen"],
+        correctable_yolo_classes=[
+            "Cardboard",
+            "Glass bottle",
+            "Pen",
+            "Plastic cup",
+            "Aluminum can",
+        ],
         correction_target_classes=[
             "Textile",
             "Organic",
             "Wood",
             "Disposable tableware",
             "Iron utensils",
+            "Plastic bottle",
         ],
         min_correction_area_ratio=0.25,
         max_correction_confidence=0.80,
@@ -362,7 +387,46 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     if cfg.manual_reference_recognition.cache_refresh_seconds == 3.0:
         cfg.manual_reference_recognition.cache_refresh_seconds = 30.0
         changed = True
-    required_correctable = ("Cardboard", "Glass bottle", "Pen")
+    legacy_thresholds = {
+        "Plastic bottle": 0.08,
+        "Glass bottle": 0.10,
+        "Milk bottle": 0.10,
+    }
+    for class_name, old_threshold in legacy_thresholds.items():
+        if cfg.model.class_thresholds.get(class_name) == old_threshold:
+            cfg.model.class_thresholds[class_name] = 0.30
+            changed = True
+    if cfg.model.specialist.class_thresholds.get("Pen") == 0.15:
+        cfg.model.specialist.class_thresholds["Pen"] = 0.45
+        changed = True
+    if cfg.three_bin_classifier.min_confidence <= 0.42:
+        cfg.three_bin_classifier.min_confidence = 0.72
+        changed = True
+    if cfg.three_bin_classifier.min_margin <= 0.10:
+        cfg.three_bin_classifier.min_margin = 0.12
+        changed = True
+    if cfg.three_bin_classifier.max_primary_confidence >= 0.70:
+        cfg.three_bin_classifier.max_primary_confidence = 0.45
+        changed = True
+    legacy_reference_values = (
+        cfg.manual_reference_recognition.min_similarity <= 0.82
+        and cfg.manual_reference_recognition.min_consensus_similarity <= 0.55
+        and cfg.manual_reference_recognition.min_margin <= 0.04
+    )
+    if legacy_reference_values:
+        cfg.manual_reference_recognition.min_similarity = 0.88
+        cfg.manual_reference_recognition.min_consensus_similarity = 0.72
+        cfg.manual_reference_recognition.min_margin = 0.08
+        cfg.manual_reference_recognition.top_k = 7
+        cfg.manual_reference_recognition.min_votes = 4
+        changed = True
+    required_correctable = (
+        "Cardboard",
+        "Glass bottle",
+        "Pen",
+        "Plastic cup",
+        "Aluminum can",
+    )
     for class_name in required_correctable:
         if class_name not in cfg.manual_reference_recognition.correctable_yolo_classes:
             cfg.manual_reference_recognition.correctable_yolo_classes.append(class_name)
@@ -373,6 +437,7 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
         "Wood",
         "Disposable tableware",
         "Iron utensils",
+        "Plastic bottle",
     )
     for class_name in required_targets:
         if class_name not in cfg.manual_reference_recognition.correction_target_classes:
@@ -405,6 +470,8 @@ def _missing_default_config_fields(raw: object) -> bool:
         ("speaker", "voice_gender"),
         ("unknown_fallback", "dispatch_enabled"),
         ("dispatch_guard", "max_objects_per_dispatch"),
+        ("manual_reference_recognition", "allow_unknown_matches"),
+        ("manual_reference_recognition", "correction_targets_by_yolo_class"),
         ("three_bin_classifier", "mode"),
     )
     for section, key in checks:

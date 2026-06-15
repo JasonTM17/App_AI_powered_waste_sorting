@@ -373,7 +373,10 @@ def test_pipeline_labels_unknown_with_reviewed_manual_reference(tmp_path, monkey
     )
     cfg.capture.output_dir = str(tmp_path / "dataset_v2")
     cfg.model.conf_threshold = 0.3
+    cfg.manual_reference_recognition.allow_unknown_matches = True
     cfg.manual_reference_recognition.min_similarity = 0.9
+    cfg.manual_reference_recognition.top_k = 3
+    cfg.manual_reference_recognition.min_votes = 3
     _write_manual_reference(Path(cfg.capture.output_dir) / "low_conf_queue")
     uart = _StubUart()
     p = Pipeline(cfg, _UnknownInfer(), uart, tmp_path / "h.db")
@@ -396,7 +399,10 @@ def test_pipeline_routes_unknown_with_legacy_common_reference_alias(tmp_path, mo
     cfg = _dispatch_ready_config()
     cfg.capture.output_dir = str(tmp_path / "dataset_v2")
     cfg.model.conf_threshold = 0.3
+    cfg.manual_reference_recognition.allow_unknown_matches = True
     cfg.manual_reference_recognition.min_similarity = 0.9
+    cfg.manual_reference_recognition.top_k = 3
+    cfg.manual_reference_recognition.min_votes = 3
     _write_manual_reference(
         Path(cfg.capture.output_dir) / "low_conf_queue",
         cls_name="lon nuoc",
@@ -463,6 +469,8 @@ def test_pipeline_corrects_large_cardboard_cloth_to_textile_reference(tmp_path, 
     cfg.capture.output_dir = str(tmp_path / "dataset_v2")
     cfg.model.conf_threshold = 0.3
     cfg.manual_reference_recognition.min_similarity = 0.9
+    cfg.manual_reference_recognition.top_k = 3
+    cfg.manual_reference_recognition.min_votes = 3
     _write_manual_reference(
         Path(cfg.capture.output_dir) / "low_conf_queue",
         cls_name="Textile",
@@ -500,6 +508,8 @@ def test_pipeline_keeps_small_cardboard_detection_without_reference_correction(
     cfg.capture.output_dir = str(tmp_path / "dataset_v2")
     cfg.model.conf_threshold = 0.3
     cfg.manual_reference_recognition.min_similarity = 0.9
+    cfg.manual_reference_recognition.top_k = 3
+    cfg.manual_reference_recognition.min_votes = 3
     _write_manual_reference(
         Path(cfg.capture.output_dir) / "low_conf_queue",
         cls_name="Textile",
@@ -537,6 +547,8 @@ def test_pipeline_rejects_non_textile_reference_for_cardboard_correction(
     cfg.capture.output_dir = str(tmp_path / "dataset_v2")
     cfg.model.conf_threshold = 0.3
     cfg.manual_reference_recognition.min_similarity = 0.9
+    cfg.manual_reference_recognition.top_k = 3
+    cfg.manual_reference_recognition.min_votes = 3
     _write_manual_reference(
         Path(cfg.capture.output_dir) / "low_conf_queue",
         cls_name="Pen",
@@ -567,6 +579,8 @@ def test_pipeline_corrects_glass_bottle_to_wooden_spoon(
     cfg.capture.output_dir = str(tmp_path / "dataset_v2")
     cfg.model.conf_threshold = 0.05
     cfg.manual_reference_recognition.min_similarity = 0.9
+    cfg.manual_reference_recognition.top_k = 3
+    cfg.manual_reference_recognition.min_votes = 3
     cfg.manual_reference_recognition.min_correction_area_ratio = 0.2
     _write_manual_reference(
         Path(cfg.capture.output_dir) / "low_conf_queue",
@@ -596,6 +610,8 @@ def test_pipeline_corrects_pen_to_disposable_fork(tmp_path, monkeypatch):
     cfg.capture.output_dir = str(tmp_path / "dataset_v2")
     cfg.model.conf_threshold = 0.05
     cfg.manual_reference_recognition.min_similarity = 0.9
+    cfg.manual_reference_recognition.top_k = 3
+    cfg.manual_reference_recognition.min_votes = 3
     cfg.manual_reference_recognition.min_correction_area_ratio = 0.2
     _write_manual_reference(
         Path(cfg.capture.output_dir) / "low_conf_queue",
@@ -744,7 +760,7 @@ def test_pipeline_uses_lower_threshold_for_plastic_bottle(tmp_path, monkeypatch)
         def predict(self, _frame):
             return [
                 Detection(0, "Organic", 0.22, (10, 10, 100, 100)),
-                Detection(1, "Plastic bottle", 0.085, (10, 10, 100, 100)),
+                Detection(1, "Plastic bottle", 0.31, (10, 10, 100, 100)),
             ]
 
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))

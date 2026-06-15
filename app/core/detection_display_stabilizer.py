@@ -7,6 +7,7 @@ from dataclasses import replace
 
 from app.core.events import Detection
 from app.core.three_bin_classifier import parse_three_bin_class_name
+from app.core.waste_categories import category_for_known_class
 
 
 def _bbox_iou(
@@ -26,13 +27,40 @@ def _bbox_iou(
     return intersection / union if union > 0 else 0.0
 
 
-def _label_family(detection: Detection) -> str:
+def _label_family(detection: Detection, *, group_by_route: bool = False) -> str:
     command = parse_three_bin_class_name(detection.cls_name)
     if command is not None:
         return f"route:{command}"
-    if detection.cls_name == "Organic":
+    if group_by_route:
+        category = category_for_known_class(detection.cls_name)
+        if category is not None:
+            return f"route:{category.code}"
+    elif detection.cls_name == "Organic":
         return "route:O"
     return f"class:{detection.cls_name}"
+
+
+def _exact_label_key(detection: Detection) -> tuple[str, str] | None:
+    if parse_three_bin_class_name(detection.cls_name) is not None:
+        return None
+    return detection.cls_name, detection.operator_label
+
+
+def _generic_route_detection(
+    family: str,
+    samples: list[Detection],
+) -> Detection:
+    command = family.removeprefix("route:")
+    latest = samples[-1]
+    confidence = sum(sample.conf for sample in samples) / len(samples)
+    cls_ids = {"O": -301, "R": -302, "I": -303}
+    return Detection(
+        cls_id=cls_ids.get(command, -300),
+        cls_name=f"Kaggle 3-bin {command}",
+        conf=confidence,
+        xyxy=latest.xyxy,
+        source="temporal_route_consensus",
+    )
 
 
 class DetectionDisplayStabilizer:
@@ -47,6 +75,10 @@ class DetectionDisplayStabilizer:
         switch_consecutive_frames: int = 3,
         max_missed_frames: int = 3,
         object_iou_threshold: float = 0.12,
+        group_by_route: bool = False,
+        exact_acquire_frames: int = 3,
+        exact_switch_frames: int = 5,
+        exact_switch_consecutive_frames: int = 3,
     ) -> None:
         self.window_size = max(3, int(window_size))
         self.acquire_frames = max(1, int(acquire_frames))
@@ -54,15 +86,27 @@ class DetectionDisplayStabilizer:
         self.switch_consecutive_frames = max(1, int(switch_consecutive_frames))
         self.max_missed_frames = max(0, int(max_missed_frames))
         self.object_iou_threshold = max(0.0, min(1.0, float(object_iou_threshold)))
+        self.group_by_route = bool(group_by_route)
+        self.exact_acquire_frames = max(1, int(exact_acquire_frames))
+        self.exact_switch_frames = max(
+            self.exact_acquire_frames,
+            int(exact_switch_frames),
+        )
+        self.exact_switch_consecutive_frames = max(
+            1,
+            int(exact_switch_consecutive_frames),
+        )
         self._samples: deque[Detection | None] = deque(maxlen=self.window_size)
         self._stable_family = ""
         self._stable_detection: Detection | None = None
+        self._stable_exact_key: tuple[str, str] | None = None
         self._missed_frames = 0
 
     def reset(self) -> None:
         self._samples.clear()
         self._stable_family = ""
         self._stable_detection = None
+        self._stable_exact_key = None
         self._missed_frames = 0
 
     def update(self, detections: list[Detection]) -> list[Detection]:
@@ -82,9 +126,11 @@ class DetectionDisplayStabilizer:
 
         self._missed_frames = 0
         self._samples.append(current)
-        current_family = _label_family(current)
+        current_family = _label_family(current, group_by_route=self.group_by_route)
         family_counts = Counter(
-            _label_family(sample) for sample in self._samples if sample is not None
+            _label_family(sample, group_by_route=self.group_by_route)
+            for sample in self._samples
+            if sample is not None
         )
 
         if not self._stable_family:
@@ -93,7 +139,9 @@ class DetectionDisplayStabilizer:
             self._stable_family = current_family
         elif current_family != self._stable_family:
             recent_families = [
-                _label_family(sample) for sample in self._samples if sample is not None
+                _label_family(sample, group_by_route=self.group_by_route)
+                for sample in self._samples
+                if sample is not None
             ]
             consecutive = recent_families[-self.switch_consecutive_frames :]
             should_switch = (
@@ -103,14 +151,20 @@ class DetectionDisplayStabilizer:
             )
             if should_switch:
                 self._stable_family = current_family
+                self._stable_exact_key = None
 
         stable_samples = [
             sample
             for sample in self._samples
-            if sample is not None and _label_family(sample) == self._stable_family
+            if sample is not None
+            and _label_family(sample, group_by_route=self.group_by_route)
+            == self._stable_family
         ]
         if not stable_samples:
             return [self._stable_detection] if self._stable_detection is not None else []
+
+        if self.group_by_route and self._stable_family.startswith("route:"):
+            return [self._stable_route_detection(stable_samples)]
 
         representative = max(
             stable_samples,
@@ -127,6 +181,48 @@ class DetectionDisplayStabilizer:
             xyxy=latest.xyxy,
         )
         return [self._stable_detection]
+
+    def _stable_route_detection(self, samples: list[Detection]) -> Detection:
+        exact_samples = [sample for sample in samples if _exact_label_key(sample) is not None]
+        exact_counts = Counter(_exact_label_key(sample) for sample in exact_samples)
+        if exact_counts:
+            candidate, candidate_count = exact_counts.most_common(1)[0]
+            exact_keys = [_exact_label_key(sample) for sample in exact_samples]
+            required = (
+                self.exact_acquire_frames
+                if self._stable_exact_key is None
+                else self.exact_switch_frames
+            )
+            consecutive = exact_keys[-self.exact_switch_consecutive_frames :]
+            can_select = candidate_count >= required and (
+                self._stable_exact_key is None
+                or candidate == self._stable_exact_key
+                or (
+                    len(consecutive) == self.exact_switch_consecutive_frames
+                    and all(key == candidate for key in consecutive)
+                )
+            )
+            if can_select:
+                self._stable_exact_key = candidate
+
+        if self._stable_exact_key is None:
+            self._stable_detection = _generic_route_detection(self._stable_family, samples)
+            return self._stable_detection
+
+        matching = [
+            sample
+            for sample in exact_samples
+            if _exact_label_key(sample) == self._stable_exact_key
+        ]
+        if not matching:
+            return self._stable_detection or _generic_route_detection(
+                self._stable_family,
+                samples,
+            )
+        latest = matching[-1]
+        confidence = sum(sample.conf for sample in matching) / len(matching)
+        self._stable_detection = replace(latest, conf=confidence)
+        return self._stable_detection
 
     def _handle_empty_frame(self) -> list[Detection]:
         self._missed_frames += 1

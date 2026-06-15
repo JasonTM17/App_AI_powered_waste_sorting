@@ -4,7 +4,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · SemVer.
 
 ## [Unreleased]
 
-- TBD next milestone improvements.
+### Fixed
+- Stabilized Live labels and servo dispatch by tracking route consensus across
+  class-name changes for the same physical object.
+- Restricted reviewed-image corrections to explicit confusion pairs and disabled
+  unsafe exact-name promotion for generic unknown objects by default.
+- Raised legacy bottle, pen, and three-bin confidence gates to reduce empty-tray
+  and cross-class false positives.
+- Open USB cameras with MJPG before requesting 1280x720 and log the actual capture
+  resolution for hardware diagnosis.
+- Route metal utensils to the inorganic bin instead of the recyclable bin.
 
 ## [2.0.0] – 2026-05-21
 

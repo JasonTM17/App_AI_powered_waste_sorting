@@ -278,7 +278,6 @@ RECYCLABLE_CLASSES = frozenset(
         "Foam food box",
         "Glass bottle",
         "Glass jar",
-        "Iron utensils",
         "Metal shavings",
         "Metal bottle cap",
         "Milk bottle",

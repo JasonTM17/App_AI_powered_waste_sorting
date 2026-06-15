@@ -137,7 +137,13 @@ class ManualReferenceRecognizer:
             self._references = references
             self._query_cache.clear()
 
-    def classify(self, frame_bgr: np.ndarray, detection: Detection) -> ManualReferenceMatch | None:
+    def classify(
+        self,
+        frame_bgr: np.ndarray,
+        detection: Detection,
+        *,
+        allowed_classes: set[str] | None = None,
+    ) -> ManualReferenceMatch | None:
         with self._lock:
             enabled = self.enabled
         if not enabled:
@@ -146,6 +152,12 @@ class ManualReferenceRecognizer:
         crops = _candidate_rgb_crops_from_bgr(frame_bgr, detection.xyxy)
         with self._lock:
             references = tuple(self._references)
+        if allowed_classes:
+            references = tuple(
+                reference
+                for reference in references
+                if reference.cls_name in allowed_classes
+            )
         if not crops or not references:
             return None
         now = time.monotonic()

@@ -606,7 +606,7 @@ class Pipeline:
         for detection in detections:
             mode = ""
             area_ratio = 0.0
-            if detection.cls_name == fallback_name:
+            if detection.cls_name == fallback_name and ref_cfg.allow_unknown_matches:
                 mode = "unknown"
             elif detection.cls_name in correctable_classes:
                 area_ratio = _box_area_ratio(detection.xyxy, width, height)
@@ -620,7 +620,20 @@ class Pipeline:
             if not mode:
                 out.append(detection)
                 continue
-            match = recognizer.classify(frame_bgr, detection)
+            source_targets = set(
+                ref_cfg.correction_targets_by_yolo_class.get(
+                    detection.cls_name,
+                    [],
+                )
+            )
+            allowed_classes = (
+                None if mode == "unknown" else source_targets or correction_targets
+            )
+            match = recognizer.classify(
+                frame_bgr,
+                detection,
+                allowed_classes=allowed_classes or None,
+            )
             if match is None:
                 out.append(detection)
                 continue

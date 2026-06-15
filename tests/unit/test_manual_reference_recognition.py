@@ -184,6 +184,33 @@ def test_manual_reference_recognizes_reviewed_sample(tmp_path):
     assert match.similarity >= 0.9
 
 
+def test_manual_reference_limits_candidates_to_allowed_classes(tmp_path):
+    queue_dir = tmp_path / "queue"
+    _write_reference(queue_dir, reviewed=True, cls_name="Pen")
+    _write_reference(
+        queue_dir,
+        reviewed=True,
+        cls_name="Plastic bottle",
+        cls_id=24,
+        rgb_color=(30, 60, 220),
+    )
+    recognizer = ManualReferenceRecognizer(
+        queue_dir,
+        min_similarity=0.9,
+        refresh_seconds=0,
+        query_cache_seconds=0,
+        embedder=_MarkerEmbedder(),
+    )
+
+    match = recognizer.classify(
+        _query_frame(),
+        Detection(42, "Pen", 0.4, (15, 12, 65, 28)),
+        allowed_classes={"Plastic bottle"},
+    )
+
+    assert match is None
+
+
 def test_manual_reference_ignores_unreviewed_sample(tmp_path):
     queue_dir = tmp_path / "queue"
     _write_reference(queue_dir, reviewed=False)

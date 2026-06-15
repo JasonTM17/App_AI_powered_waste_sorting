@@ -56,6 +56,12 @@ class CameraWorker(QThread):
             if not cap.isOpened():
                 cap.release()
                 continue
+            if is_index:
+                with suppress(Exception):
+                    cap.set(
+                        cv2.CAP_PROP_FOURCC,
+                        cv2.VideoWriter_fourcc(*"MJPG"),
+                    )
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
             with suppress(Exception):
@@ -70,7 +76,19 @@ class CameraWorker(QThread):
                 )
                 cap.release()
                 continue
-            logger.info("camera open ok source={} backend={}", self._source, name)
+            actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+            actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+            actual_fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+            logger.info(
+                "camera open ok source={} backend={} requested={}x{} actual={}x{} fps={:.1f}",
+                self._source,
+                name,
+                self._width,
+                self._height,
+                actual_width,
+                actual_height,
+                actual_fps,
+            )
             self._cap = cap
             return True
         return False
