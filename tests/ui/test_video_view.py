@@ -17,3 +17,15 @@ def test_video_view_accepts_frame_and_detections(qtbot):
     assert v._pixmap is not None
     assert v._frame_w == 320 and v._frame_h == 240
     assert len(v._detections) == 1
+
+
+def test_video_view_fills_available_camera_area(qtbot):
+    v = VideoView()
+    qtbot.addWidget(v)
+    v.resize(900, 400)
+    v.set_frame(np.zeros((480, 640, 3), dtype=np.uint8))
+
+    scaled = v._ensure_scaled()
+
+    assert scaled is not None
+    assert scaled.size() == v.size()

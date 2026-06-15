@@ -27,6 +27,7 @@ from app.core.waste_categories import (
     category_for_class,
     category_for_command,
 )
+from app.core.waste_display import waste_display_name
 from app.ui.widgets.safe_inputs import SafeSpinBox
 
 _DEFAULT_DOT = "#64748B"
@@ -50,37 +51,8 @@ def _route_for(mapping: ClassMapping) -> WasteCategory:
 
 
 def _vietnamese_name(class_name: str) -> str:
-    vi_map = {
-        "Organic": "Rác hữu cơ",
-        "Aluminum can": "Lon nhôm",
-        "Plastic bottle": "Chai nhựa PET",
-        "Cardboard": "Thùng carton",
-        "Paper": "Giấy",
-        "Plastic bag": "Túi nylon",
-        "Plastic cup": "Ly nhựa",
-        "Tin": "Hộp thiếc",
-        "Glass bottle": "Chai thủy tinh",
-        "Pen": "Bút bi",
-        "Battery": "Pin",
-        "Toothbrush": "Bàn chải",
-        "Textile": "Vải/Quần áo",
-        "Disposable tableware": "Hộp xốp/1 lần",
-        "Unknown plastic": "Nhựa khác",
-        "Tetra pack": "Vỏ hộp sữa",
-        "Ceramic": "Gốm sứ",
-        "Aerosols": "Bình xịt",
-        "Electronics": "Đồ điện tử",
-        "Plastic caps": "Nắp nhựa",
-        "Stretch film": "Màng bọc TP",
-        "Paper cups": "Ly giấy",
-        "Aluminum caps": "Nắp nhôm",
-        "Foil": "Giấy bạc",
-        "Postal packaging": "Bao bì CPN",
-        "Scrap metal": "Sắt vụn",
-        "Plastic canister": "Can/Hộp nhựa",
-        "Paper bag": "Túi giấy",
-    }
-    return vi_map.get(class_name, "")
+    display_name = waste_display_name(class_name)
+    return "" if display_name == class_name else display_name
 
 
 def _payload_preview(command: str) -> str:

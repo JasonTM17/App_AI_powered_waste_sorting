@@ -292,19 +292,18 @@ def main(*, require_admin_login: bool = True) -> int:
             from datetime import datetime
 
             from app.core.config import ClassMapping
-            from app.core.three_bin_classifier import (
-                parse_three_bin_class_name,
-                three_bin_display_name,
-            )
+            from app.core.three_bin_classifier import parse_three_bin_class_name
             from app.core.uart_protocol import encode_sort
             from app.core.waste_categories import (
                 category_for_command,
                 normalize_mapping_to_three_bins,
             )
+            from app.core.waste_display import waste_display_name
 
             ts = datetime.now().strftime("%H:%M:%S")
+            current_rows: list[tuple[str, float, str, str]] = []
             for d in detections:
-                display_name = three_bin_display_name(d.cls_name)
+                display_name = waste_display_name(d.cls_name)
                 three_bin_command = parse_three_bin_class_name(d.cls_name)
                 mapping = next(
                     (m for m in controller.cfg.mappings if m.enabled and m.class_name == d.cls_name),
@@ -357,7 +356,8 @@ def main(*, require_admin_login: bool = True) -> int:
                     )
                     if three_bin_command is not None:
                         detail = f"Phân loại dự phòng 3 thùng; {detail}"
-                window.live_page.append_detection(display_name, d.conf, ts, detail)
+                current_rows.append((display_name, d.conf, ts, detail))
+            window.live_page.set_current_detections(current_rows)
 
     controller.frame_processed.connect(_on_frame)
     window.live_page.snapshot_requested.connect(controller.take_snapshot)

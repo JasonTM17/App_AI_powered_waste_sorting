@@ -4,7 +4,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtWidgets import QApplication, QBoxLayout
 
-import app.ui.pages.live as live_module
 from app.ui.pages.live import LivePage
 from app.ui.widgets.theme import apply_theme
 
@@ -158,28 +157,28 @@ def test_live_page_stacks_video_and_detection_stream_when_narrow(qtbot):
     assert page._stream_card.maximumHeight() == 16777215
 
 
-def test_live_page_coalesces_same_detection_within_one_second(qtbot, monkeypatch):
+def test_live_page_replaces_previous_frame_detection(qtbot):
     page = LivePage()
     qtbot.addWidget(page)
-    ticks = iter((10.0, 10.4))
-    monkeypatch.setattr(live_module.time, "monotonic", lambda: next(ticks))
 
     page.append_detection("Pen", 0.51, "09:32:01", "TEST OFF; Vô cơ; bin 2")
     page.append_detection("Pen", 0.56, "09:32:01", "TEST OFF; Vô cơ; bin 2")
 
     assert page.stream.count() == 1
     assert "0.56" in page.stream.item(0).text()
-    assert "[x2]" in page.stream.item(0).text()
 
 
-def test_live_page_keeps_distinct_or_later_detections(qtbot, monkeypatch):
+def test_live_page_shows_only_current_frame_results(qtbot):
     page = LivePage()
     qtbot.addWidget(page)
-    ticks = iter((10.0, 10.2, 11.5))
-    monkeypatch.setattr(live_module.time, "monotonic", lambda: next(ticks))
 
-    page.append_detection("Pen", 0.51, "09:32:01", "route A")
-    page.append_detection("Pen", 0.52, "09:32:01", "route B")
-    page.append_detection("Pen", 0.53, "09:32:02", "route A")
+    page.set_current_detections(
+        [
+            ("Rác hữu cơ", 0.81, "09:32:02", "Hữu cơ; bin 1"),
+            ("Lon nhôm", 0.76, "09:32:02", "Tái chế; bin 3"),
+        ]
+    )
 
-    assert page.stream.count() == 3
+    assert page.stream.count() == 2
+    assert "Rác hữu cơ" in page.stream.item(0).text()
+    assert "Lon nhôm" in page.stream.item(1).text()

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import time
-
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
@@ -30,7 +28,6 @@ from app.utils.paths import resource_path
 
 LIVE_CONTROL_SIZE = QSize(176, 56)
 SPEAKER_BUTTON_SIZE = QSize(182, 48)
-DETECTION_COALESCE_SECONDS = 1.0
 DETECTION_STREAM_LIMIT = 50
 
 
@@ -80,7 +77,6 @@ class LivePage(QWidget):
         self._auto_sort_state = "WAITING_EMPTY"
         self._speaker_output_mode = "hardware"
         self._speaker_voice_gender = "female"
-        self._detection_rows: dict[str, tuple[QListWidgetItem, float, int]] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 24)
@@ -243,7 +239,7 @@ class LivePage(QWidget):
         stream_layout = QVBoxLayout(stream_card)
         stream_layout.setContentsMargins(16, 14, 16, 16)
         stream_layout.setSpacing(12)
-        stream_title = QLabel("AI DETECTION")
+        stream_title = QLabel("KẾT QUẢ HIỆN TẠI")
         stream_title.setObjectName("mono")
         stream_layout.addWidget(stream_title)
         self.stream = QListWidget()
@@ -451,37 +447,21 @@ class LivePage(QWidget):
         self.video.set_detections(detections)
 
     def append_detection(self, cls_name: str, conf: float, ts: str, detail: str = "") -> None:
-        now = time.monotonic()
-        key = self._detection_key(cls_name, detail)
-        recent = self._detection_rows.get(key)
-        if recent is not None:
-            item, last_seen, observations = recent
-            if now - last_seen <= DETECTION_COALESCE_SECONDS and self.stream.row(item) >= 0:
-                observations += 1
-                text = self._detection_text(cls_name, conf, ts, detail, observations)
-                item.setText(text)
-                item.setToolTip(text)
-                self.stream.takeItem(self.stream.row(item))
-                self.stream.insertItem(0, item)
-                self._detection_rows[key] = (item, now, observations)
-                return
+        self.set_current_detections([(cls_name, conf, ts, detail)])
 
-        text = self._detection_text(cls_name, conf, ts, detail, 1)
-        item = QListWidgetItem(text)
-        item.setToolTip(text)
-        item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter)
-        self.stream.insertItem(0, item)
-        self._detection_rows[key] = (item, now, 1)
-        while self.stream.count() > DETECTION_STREAM_LIMIT:
-            removed = self.stream.takeItem(self.stream.count() - 1)
-            stale_keys = [row_key for row_key, row in self._detection_rows.items() if row[0] is removed]
-            for row_key in stale_keys:
-                self._detection_rows.pop(row_key, None)
+    def set_current_detections(
+        self,
+        rows: list[tuple[str, float, str, str]],
+    ) -> None:
+        """Replace per-frame guesses instead of accumulating contradictory labels."""
 
-    @staticmethod
-    def _detection_key(cls_name: str, detail: str) -> str:
-        stable_detail = " ".join(str(detail or "").split()).casefold()
-        return f"{str(cls_name).strip().casefold()}|{stable_detail}"
+        self.stream.clear()
+        for cls_name, conf, ts, detail in rows[:DETECTION_STREAM_LIMIT]:
+            text = self._detection_text(cls_name, conf, ts, detail)
+            item = QListWidgetItem(text)
+            item.setToolTip(text)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignVCenter)
+            self.stream.addItem(item)
 
     @staticmethod
     def _detection_text(
@@ -489,11 +469,9 @@ class LivePage(QWidget):
         conf: float,
         ts: str,
         detail: str,
-        observations: int,
     ) -> str:
-        count = f"  [x{observations}]" if observations > 1 else ""
         suffix = f"\n    {detail}" if detail else ""
-        return f"*  {cls_name:<10} {conf:.2f}    {ts}{count}{suffix}"
+        return f"*  {cls_name:<10} {conf:.2f}    {ts}{suffix}"
 
     def set_fps(self, fps: float) -> None:
         if not self._cam_on:

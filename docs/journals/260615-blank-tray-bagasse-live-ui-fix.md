@@ -28,6 +28,14 @@
 - Generic three-bin `O` remains `Rác hữu cơ (chưa xác định loại)`; it is not promoted to
   the exact `Organic` class unless the narrow two-model bagasse ambiguity gate passes.
 
+## Live Presentation Follow-up
+
+- The side panel now replaces per-frame results instead of accumulating contradictory
+  intermediate labels for the same object.
+- Canonical classes use one shared Vietnamese display-name map across Live, bbox, and Mapping.
+- The camera preview fills its available widget without cropping the source frame. Stretching
+  is presentation-only; inference, ROI, captures, and bbox coordinates keep the original frame.
+
 ## Unresolved Questions
 
 - Exact bagasse recognition still needs reviewed bagasse samples and a future trained class
