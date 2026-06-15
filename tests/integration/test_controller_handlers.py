@@ -460,6 +460,29 @@ def test_laptop_voice_warning_previews_warning_audio(tmp_path):
     assert results and results[0][0] is True
 
 
+def test_laptop_startup_event_plays_selected_voice_pack(tmp_path):
+    cfg = AppConfig()
+    cfg.speaker.output_mode = "computer_speaker"
+    cfg.speaker.voice_gender = "male"
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    speaker = _SpeakerSpy()
+    controller._speaker = speaker
+    results = []
+    controller.test_uart_result.connect(lambda ok, msg: results.append((ok, msg)))
+
+    try:
+        controller.test_audio_event(
+            "startup",
+            output_mode="computer_speaker",
+            voice_gender=cfg.speaker.voice_gender,
+        )
+    finally:
+        controller.stop()
+
+    assert speaker.events == [("startup", "male")]
+    assert results and results[0][0] is True
+
+
 def test_hardware_audio_event_uses_audio_only_uart_command(tmp_path):
     class _AudioUart:
         is_connected = True

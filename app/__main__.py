@@ -196,6 +196,12 @@ def main(*, require_admin_login: bool = True) -> int:
         new_cfg.speaker.output_mode = mode
         controller.update_config(new_cfg)
         _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
+        if controller.cfg.speaker.output_mode == "computer_speaker":
+            controller.test_audio_event(
+                "startup",
+                output_mode="computer_speaker",
+                voice_gender=controller.cfg.speaker.voice_gender,
+            )
 
     def _on_speaker_voice_gender_request(gender: str) -> None:
         new_cfg = controller.cfg.model_copy(deep=True)
