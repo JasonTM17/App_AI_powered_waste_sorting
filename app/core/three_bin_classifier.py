@@ -22,9 +22,9 @@ THREE_BIN_CLASS_NAMES = {
     "I": "Kaggle 3-bin I",
 }
 THREE_BIN_DISPLAY_NAMES = {
-    "O": "Rác hữu cơ (chưa xác định loại)",
-    "R": "Rác vô cơ (chưa xác định loại)",
-    "I": "Rác tái chế (chưa xác định loại)",
+    "O": "Nhóm Hữu cơ (AI chưa xác định vật cụ thể)",
+    "R": "Nhóm Vô cơ (AI chưa xác định vật cụ thể)",
+    "I": "Nhóm Tái chế (AI chưa xác định vật cụ thể)",
 }
 THREE_BIN_CLASS_IDS = {"O": -301, "R": -302, "I": -303}
 THREE_BIN_SOURCE = "kaggle_three_bin_classifier"

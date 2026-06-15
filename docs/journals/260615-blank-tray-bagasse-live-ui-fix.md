@@ -25,7 +25,7 @@
   classifier confirmed `O`, so the corrected output is `Organic`.
 - Curated Organic aliases include banana/fruit peel, vegetable and food scraps,
   eggshell, coffee/tea grounds, leaves, hard fruit rind, bones, and sugarcane bagasse.
-- Generic three-bin `O` remains `Rác hữu cơ (chưa xác định loại)`; it is not promoted to
+- Generic three-bin `O` remains a generic organic-group result; it is not promoted to
   the exact `Organic` class unless the narrow two-model bagasse ambiguity gate passes.
 
 ## Live Presentation Follow-up
@@ -53,6 +53,21 @@
 - Operator review restored the balanced `4:1` Live layout and the wider result panel.
 - The camera image now preserves its source aspect ratio inside the card, so objects are
   not stretched or visually over-zoomed and surrounding tray space remains visible.
+
+## Leaf, Wooden Spoon, And Empty-Tray Follow-up
+
+- A second empty-tray guard now rejects bright, low-detail frames when the model produces
+  a full-tray box or a tiny border box. The empty frame still updates the foreground
+  baseline so the next real object is recognized without an extra cycle.
+- Reviewed recognition-only references preserve the exact operator labels `Lá cây` and
+  `Thìa gỗ`; these samples are excluded from automatic training.
+- Low-confidence `Glass bottle` predictions may be corrected by reviewed references, while
+  the existing high-confidence Cardboard-to-Textile correction remains unchanged.
+- Generic three-bin results now say that AI has not identified the specific object instead
+  of presenting an internal or ambiguous class name.
+- Real-image acceptance with the active model produced no result for the empty tray,
+  `Organic / Lá cây` at 0.995, and `Wood / Thìa gỗ` at 0.991.
+- Multiple detected objects remain visible for review but are blocked from servo dispatch.
 
 ## Unresolved Questions
 

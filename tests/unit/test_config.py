@@ -119,9 +119,17 @@ def test_app_config_parses_default_dict():
     assert c.manual_reference_recognition.top_k == 5
     assert c.manual_reference_recognition.cache_refresh_seconds == 30.0
     assert c.manual_reference_recognition.query_cache_seconds == 1.0
-    assert c.manual_reference_recognition.correctable_yolo_classes == ["Cardboard"]
-    assert c.manual_reference_recognition.correction_target_classes == ["Textile"]
+    assert c.manual_reference_recognition.correctable_yolo_classes == [
+        "Cardboard",
+        "Glass bottle",
+    ]
+    assert c.manual_reference_recognition.correction_target_classes == [
+        "Textile",
+        "Organic",
+        "Wood",
+    ]
     assert c.manual_reference_recognition.min_correction_area_ratio == 0.25
+    assert c.manual_reference_recognition.max_correction_confidence == 0.30
     assert c.three_bin_classifier.enabled is False
     assert c.three_bin_classifier.model_path == "models/three_bin_classifier.pt"
     assert c.three_bin_classifier.mode == "unknown_only"

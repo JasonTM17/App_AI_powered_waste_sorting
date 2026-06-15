@@ -22,6 +22,7 @@ from app.core.config import (
 )
 from app.core.detection_filtering import (
     find_ambiguous_organic_candidate,
+    is_low_detail_empty_tray,
     is_uniform_empty_tray_artifact,
     suppress_overlapping_detections,
 )
@@ -455,7 +456,9 @@ class Pipeline:
         changed_ratio = changed / float(area)
         return changed >= 48 and changed_ratio >= 0.02
 
-    def _save_labeled_capture(self, frame_bgr, tracked: TrackedDetection, mapping) -> LabeledCapture:
+    def _save_labeled_capture(
+        self, frame_bgr, tracked: TrackedDetection, mapping
+    ) -> LabeledCapture:
         det = tracked.detection
         category = category_for_command(mapping.command)
         category_name = category.name if category is not None else f"Thùng {mapping.bin_index}"
@@ -476,10 +479,7 @@ class Pipeline:
         width, height = annotated.size
         x1, y1, x2, y2 = _clamp_box(det.xyxy, width, height)
         font = _load_label_font()
-        label = (
-            f"{det.cls_name} {det.conf:.0%} | {category_name} | "
-            f"Thùng {int(mapping.bin_index)}"
-        )
+        label = f"{det.cls_name} {det.conf:.0%} | {category_name} | Thùng {int(mapping.bin_index)}"
         stroke = (16, 185, 129)
         fill = (4, 54, 38)
         draw.rectangle((x1, y1, x2, y2), outline=stroke, width=4)
@@ -581,14 +581,10 @@ class Pipeline:
             return detections
         fallback_name = self.cfg.unknown_fallback.class_name
         correctable_classes = {
-            str(name).strip()
-            for name in ref_cfg.correctable_yolo_classes
-            if str(name).strip()
+            str(name).strip() for name in ref_cfg.correctable_yolo_classes if str(name).strip()
         }
         correction_targets = {
-            str(name).strip()
-            for name in ref_cfg.correction_target_classes
-            if str(name).strip()
+            str(name).strip() for name in ref_cfg.correction_target_classes if str(name).strip()
         }
         height, width = frame_bgr.shape[:2] if frame_bgr.ndim >= 2 else (0, 0)
         out: list[Detection] = []
@@ -599,7 +595,11 @@ class Pipeline:
                 mode = "unknown"
             elif detection.cls_name in correctable_classes:
                 area_ratio = _box_area_ratio(detection.xyxy, width, height)
-                if area_ratio >= ref_cfg.min_correction_area_ratio:
+                confidence_ok = (
+                    detection.cls_name != "Glass bottle"
+                    or detection.conf <= ref_cfg.max_correction_confidence
+                )
+                if area_ratio >= ref_cfg.min_correction_area_ratio and confidence_ok:
                     mode = "correction"
             if not mode:
                 out.append(detection)
@@ -608,7 +608,11 @@ class Pipeline:
             if match is None:
                 out.append(detection)
                 continue
-            if mode == "correction" and correction_targets and match.cls_name not in correction_targets:
+            if (
+                mode == "correction"
+                and correction_targets
+                and match.cls_name not in correction_targets
+            ):
                 out.append(detection)
                 continue
             out.append(
@@ -618,6 +622,7 @@ class Pipeline:
                     conf=max(detection.conf, match.similarity),
                     xyxy=detection.xyxy,
                     source="manual_reference",
+                    operator_label=match.operator_label,
                 )
             )
             self.dispatch_status = f"manual reference {match.cls_name}"
@@ -792,13 +797,18 @@ class Pipeline:
 
     def process_frame(self, frame_bgr: np.ndarray, ts: datetime):
         raw = self.engine.predict(frame_bgr)
+        low_detail_empty = is_low_detail_empty_tray(frame_bgr, raw)
         roi = self.cfg.roi
         roi_xyxy = (
             (roi.x, roi.y, roi.x + roi.width, roi.y + roi.height)
             if roi.enabled and roi.width > 0 and roi.height > 0
             else None
         )
-        if is_uniform_empty_tray_artifact(frame_bgr, raw, roi_xyxy=roi_xyxy):
+        if low_detail_empty or is_uniform_empty_tray_artifact(
+            frame_bgr,
+            raw,
+            roi_xyxy=roi_xyxy,
+        ):
             raw = []
         else:
             raw = self._correct_ambiguous_organic(frame_bgr, raw)
@@ -988,9 +998,7 @@ class Pipeline:
                 "route": mapping.command,
                 "bin_index": int(mapping.bin_index),
                 "confidence": float(t.detection.conf),
-                "speaker_mode": (
-                    "computer" if computer_speaker_enabled(self.cfg) else "hardware"
-                ),
+                "speaker_mode": ("computer" if computer_speaker_enabled(self.cfg) else "hardware"),
                 "payload": self._uart_payload_preview(
                     mapping.command,
                     t.detection.conf,
@@ -1012,7 +1020,9 @@ class Pipeline:
                 "image_path": None,
                 "annotated_path": None,
                 "meta_path": None,
-                "route_label": category.name if category is not None else f"Thùng {mapping.bin_index}",
+                "route_label": category.name
+                if category is not None
+                else f"Thùng {mapping.bin_index}",
                 "bin_index": int(mapping.bin_index),
             }
             capture_ok = False
@@ -1136,12 +1146,16 @@ class Pipeline:
 
     def _uart_payload_preview(self, command: str, confidence: float) -> str:
         try:
-            return encode_sort(
-                command,
-                confidence,
-                protocol=self.cfg.uart.protocol,
-                silent=computer_speaker_enabled(self.cfg),
-            ).decode("utf-8").strip()
+            return (
+                encode_sort(
+                    command,
+                    confidence,
+                    protocol=self.cfg.uart.protocol,
+                    silent=computer_speaker_enabled(self.cfg),
+                )
+                .decode("utf-8")
+                .strip()
+            )
         except Exception as e:
             return f"invalid:{e}"
 

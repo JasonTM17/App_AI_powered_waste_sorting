@@ -162,6 +162,16 @@ DEFAULT_CLASS_ORDER = (
 )
 
 VIETNAMESE_CLASS_ALIASES = {
+    "leaf": "Organic",
+    "leaves": "Organic",
+    "dry leaf": "Organic",
+    "la cay": "Organic",
+    "lá cây": "Organic",
+    "wooden spoon": "Wood",
+    "thia go": "Wood",
+    "thìa gỗ": "Wood",
+    "muong go": "Wood",
+    "muỗng gỗ": "Wood",
     "vo chuoi": "Organic",
     "vỏ chuối": "Organic",
     "rac thuc pham": "Organic",

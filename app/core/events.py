@@ -21,6 +21,7 @@ class Detection:
     secondary_margin: float | None = None
     route_consensus: Literal["not_required", "passed", "blocked"] = "not_required"
     route_consensus_reason: str = ""
+    operator_label: str = ""
 
 
 @dataclass(frozen=True)

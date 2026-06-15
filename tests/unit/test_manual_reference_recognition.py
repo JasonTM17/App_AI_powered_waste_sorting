@@ -49,6 +49,8 @@ def _write_reference(
     cls_name: str = "Pen",
     cls_id: int = 42,
     rgb_color: tuple[int, int, int] = (220, 30, 30),
+    operator_label: str = "",
+    recognition_only: bool = False,
 ) -> None:
     queue_dir.mkdir(parents=True, exist_ok=True)
     for index in range(count):
@@ -65,17 +67,46 @@ def _write_reference(
             "reviewed": reviewed,
             "bbox_reviewed": reviewed,
             "recognition_enabled": True,
+            "recognition_only": recognition_only,
+            "training_excluded": recognition_only,
             "holdout": holdout,
             "boxes": [
                 {
                     "cls_id": cls_id,
                     "cls_name": cls_name,
+                    "operator_label": operator_label,
                     "conf": 1.0,
                     "xyxy": [15, 12, 65, 28],
                 }
             ],
         }
         img_path.with_suffix(".json").write_text(json.dumps(meta), encoding="utf-8")
+
+
+def test_manual_reference_accepts_reviewed_recognition_only_operator_label(tmp_path):
+    queue_dir = tmp_path / "queue"
+    _write_reference(
+        queue_dir,
+        reviewed=True,
+        cls_name="Organic",
+        cls_id=17,
+        operator_label="Lá cây",
+        recognition_only=True,
+    )
+    recognizer = ManualReferenceRecognizer(
+        queue_dir,
+        min_similarity=0.9,
+        embedder=LegacyImageEmbedder(),
+    )
+    frame = np.zeros((40, 80, 3), dtype=np.uint8)
+    frame[:, :] = (20, 20, 20)
+    frame[12:28, 15:65] = (30, 30, 220)
+
+    match = recognizer.classify(frame, Detection(-1, "Unknown object", 0.2, (15, 12, 65, 28)))
+
+    assert match is not None
+    assert match.cls_name == "Organic"
+    assert match.operator_label == "Lá cây"
 
 
 def _write_full_pen_references(queue_dir) -> None:

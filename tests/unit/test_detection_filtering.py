@@ -2,6 +2,7 @@ import numpy as np
 
 from app.core.detection_filtering import (
     find_ambiguous_organic_candidate,
+    is_low_detail_empty_tray,
     is_uniform_empty_tray_artifact,
     suppress_overlapping_detections,
 )
@@ -54,6 +55,28 @@ def test_uniform_empty_tray_keeps_colored_bagasse_material():
     detections = [Detection(19, "Paper bag", 0.17, (2, 2, 318, 238))]
 
     assert not is_uniform_empty_tray_artifact(frame, detections)
+
+
+def test_low_detail_empty_tray_blocks_border_fallback_box():
+    frame = np.full((480, 640, 3), 176, dtype=np.uint8)
+    frame += np.linspace(0, 20, 640, dtype=np.uint8)[None, :, None]
+    detections = [Detection(-1, "Unknown object", 0.2, (500, 455, 610, 480))]
+
+    assert is_low_detail_empty_tray(frame, detections)
+
+
+def test_low_detail_empty_tray_keeps_leaf_material():
+    frame = np.full((480, 640, 3), 176, dtype=np.uint8)
+    frame[90:390, 160:520] = (55, 95, 130)
+
+    assert not is_low_detail_empty_tray(frame, [Detection(17, "Organic", 0.6, (160, 90, 520, 390))])
+
+
+def test_low_detail_frame_keeps_compact_center_object_detection():
+    frame = np.full((240, 320, 3), 176, dtype=np.uint8)
+    detections = [Detection(42, "Pen", 0.7, (90, 100, 230, 140))]
+
+    assert not is_low_detail_empty_tray(frame, detections)
 
 
 def test_ambiguous_paper_and_organic_candidate_requires_close_scores():

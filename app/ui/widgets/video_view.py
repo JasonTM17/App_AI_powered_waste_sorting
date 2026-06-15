@@ -95,7 +95,8 @@ class VideoView(QWidget):
                 pen.setWidth(2)
                 p.setPen(pen)
                 p.drawRoundedRect(rx, ry, rw, rh, 4, 4)
-                label = f"{waste_display_name(d.cls_name)} {d.conf:.2f}"
+                label_name = d.operator_label or waste_display_name(d.cls_name)
+                label = f"{label_name} {d.conf:.2f}"
                 metrics = p.fontMetrics()
                 tw = metrics.horizontalAdvance(label) + 12
                 th = metrics.height() + 4

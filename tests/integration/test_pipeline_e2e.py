@@ -108,6 +108,13 @@ class _CardboardInfer:
         return [Detection(3, "Cardboard", 0.72, self.xyxy)]
 
 
+class _LowConfidenceGlassBottleInfer:
+    class_names: ClassVar[dict[int, str]] = {12: "Glass bottle"}
+
+    def predict(self, frame):
+        return [Detection(12, "Glass bottle", 0.10, (5, 10, 75, 35))]
+
+
 class _StubUart:
     def __init__(self):
         self.sent = []
@@ -279,6 +286,8 @@ def _write_manual_reference(
     cls_name: str = "Pen",
     cls_id: int = 42,
     rgb_color: tuple[int, int, int] = (220, 30, 30),
+    operator_label: str = "",
+    recognition_only: bool = False,
 ) -> None:
     queue_dir.mkdir(parents=True, exist_ok=True)
     for index in range(3):
@@ -293,7 +302,15 @@ def _write_manual_reference(
             "reviewed": True,
             "bbox_reviewed": True,
             "recognition_enabled": True,
-            "boxes": [{"cls_id": cls_id, "cls_name": cls_name, "conf": 1.0, "xyxy": [15, 12, 65, 28]}],
+            "recognition_only": recognition_only,
+            "training_excluded": recognition_only,
+            "boxes": [{
+                "cls_id": cls_id,
+                "cls_name": cls_name,
+                "operator_label": operator_label,
+                "conf": 1.0,
+                "xyxy": [15, 12, 65, 28],
+            }],
         }
         img_path.with_suffix(".json").write_text(json.dumps(meta), encoding="utf-8")
 
@@ -521,6 +538,38 @@ def test_pipeline_rejects_non_textile_reference_for_cardboard_correction(
     assert uart.sent == []
 
 
+def test_pipeline_corrects_low_confidence_glass_bottle_to_wooden_spoon(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
+    cfg = _dispatch_ready_config()
+    cfg.capture.output_dir = str(tmp_path / "dataset_v2")
+    cfg.model.conf_threshold = 0.05
+    cfg.manual_reference_recognition.min_similarity = 0.9
+    cfg.manual_reference_recognition.min_correction_area_ratio = 0.2
+    _write_manual_reference(
+        Path(cfg.capture.output_dir) / "low_conf_queue",
+        cls_name="Wood",
+        cls_id=40,
+        rgb_color=(180, 140, 80),
+        operator_label="Thìa gỗ",
+        recognition_only=True,
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, _LowConfidenceGlassBottleInfer(), uart, tmp_path / "h.db")
+    frame = np.zeros((40, 80, 3), dtype=np.uint8)
+    frame[:, :] = (20, 20, 20)
+    frame[10:35, 5:75] = (80, 140, 180)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(d.cls_name, d.operator_label) for d in detections] == [("Wood", "Thìa gỗ")]
+    assert uart.sent == [(1, "O", detections[0].conf)]
+
+
 def test_pipeline_routes_unknown_with_kaggle_three_bin_classifier(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config()
@@ -562,8 +611,8 @@ def test_pipeline_keeps_generic_three_bin_organic_non_specific(tmp_path, monkeyp
 
 
 def test_three_bin_display_name_does_not_claim_an_exact_class():
-    assert three_bin_display_name("Kaggle 3-bin O") == "Rác hữu cơ (chưa xác định loại)"
-    assert three_bin_display_name("Kaggle 3-bin I") == "Rác tái chế (chưa xác định loại)"
+    assert three_bin_display_name("Kaggle 3-bin O") == "Nhóm Hữu cơ (AI chưa xác định vật cụ thể)"
+    assert three_bin_display_name("Kaggle 3-bin I") == "Nhóm Tái chế (AI chưa xác định vật cụ thể)"
     assert three_bin_display_name("Plastic bottle") == "Plastic bottle"
 
 

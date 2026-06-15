@@ -304,7 +304,7 @@ def main(*, require_admin_login: bool = True) -> int:
             ts = datetime.now().strftime("%H:%M:%S")
             current_rows: list[tuple[str, float, str, str]] = []
             for d in display_detections:
-                display_name = waste_display_name(d.cls_name)
+                display_name = d.operator_label or waste_display_name(d.cls_name)
                 three_bin_command = parse_three_bin_class_name(d.cls_name)
                 mapping = next(
                     (m for m in controller.cfg.mappings if m.enabled and m.class_name == d.cls_name),

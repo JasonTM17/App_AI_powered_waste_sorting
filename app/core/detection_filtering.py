@@ -44,15 +44,12 @@ def find_ambiguous_organic_candidate(
         (
             detection
             for detection in detections
-            if detection.cls_name in PAPER_LIKE_CLASSES
-            and detection.conf <= max_primary_confidence
+            if detection.cls_name in PAPER_LIKE_CLASSES and detection.conf <= max_primary_confidence
         ),
         key=lambda item: item.conf,
         reverse=True,
     )
-    organic_candidates = [
-        detection for detection in detections if detection.cls_name == "Organic"
-    ]
+    organic_candidates = [detection for detection in detections if detection.cls_name == "Organic"]
     for paper in paper_candidates:
         for organic in organic_candidates:
             if organic.conf < min_organic_confidence:
@@ -94,7 +91,43 @@ def is_uniform_empty_tray_artifact(
     strong_deviation = float(np.mean(np.abs(gray.astype(np.float32) - median) > 30.0))
     saturation_ratio = float(np.mean(hsv[:, :, 1] > 20))
     edge_ratio = float(np.count_nonzero(edges)) / float(max(1, edges.size))
-    return saturation_ratio < 0.04 and strong_deviation < 0.08 and edge_ratio < 0.004
+    return saturation_ratio < 0.04 and strong_deviation < 0.10 and edge_ratio < 0.004
+
+
+def is_low_detail_empty_tray(
+    frame_bgr: np.ndarray,
+    detections: list[Detection] | None = None,
+) -> bool:
+    """Reject plain tray frames before fallback classification and dispatch."""
+    if frame_bgr.ndim != 3 or frame_bgr.shape[2] < 3 or frame_bgr.size == 0:
+        return False
+    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blurred, 30, 90)
+    saturation_ratio = float(np.mean(hsv[:, :, 1] > 20))
+    edge_ratio = float(np.count_nonzero(edges)) / float(max(1, edges.size))
+    low_detail = (
+        float(np.mean(gray)) > 140.0
+        and saturation_ratio < 0.02
+        and edge_ratio < 0.001
+        and float(np.std(gray)) < 30.0
+    )
+    if not low_detail or not detections:
+        return low_detail
+    height, width = gray.shape[:2]
+    frame_area = float(max(1, width * height))
+    border_x = max(2, round(width * 0.02))
+    border_y = max(2, round(height * 0.02))
+    for detection in detections:
+        x1, y1, x2, y2 = _clamp_box(detection.xyxy, width, height)
+        coverage = ((x2 - x1) * (y2 - y1)) / frame_area
+        touches_border = (
+            x1 <= border_x or y1 <= border_y or x2 >= width - border_x or y2 >= height - border_y
+        )
+        if coverage >= 0.65 or (coverage <= 0.08 and touches_border):
+            return True
+    return False
 
 
 def _clamp_box(
@@ -116,9 +149,7 @@ def _intersection_area(
 ) -> int:
     ax1, ay1, ax2, ay2 = first
     bx1, by1, bx2, by2 = second
-    return max(0, min(ax2, bx2) - max(ax1, bx1)) * max(
-        0, min(ay2, by2) - max(ay1, by1)
-    )
+    return max(0, min(ax2, bx2) - max(ax1, bx1)) * max(0, min(ay2, by2) - max(ay1, by1))
 
 
 def _same_physical_object(
@@ -129,9 +160,7 @@ def _same_physical_object(
 ) -> bool:
     ax1, ay1, ax2, ay2 = first
     bx1, by1, bx2, by2 = second
-    intersection = max(0, min(ax2, bx2) - max(ax1, bx1)) * max(
-        0, min(ay2, by2) - max(ay1, by1)
-    )
+    intersection = max(0, min(ax2, bx2) - max(ax1, bx1)) * max(0, min(ay2, by2) - max(ay1, by1))
     first_area = max(0, ax2 - ax1) * max(0, ay2 - ay1)
     second_area = max(0, bx2 - bx1) * max(0, by2 - by1)
     union = first_area + second_area - intersection
@@ -142,6 +171,7 @@ def _same_physical_object(
 
 __all__ = [
     "find_ambiguous_organic_candidate",
+    "is_low_detail_empty_tray",
     "is_uniform_empty_tray_artifact",
     "suppress_overlapping_detections",
 ]

@@ -38,12 +38,14 @@ class ManualReferenceMatch:
     votes: int = 0
     margin: float = 0.0
     backend: str = ""
+    operator_label: str = ""
 
 
 @dataclass(frozen=True)
 class _Reference:
     cls_id: int
     cls_name: str
+    operator_label: str
     image_path: Path
     vector: np.ndarray
 
@@ -181,22 +183,30 @@ class ManualReferenceRecognizer:
             key=lambda item: item[1],
             reverse=True,
         )[:top_k]
-        votes = Counter(reference.cls_name for reference, _score in ranked)
+        votes = Counter(
+            (reference.cls_name, reference.operator_label)
+            for reference, _score in ranked
+        )
         if not votes:
             return None
-        winner_name, winner_votes = votes.most_common(1)[0]
+        (winner_name, winner_operator_label), winner_votes = votes.most_common(1)[0]
         if winner_votes < min_votes:
             self._store_cached_match(cache_key, None, now)
             return None
-        class_scores: dict[str, list[float]] = defaultdict(list)
+        class_scores: dict[tuple[str, str], list[float]] = defaultdict(list)
         for reference, score in ranked:
-            class_scores[reference.cls_name].append(score)
-        winner_scores = sorted(class_scores[winner_name], reverse=True)
+            class_scores[(reference.cls_name, reference.operator_label)].append(score)
+        winner_key = (winner_name, winner_operator_label)
+        winner_scores = sorted(class_scores[winner_key], reverse=True)
         best_score = winner_scores[0]
         consensus_score = winner_scores[min_votes - 1]
         winner_score = float(np.mean(winner_scores[:min_votes]))
         runner_up = max(
-            (float(np.mean(scores)) for name, scores in class_scores.items() if name != winner_name),
+            (
+                float(np.mean(scores))
+                for label_key, scores in class_scores.items()
+                if label_key != winner_key
+            ),
             default=-1.0,
         )
         margin = winner_score - runner_up if runner_up >= 0 else 1.0
@@ -208,7 +218,9 @@ class ManualReferenceRecognizer:
             self._store_cached_match(cache_key, None, now)
             return None
         best_reference, _ = next(
-            item for item in ranked if item[0].cls_name == winner_name
+            item
+            for item in ranked
+            if (item[0].cls_name, item[0].operator_label) == winner_key
         )
         match = ManualReferenceMatch(
             cls_id=best_reference.cls_id,
@@ -218,6 +230,7 @@ class ManualReferenceRecognizer:
             votes=winner_votes,
             margin=margin,
             backend=self.embedder.name,
+            operator_label=winner_operator_label,
         )
         self._store_cached_match(cache_key, match, now)
         return match
@@ -294,6 +307,7 @@ class ManualReferenceRecognizer:
                             _Reference(
                                 cls_id=cls_id,
                                 cls_name=cls_name,
+                                operator_label=str(box.get("operator_label") or "").strip(),
                                 image_path=image_path,
                                 vector=vector,
                             )
@@ -313,7 +327,10 @@ def _can_use_as_reference(meta: dict) -> bool:
     source = str(meta.get("source") or "")
     if source not in MANUAL_REFERENCE_SOURCES:
         return False
-    if not classify_dataset_item(meta).trainable or meta.get("reviewed") is not True:
+    reviewed = meta.get("reviewed") is True and meta.get("bbox_reviewed") is True
+    if meta.get("recognition_only") is True:
+        return reviewed and meta.get("holdout") is not True
+    if not classify_dataset_item(meta).trainable or not reviewed:
         return False
     if meta.get("holdout") is True:
         return False

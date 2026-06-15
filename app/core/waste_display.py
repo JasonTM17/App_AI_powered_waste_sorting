@@ -33,6 +33,8 @@ WASTE_DISPLAY_NAMES = {
     "Scrap metal": "Sắt vụn",
     "Plastic canister": "Can/Hộp nhựa",
     "Paper bag": "Túi giấy",
+    "Leaf": "Lá cây",
+    "Wooden spoon": "Thìa gỗ",
 }
 
 
