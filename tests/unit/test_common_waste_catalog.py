@@ -24,6 +24,7 @@ def test_common_waste_catalog_routes_examples_to_three_bins():
 
 def test_common_aliases_canonicalize_to_training_classes():
     assert canonical_class_name("vo chuoi") == "Organic"
+    assert canonical_class_name("bã mía") == "Organic"
     assert canonical_class_name("lon nuoc") == "Aluminum can"
     assert canonical_class_name("chai pet") == "Plastic bottle"
     assert canonical_class_name("hop sua giay") == "Tetra pack"

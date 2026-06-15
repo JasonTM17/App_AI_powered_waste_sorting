@@ -20,7 +20,11 @@ from app.core.config import (
     computer_speaker_enabled,
     normalize_multi_class_warning_text,
 )
-from app.core.detection_filtering import suppress_overlapping_detections
+from app.core.detection_filtering import (
+    find_ambiguous_organic_candidate,
+    is_uniform_empty_tray_artifact,
+    suppress_overlapping_detections,
+)
 from app.core.dispatch_guard import DispatchGuard
 from app.core.events import Detection, TrackedDetection
 from app.core.hardware_profile import route_for_command
@@ -685,6 +689,55 @@ class Pipeline:
             )
         return out
 
+    def _correct_ambiguous_organic(
+        self,
+        frame_bgr: np.ndarray,
+        detections: list[Detection],
+    ) -> list[Detection]:
+        classifier = self._three_bin_classifier
+        cfg = self.cfg.three_bin_classifier
+        if classifier is None or cfg.max_primary_confidence <= 0:
+            return detections
+        pair = find_ambiguous_organic_candidate(
+            detections,
+            max_primary_confidence=cfg.max_primary_confidence,
+        )
+        if pair is None:
+            return detections
+        paper, organic = pair
+        prediction = classifier.classify_bgr(frame_bgr, paper.xyxy)
+        if prediction is None or not prediction.passed or prediction.command != "O":
+            return detections
+
+        corrected = Detection(
+            cls_id=organic.cls_id,
+            cls_name="Organic",
+            conf=max(organic.conf, prediction.confidence),
+            xyxy=organic.xyxy,
+            source=THREE_BIN_SOURCE,
+            secondary_route="O",
+            secondary_confidence=prediction.confidence,
+            secondary_margin=prediction.margin,
+        )
+        logger.info(
+            "corrected ambiguous paper-like detection to Organic primary={} {:.3f} "
+            "organic={:.3f} secondary={:.3f} margin={:.3f}",
+            paper.cls_name,
+            paper.conf,
+            organic.conf,
+            prediction.confidence,
+            prediction.margin,
+        )
+        replaced_boxes = {paper.xyxy, organic.xyxy}
+        return [
+            detection
+            for detection in detections
+            if not (
+                detection.cls_name in {paper.cls_name, "Organic"}
+                and detection.xyxy in replaced_boxes
+            )
+        ] + [corrected]
+
     def _apply_route_consensus(
         self,
         frame_bgr: np.ndarray,
@@ -739,6 +792,16 @@ class Pipeline:
 
     def process_frame(self, frame_bgr: np.ndarray, ts: datetime):
         raw = self.engine.predict(frame_bgr)
+        roi = self.cfg.roi
+        roi_xyxy = (
+            (roi.x, roi.y, roi.x + roi.width, roi.y + roi.height)
+            if roi.enabled and roi.width > 0 and roi.height > 0
+            else None
+        )
+        if is_uniform_empty_tray_artifact(frame_bgr, raw, roi_xyxy=roi_xyxy):
+            raw = []
+        else:
+            raw = self._correct_ambiguous_organic(frame_bgr, raw)
         threshold_for_detection = getattr(self.engine, "threshold_for_detection", None)
         filtered = [
             detection

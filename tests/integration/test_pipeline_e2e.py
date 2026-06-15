@@ -234,6 +234,26 @@ class _WidePenInfer:
         return [Detection(42, "Pen", 0.93, (20, 20, 285, 205))]
 
 
+class _BlankTrayPaperInfer:
+    class_names: ClassVar[dict[int, str]] = {18: "Paper"}
+
+    def predict(self, frame):
+        height, width = frame.shape[:2]
+        return [Detection(18, "Paper", 0.54, (2, 2, width - 2, height - 2))]
+
+
+class _BagasseAmbiguityInfer:
+    class_names: ClassVar[dict[int, str]] = {17: "Organic", 19: "Paper bag"}
+
+    def predict(self, frame):
+        height, width = frame.shape[:2]
+        box = (10, 10, width - 10, height - 10)
+        return [
+            Detection(19, "Paper bag", 0.17, box),
+            Detection(17, "Organic", 0.16, box),
+        ]
+
+
 def _dispatch_ready_config(*, mappings=None) -> AppConfig:
     cfg = AppConfig(mappings=mappings or [])
     cfg.roi.enabled = True
@@ -276,6 +296,42 @@ def _write_manual_reference(
             "boxes": [{"cls_id": cls_id, "cls_name": cls_name, "conf": 1.0, "xyxy": [15, 12, 65, 28]}],
         }
         img_path.with_suffix(".json").write_text(json.dumps(meta), encoding="utf-8")
+
+
+def test_pipeline_rejects_blank_tray_paper_false_positive(tmp_path):
+    cfg = _dispatch_ready_config()
+    uart = _StubUart()
+    p = Pipeline(cfg, _BlankTrayPaperInfer(), uart, tmp_path / "h.db")
+    frame = np.full((240, 320, 3), 175, dtype=np.uint8)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert detections == []
+    assert uart.sent == []
+    p.close()
+
+
+def test_pipeline_routes_bagasse_ambiguity_to_organic(tmp_path):
+    cfg = _dispatch_ready_config()
+    cfg.three_bin_classifier.enabled = True
+    cfg.three_bin_classifier.mode = "unknown_only"
+    cfg.three_bin_classifier.unknown_only = True
+    cfg.three_bin_classifier.max_primary_confidence = 0.7
+    uart = _StubUart()
+    p = Pipeline(cfg, _BagasseAmbiguityInfer(), uart, tmp_path / "h.db")
+    p._three_bin_classifier = _StubThreeBinClassifier("O")
+    frame = np.full((240, 320, 3), 175, dtype=np.uint8)
+    frame[70:180, 50:270] = (95, 145, 185)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(item.cls_name, item.source) for item in detections] == [
+        ("Organic", THREE_BIN_SOURCE)
+    ]
+    assert uart.sent == [(1, "O", detections[0].conf)]
+    p.close()
 
 
 def test_pipeline_labels_unknown_with_reviewed_manual_reference(tmp_path, monkeypatch):
@@ -484,7 +540,29 @@ def test_pipeline_routes_unknown_with_kaggle_three_bin_classifier(tmp_path, monk
     assert uart.sent == [(1, "I", detections[0].conf)]
 
 
+def test_pipeline_keeps_generic_three_bin_organic_non_specific(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config()
+    cfg.model.conf_threshold = 0.3
+    cfg.three_bin_classifier.enabled = True
+    cfg.three_bin_classifier.unknown_only = True
+    uart = _StubUart()
+    p = Pipeline(cfg, _UnknownInfer(), uart, tmp_path / "h.db")
+    p._three_bin_classifier = _StubThreeBinClassifier("O")
+    frame = np.zeros((40, 80, 3), dtype=np.uint8)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(item.cls_id, item.cls_name) for item in detections] == [
+        (-301, "Kaggle 3-bin O")
+    ]
+    assert uart.sent == [(1, "O", detections[0].conf)]
+    p.close()
+
+
 def test_three_bin_display_name_does_not_claim_an_exact_class():
+    assert three_bin_display_name("Kaggle 3-bin O") == "Rác hữu cơ (chưa xác định loại)"
     assert three_bin_display_name("Kaggle 3-bin I") == "Rác tái chế (chưa xác định loại)"
     assert three_bin_display_name("Plastic bottle") == "Plastic bottle"
 

@@ -1,4 +1,10 @@
-from app.core.detection_filtering import suppress_overlapping_detections
+import numpy as np
+
+from app.core.detection_filtering import (
+    find_ambiguous_organic_candidate,
+    is_uniform_empty_tray_artifact,
+    suppress_overlapping_detections,
+)
 from app.core.events import Detection
 
 
@@ -33,3 +39,32 @@ def test_suppress_overlapping_detections_handles_large_container_box():
     filtered = suppress_overlapping_detections(detections)
 
     assert [item.cls_name for item in filtered] == ["Aluminum can"]
+
+
+def test_uniform_empty_tray_rejects_full_frame_false_positive():
+    frame = np.full((240, 320, 3), 175, dtype=np.uint8)
+    detections = [Detection(18, "Paper", 0.54, (2, 2, 318, 238))]
+
+    assert is_uniform_empty_tray_artifact(frame, detections)
+
+
+def test_uniform_empty_tray_keeps_colored_bagasse_material():
+    frame = np.full((240, 320, 3), 175, dtype=np.uint8)
+    frame[70:180, 50:270] = (95, 145, 185)
+    detections = [Detection(19, "Paper bag", 0.17, (2, 2, 318, 238))]
+
+    assert not is_uniform_empty_tray_artifact(frame, detections)
+
+
+def test_ambiguous_paper_and_organic_candidate_requires_close_scores():
+    close = [
+        Detection(19, "Paper bag", 0.17, (10, 10, 300, 220)),
+        Detection(17, "Organic", 0.16, (12, 11, 299, 219)),
+    ]
+    far = [
+        Detection(19, "Paper bag", 0.65, (10, 10, 300, 220)),
+        Detection(17, "Organic", 0.08, (12, 11, 299, 219)),
+    ]
+
+    assert find_ambiguous_organic_candidate(close, max_primary_confidence=0.7)
+    assert find_ambiguous_organic_candidate(far, max_primary_confidence=0.7) is None

@@ -80,8 +80,9 @@ Mặc định:
 
 Nhóm chai/lọ dùng ngưỡng class riêng trong `model.class_thresholds` để giữ lại
 dự đoán Tái chế có confidence thấp trên camera thật. Pipeline khử các bbox chồng
-lấn của cùng một vật trước tracker; classifier 3 thùng chỉ xử lý `Unknown` và
-không được ghi đè route của class YOLO đã biết.
+lấn của cùng một vật trước tracker. Classifier 3 thùng xử lý `Unknown` và có thể
+xác nhận `Organic` khi YOLO đồng thời thấy `Paper/Paper bag` và `Organic` với
+điểm gần nhau; nhãn kỹ thuật `Kaggle 3-bin` không hiển thị trên Live UI.
 
 ## Web Login And Roles
 
@@ -485,4 +486,4 @@ The current real hardware profile follows the user-provided block diagram and re
 - Admin web also has raw D6/D7 calibration tests for replaying candidate positions before locking a production angle.
 - If UART is off, UI shows `UART OFF, khong gui xuong phan cung`.
 - Admin desktop/web has `Actuation Test Mode` for the real camera path: detected class -> group -> bin -> serial payload -> UART sent -> ACK -> history row. Use this before placing real test objects in front of the camera.
-- Camera-driven dispatch is guarded by defaults in `dispatch_guard`: enabling automatic sorting arms the first valid object immediately after `3` stable frames; one active dump remains locked until ACK/NACK/timeout plus `1s` settle; after a successful ACK/HOME the next new tracked object is accepted immediately, while the already-emitted track remains blocked; and ROI must be valid and enabled. Empty-tray observation remains a fallback re-arm path after startup/reset. Manual Test Huu co/Vo co/Tai che buttons remain direct hardware tests.
+- Camera-driven dispatch is guarded by defaults in `dispatch_guard`: enabling automatic sorting arms the first valid object immediately after `3` stable frames; one active dump remains locked until ACK/NACK/timeout plus `0.35s` settle; after a successful ACK/HOME the next new tracked object is accepted immediately, while the already-emitted track remains blocked; and ROI must be valid and enabled. Empty-tray observation remains a fallback re-arm path after startup/reset. Manual Test Huu co/Vo co/Tai che buttons remain direct hardware tests.

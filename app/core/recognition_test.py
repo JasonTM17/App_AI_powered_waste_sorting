@@ -43,7 +43,7 @@ class RecognitionTestSessionConfig:
     stable_frames: int = 3
     empty_seconds: float = 2.0
     empty_frames: int = 10
-    busy_settle_seconds: float = 1.0
+    busy_settle_seconds: float = 0.35
     phase: RecognitionTestPhase = "recognition"
 
 

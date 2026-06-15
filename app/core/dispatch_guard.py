@@ -25,7 +25,7 @@ class DispatchGuard:
         self,
         *,
         min_sort_interval_seconds: float = 0.0,
-        busy_settle_seconds: float = 1.0,
+        busy_settle_seconds: float = 0.35,
         min_stable_frames: int = 3,
         empty_rearm_seconds: float = 2.0,
         empty_rearm_frames: int = 10,

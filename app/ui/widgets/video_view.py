@@ -8,6 +8,7 @@ from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from app.core.events import Detection
+from app.core.three_bin_classifier import three_bin_display_name
 
 
 def _conf_color(conf: float) -> QColor:
@@ -94,7 +95,7 @@ class VideoView(QWidget):
                 pen.setWidth(2)
                 p.setPen(pen)
                 p.drawRoundedRect(rx, ry, rw, rh, 4, 4)
-                label = f"{d.cls_name} {d.conf:.2f}"
+                label = f"{three_bin_display_name(d.cls_name)} {d.conf:.2f}"
                 metrics = p.fontMetrics()
                 tw = metrics.horizontalAdvance(label) + 12
                 th = metrics.height() + 4

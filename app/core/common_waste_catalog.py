@@ -53,7 +53,7 @@ COMMON_WASTE_ITEMS: tuple[CommonWasteItem, ...] = (
     CommonWasteItem("La cay", "Organic", ("la cay", "leaf waste", "wood"), "Use Organic for soft leaves."),
     CommonWasteItem("Vo dua/vo trai cay cung", "Organic", ("vo dua", "vo xoai", "vo dua hau", "fruit rind")),
     CommonWasteItem("Xuong/thit ca thua", "Organic", ("xuong", "xuong ga", "xuong ca", "fish bone")),
-    CommonWasteItem("Ba mia", "Organic", ("ba mia", "sugarcane bagasse")),
+    CommonWasteItem("Ba mia", "Organic", ("ba mia", "bã mía", "sugarcane bagasse")),
     CommonWasteItem("Lon nuoc", "Aluminum can", ("lon nuoc", "lon bia", "lon nuoc ngot", "beer can")),
     CommonWasteItem("Lon do hop", "Tin", ("lon do hop", "hop ca", "food can")),
     CommonWasteItem("Vo lon sua bot", "Tin", ("lon sua bot", "vo lon sua", "milk powder can")),

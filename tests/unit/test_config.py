@@ -159,6 +159,10 @@ def test_dispatch_guard_invalid_values_rejected():
         AppConfig.model_validate(d)
 
 
+def test_default_dispatch_return_settle_is_fast() -> None:
+    assert AppConfig().dispatch_guard.busy_settle_seconds == 0.35
+
+
 def test_manual_reference_recognition_invalid_values_rejected():
     d = _default_dict()
     d["manual_reference_recognition"] = {"min_similarity": 2.0}

@@ -233,7 +233,7 @@ class LivePage(QWidget):
         self._video_stack.setCurrentWidget(self.placeholder)
         video_layout.addWidget(video_container, 1)
 
-        body.addWidget(video_card, 3)
+        body.addWidget(video_card, 4)
 
         stream_card = QFrame()
         stream_card.setObjectName("card")
