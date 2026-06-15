@@ -155,6 +155,7 @@ def test_live_page_stacks_video_and_detection_stream_when_narrow(qtbot):
     page._sync_responsive_body()
     assert page._body_layout.direction() == QBoxLayout.Direction.LeftToRight
     assert page._stream_card.maximumHeight() == 16777215
+    assert page._stream_card.maximumWidth() == 240
 
 
 def test_live_page_replaces_previous_frame_detection(qtbot):

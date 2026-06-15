@@ -22,6 +22,14 @@ class DesktopAuthResult:
 
 AuthServiceFactory = Callable[[], AuthService]
 
+INVALID_CREDENTIALS_MESSAGE = (
+    "Thông tin đăng nhập không chính xác. Vui lòng kiểm tra và thử lại."
+)
+AUTH_UNAVAILABLE_MESSAGE = (
+    "Dịch vụ xác thực tạm thời không khả dụng. Vui lòng thử lại sau."
+)
+ACCESS_DENIED_MESSAGE = "Không thể cấp quyền truy cập ứng dụng vận hành."
+
 
 def authenticate_desktop_admin(
     username: str,
@@ -32,48 +40,48 @@ def authenticate_desktop_admin(
 ) -> DesktopAuthResult:
     clean_username = str(username or "").strip()
     if not clean_username or not password:
-        return DesktopAuthResult(False, "Nhập tài khoản và mật khẩu Admin.")
+        return DesktopAuthResult(False, "Vui lòng nhập đầy đủ thông tin đăng nhập.")
     try:
         service = service_factory()
     except Exception as exc:
-        return DesktopAuthResult(False, f"Không mở được hệ thống tài khoản: {exc}")
-    if require_shared_database and not str(getattr(service, "database_url", "") or "").strip():
-        return DesktopAuthResult(
-            False,
-            "Desktop app đang yêu cầu dùng SQL auth chung nhưng chưa cấu hình "
-            "TRASH_SORTER_AUTH_DATABASE_URL. Hãy đặt Supabase Postgres URL trong .env.local "
-            "hoặc Windows env rồi mở lại app.",
+        logger.exception(
+            "desktop authentication service initialization failed type={}",
+            exc.__class__.__name__,
         )
+        return DesktopAuthResult(False, AUTH_UNAVAILABLE_MESSAGE)
+    if require_shared_database and not str(getattr(service, "database_url", "") or "").strip():
+        logger.error(
+            "desktop authentication unavailable reason=shared_auth_store_not_configured"
+        )
+        return DesktopAuthResult(False, AUTH_UNAVAILABLE_MESSAGE)
 
     started = perf_counter()
     try:
         result = service.login(clean_username, password, client_label="desktop-admin")
     except InactiveAccountError:
         _log_login_timing(started, clean_username, "inactive")
-        return DesktopAuthResult(False, "Tài khoản này đang bị khóa.")
+        return DesktopAuthResult(False, ACCESS_DENIED_MESSAGE)
     except SQLAlchemyError as exc:
         _log_login_timing(started, clean_username, "database_error")
-        return DesktopAuthResult(
-            False,
-            "Không đọc được DB tài khoản chung. Kiểm tra Supabase/PostgreSQL "
-            f"và khởi động lại app. Chi tiết: {exc.__class__.__name__}",
+        logger.exception(
+            "desktop authentication data-store error type={}",
+            exc.__class__.__name__,
         )
+        return DesktopAuthResult(False, AUTH_UNAVAILABLE_MESSAGE)
     except Exception as exc:
         _log_login_timing(started, clean_username, "error")
-        return DesktopAuthResult(False, f"Đăng nhập thất bại: {exc}")
+        logger.exception(
+            "desktop authentication unexpected error type={}",
+            exc.__class__.__name__,
+        )
+        return DesktopAuthResult(False, AUTH_UNAVAILABLE_MESSAGE)
     if result is None:
         _log_login_timing(started, clean_username, "invalid")
-        message = "Sai tài khoản hoặc mật khẩu."
-        if str(getattr(service, "database_url", "") or "").strip():
-            message = (
-                "PostgreSQL đã kết nối, nhưng tài khoản hoặc mật khẩu Admin không khớp. "
-                "Hãy dùng mật khẩu tài khoản trong hệ thống, không dùng mật khẩu kết nối DB."
-            )
-        return DesktopAuthResult(False, message)
+        return DesktopAuthResult(False, INVALID_CREDENTIALS_MESSAGE)
     if result.identity.role != "admin":
         service.revoke_session(result.token)
         _log_login_timing(started, clean_username, "non_admin")
-        return DesktopAuthResult(False, "Desktop app chỉ cho phép tài khoản Admin.")
+        return DesktopAuthResult(False, ACCESS_DENIED_MESSAGE)
     _log_login_timing(started, clean_username, "ok")
     return DesktopAuthResult(True, "Đăng nhập Admin thành công.", result.token, result.identity)
 
@@ -86,3 +94,12 @@ def _log_login_timing(started: float, username: str, outcome: str) -> None:
         outcome,
         elapsed_ms,
     )
+
+
+__all__ = [
+    "ACCESS_DENIED_MESSAGE",
+    "AUTH_UNAVAILABLE_MESSAGE",
+    "INVALID_CREDENTIALS_MESSAGE",
+    "DesktopAuthResult",
+    "authenticate_desktop_admin",
+]

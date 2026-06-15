@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core.detection_display_stabilizer import DetectionDisplayStabilizer
 from app.core.events import Detection
 from app.core.voice_pack import normalize_voice_gender, voice_pack_status
 from app.ui.widgets.stat_card import StatCard
@@ -77,10 +78,11 @@ class LivePage(QWidget):
         self._auto_sort_state = "WAITING_EMPTY"
         self._speaker_output_mode = "hardware"
         self._speaker_voice_gender = "female"
+        self._display_stabilizer = DetectionDisplayStabilizer()
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 24)
-        root.setSpacing(16)
+        root.setContentsMargins(12, 12, 12, 14)
+        root.setSpacing(10)
 
         header = QVBoxLayout()
         header.setSpacing(10)
@@ -198,15 +200,15 @@ class LivePage(QWidget):
 
         body = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self._body_layout = body
-        body.setSpacing(16)
+        body.setSpacing(8)
 
         video_card = QFrame()
         video_card.setObjectName("card")
         video_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._video_card = video_card
         video_layout = QVBoxLayout(video_card)
-        video_layout.setContentsMargins(16, 14, 16, 16)
-        video_layout.setSpacing(12)
+        video_layout.setContentsMargins(6, 6, 6, 6)
+        video_layout.setSpacing(6)
         video_title = QLabel("LIVE CAMERA")
         video_title.setObjectName("mono")
         video_layout.addWidget(video_title)
@@ -229,16 +231,17 @@ class LivePage(QWidget):
         self._video_stack.setCurrentWidget(self.placeholder)
         video_layout.addWidget(video_container, 1)
 
-        body.addWidget(video_card, 4)
+        body.addWidget(video_card, 8)
 
         stream_card = QFrame()
         stream_card.setObjectName("card")
-        stream_card.setMinimumWidth(220)
+        stream_card.setMinimumWidth(200)
+        stream_card.setMaximumWidth(240)
         stream_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self._stream_card = stream_card
         stream_layout = QVBoxLayout(stream_card)
-        stream_layout.setContentsMargins(16, 14, 16, 16)
-        stream_layout.setSpacing(12)
+        stream_layout.setContentsMargins(10, 8, 10, 10)
+        stream_layout.setSpacing(8)
         stream_title = QLabel("KẾT QUẢ HIỆN TẠI")
         stream_title.setObjectName("mono")
         stream_layout.addWidget(stream_title)
@@ -288,6 +291,7 @@ class LivePage(QWidget):
         if self._body_layout.direction() != direction:
             self._body_layout.setDirection(direction)
         self._stream_card.setMaximumHeight(260 if narrow else 16777215)
+        self._stream_card.setMaximumWidth(16777215 if narrow else 240)
 
     def _toggle_camera(self) -> None:
         self._cam_on = not self._cam_on
@@ -310,6 +314,8 @@ class LivePage(QWidget):
             self._video_stack.setCurrentWidget(self.video)
         else:
             self._video_stack.setCurrentWidget(self.placeholder)
+            self._display_stabilizer.reset()
+            self.stream.clear()
             self._paused = False
             self.btn_pause.setText("Tạm dừng")
             _set_button_icon(self.btn_pause, "pause")
@@ -445,6 +451,9 @@ class LivePage(QWidget):
             return
         self.video.set_frame(frame)
         self.video.set_detections(detections)
+
+    def stabilize_detections(self, detections: list[Detection]) -> list[Detection]:
+        return self._display_stabilizer.update(detections)
 
     def append_detection(self, cls_name: str, conf: float, ts: str, detail: str = "") -> None:
         self.set_current_detections([(cls_name, conf, ts, detail)])

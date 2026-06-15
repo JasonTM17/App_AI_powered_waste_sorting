@@ -1,7 +1,14 @@
 from pathlib import Path
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.agent.auth_service import AuthService
-from app.ui.desktop_auth import authenticate_desktop_admin
+from app.ui.desktop_auth import (
+    ACCESS_DENIED_MESSAGE,
+    AUTH_UNAVAILABLE_MESSAGE,
+    INVALID_CREDENTIALS_MESSAGE,
+    authenticate_desktop_admin,
+)
 
 
 def _service_factory(db_path: Path):
@@ -37,7 +44,7 @@ def test_desktop_auth_rejects_user_role_and_revokes_session(tmp_path):
     )
 
     assert result.ok is False
-    assert "Admin" in result.message
+    assert result.message == ACCESS_DENIED_MESSAGE
     assert result.token == ""
 
 
@@ -51,7 +58,7 @@ def test_desktop_auth_reports_missing_accounts_as_failed_login(tmp_path):
     )
 
     assert result.ok is False
-    assert "Sai tài khoản hoặc mật khẩu" in result.message
+    assert result.message == INVALID_CREDENTIALS_MESSAGE
 
 
 def test_desktop_auth_can_require_shared_sql_database(tmp_path):
@@ -67,10 +74,10 @@ def test_desktop_auth_can_require_shared_sql_database(tmp_path):
     )
 
     assert result.ok is False
-    assert "TRASH_SORTER_AUTH_DATABASE_URL" in result.message
+    assert result.message == AUTH_UNAVAILABLE_MESSAGE
 
 
-def test_desktop_auth_identifies_postgres_password_mismatch(tmp_path):
+def test_desktop_auth_does_not_expose_auth_backend_on_password_mismatch(tmp_path):
     db_path = tmp_path / "auth.db"
     service = AuthService(db_path=db_path)
     service.create_account("owner", "owner-pass-123", "admin")
@@ -83,8 +90,9 @@ def test_desktop_auth_identifies_postgres_password_mismatch(tmp_path):
     )
 
     assert result.ok is False
-    assert "PostgreSQL đã kết nối" in result.message
-    assert "mật khẩu kết nối DB" in result.message
+    assert result.message == INVALID_CREDENTIALS_MESSAGE
+    assert "PostgreSQL" not in result.message
+    assert "DB" not in result.message
 
 
 def test_desktop_auth_uses_latest_password_from_account_database(tmp_path):
@@ -106,3 +114,36 @@ def test_desktop_auth_uses_latest_password_from_account_database(tmp_path):
 
     assert old_result.ok is False
     assert new_result.ok is True
+
+
+def test_desktop_auth_hides_service_initialization_details():
+    def broken_factory():
+        raise RuntimeError("postgresql://operator:secret@internal-host/database")
+
+    result = authenticate_desktop_admin(
+        "owner",
+        "owner-pass-123",
+        service_factory=broken_factory,
+    )
+
+    assert result.message == AUTH_UNAVAILABLE_MESSAGE
+    assert "postgresql" not in result.message.casefold()
+    assert "secret" not in result.message.casefold()
+
+
+def test_desktop_auth_hides_data_store_exception_details():
+    class BrokenService:
+        database_url = "configured"
+
+        def login(self, *_args, **_kwargs):
+            raise SQLAlchemyError("internal database host unavailable")
+
+    result = authenticate_desktop_admin(
+        "owner",
+        "owner-pass-123",
+        service_factory=BrokenService,
+    )
+
+    assert result.message == AUTH_UNAVAILABLE_MESSAGE
+    assert "database" not in result.message.casefold()
+    assert "sql" not in result.message.casefold()

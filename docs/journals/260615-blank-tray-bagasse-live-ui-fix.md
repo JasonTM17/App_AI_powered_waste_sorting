@@ -36,6 +36,18 @@
 - The camera preview fills its available widget without cropping the source frame. Stretching
   is presentation-only; inference, ROI, captures, and bbox coordinates keep the original frame.
 
+## Stable Live Labels And Larger Preview
+
+- Operator labels now use a seven-frame hysteresis window.
+- Initial display requires three matching frames.
+- A competing label must win five frames and the latest three consecutive frames before it
+  replaces the current label.
+- Exact `Organic` remains visible when a short-lived generic organic fallback appears.
+- The Live camera/result ratio is now `8:1`; the result panel is capped at 240 px on wide
+  layouts and camera/card padding is reduced to 6 px.
+- At a 1500 px page width, the rendered camera card occupies 1268 px and the result card
+  occupies 200 px.
+
 ## Unresolved Questions
 
 - Exact bagasse recognition still needs reviewed bagasse samples and a future trained class

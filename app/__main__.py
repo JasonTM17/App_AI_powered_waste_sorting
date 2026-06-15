@@ -274,7 +274,8 @@ def main(*, require_admin_login: bool = True) -> int:
     controller.recognition_test_action_result.connect(_on_test_result)
 
     def _on_frame(frame, detections, fps, latency):
-        window.live_page.update_frame(frame, detections)
+        display_detections = window.live_page.stabilize_detections(detections)
+        window.live_page.update_frame(frame, display_detections)
         window.live_page.set_fps(fps)
         window.live_page.set_latency(latency)
         window.set_fps(fps)
@@ -288,7 +289,7 @@ def main(*, require_admin_login: bool = True) -> int:
         window.live_page.set_warning(warning_text)
         # Push each detection into the side stream so user can see what
         # the model classified (= app cũ's "system log under camera")
-        if detections:
+        if display_detections:
             from datetime import datetime
 
             from app.core.config import ClassMapping
@@ -302,7 +303,7 @@ def main(*, require_admin_login: bool = True) -> int:
 
             ts = datetime.now().strftime("%H:%M:%S")
             current_rows: list[tuple[str, float, str, str]] = []
-            for d in detections:
+            for d in display_detections:
                 display_name = waste_display_name(d.cls_name)
                 three_bin_command = parse_three_bin_class_name(d.cls_name)
                 mapping = next(
@@ -358,6 +359,8 @@ def main(*, require_admin_login: bool = True) -> int:
                         detail = f"Phân loại dự phòng 3 thùng; {detail}"
                 current_rows.append((display_name, d.conf, ts, detail))
             window.live_page.set_current_detections(current_rows)
+        else:
+            window.live_page.set_current_detections([])
 
     controller.frame_processed.connect(_on_frame)
     window.live_page.snapshot_requested.connect(controller.take_snapshot)

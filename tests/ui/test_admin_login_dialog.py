@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QDialog, QLineEdit
 
 import app.ui.widgets.admin_login_dialog as login_dialog_module
 from app.agent.auth_service import AuthIdentity
-from app.ui.desktop_auth import DesktopAuthResult
+from app.ui.desktop_auth import INVALID_CREDENTIALS_MESSAGE, DesktopAuthResult
 from app.ui.widgets.admin_login_dialog import AdminLoginDialog
 
 
@@ -90,3 +90,21 @@ def test_admin_login_password_visibility_toggle(qtbot):
     dialog.btn_toggle_password.click()
 
     assert dialog.password.echoMode() == QLineEdit.EchoMode.Password
+
+
+def test_admin_login_shows_neutral_authentication_error(qtbot, monkeypatch):
+    _FakeLoginWorker.instances = []
+    monkeypatch.setattr(login_dialog_module, "_LoginWorker", _FakeLoginWorker)
+    dialog = AdminLoginDialog()
+    qtbot.addWidget(dialog)
+    dialog.username.setText("admin")
+    dialog.password.setText("incorrect")
+
+    dialog._submit()
+    worker = _FakeLoginWorker.instances[0]
+    worker.emit_result(DesktopAuthResult(False, INVALID_CREDENTIALS_MESSAGE))
+
+    assert dialog.message.text() == INVALID_CREDENTIALS_MESSAGE
+    assert not dialog.message.isHidden()
+    assert "PostgreSQL" not in dialog.message.text()
+    assert "DB" not in dialog.message.text()
