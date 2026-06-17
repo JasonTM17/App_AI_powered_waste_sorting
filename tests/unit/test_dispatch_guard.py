@@ -81,7 +81,7 @@ def test_first_stable_object_dispatches_immediately_when_auto_sort_is_enabled():
     assert guard.state == "DETECTING"
 
 
-def test_ack_rearms_when_next_track_arrives_after_return_settle():
+def test_ack_waits_for_empty_tray_even_when_vibration_creates_new_track():
     guard = _guard()
     guard.min_sort_interval_seconds = 0
     guard.reset(arm_immediately=True)
@@ -98,8 +98,8 @@ def test_ack_rearms_when_next_track_arrives_after_return_settle():
         now=1.3,
     )
 
-    assert decision.allowed is True
-    assert guard.state == "DETECTING"
+    assert decision.allowed is False
+    assert decision.reason == "waiting empty tray"
 
 
 def test_ack_still_blocks_same_track_until_empty_tray():
@@ -165,7 +165,25 @@ def test_busy_blocks_until_ack_timeout_and_settle():
         now=8.6,
     )
 
-    assert expired.allowed is True
+    assert expired.allowed is False
+    assert expired.reason == "waiting empty tray"
+
+    for index in range(10):
+        guard.observe_frame(
+            has_visible_object=False,
+            roi_ready=True,
+            now=8.7 + index * 0.25,
+        )
+
+    rearmed = guard.evaluate(
+        track_id=2,
+        stable_frames=3,
+        in_roi=True,
+        roi_ready=True,
+        now=11.3,
+    )
+
+    assert rearmed.allowed is True
     assert guard.state == "DETECTING"
 
 

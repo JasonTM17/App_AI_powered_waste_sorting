@@ -152,9 +152,10 @@ Before using camera-driven actuation with real waste, confirm all items below:
 2. In Settings, enable ROI and set `x/y/width/height` around only the tray.
    ROI width and height must be greater than zero.
 3. Start camera live and enable automatic sorting. The first valid object may
-   already be on the tray; it dispatches after 3 stable frames. After every ACK
-   and HOME settle, the next new tracked object can dispatch immediately without
-   waiting for 10 empty frames. The previously emitted track remains blocked.
+   already be on the tray; it dispatches after 2 stable frames. After every ACK
+   and HOME settle, the camera must see an empty tray for 1.2 seconds and at
+   least 6 frames before the next object can dispatch. This blocks scale/table
+   vibration from creating a second dump when no new trash was placed.
 4. Place one representative item at a time inside the ROI:
    - Huu co: `Organic`.
    - Tai che: `Plastic bottle`, `Paper`, `Disposable tableware`, dirty nylon,

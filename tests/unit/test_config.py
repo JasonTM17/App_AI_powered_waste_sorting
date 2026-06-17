@@ -177,12 +177,12 @@ def test_dispatch_guard_invalid_values_rejected():
         AppConfig.model_validate(d)
 
 
-def test_default_dispatch_return_settle_is_fast() -> None:
-    assert AppConfig().dispatch_guard.busy_settle_seconds == 0.35
+def test_default_dispatch_guard_filters_post_sort_vibration() -> None:
+    assert AppConfig().dispatch_guard.busy_settle_seconds == 0.8
     assert AppConfig().dispatch_guard.min_sort_interval_seconds == 0.0
-    assert AppConfig().dispatch_guard.min_stable_frames == 1
-    assert AppConfig().dispatch_guard.empty_rearm_seconds == 0.8
-    assert AppConfig().dispatch_guard.empty_rearm_frames == 3
+    assert AppConfig().dispatch_guard.min_stable_frames == 2
+    assert AppConfig().dispatch_guard.empty_rearm_seconds == 1.2
+    assert AppConfig().dispatch_guard.empty_rearm_frames == 6
 
 
 def test_manual_reference_recognition_invalid_values_rejected():

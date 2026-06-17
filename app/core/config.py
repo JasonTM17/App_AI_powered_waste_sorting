@@ -189,10 +189,10 @@ class UnknownObjectFallbackConfig(BaseModel):
 
 class DispatchGuardConfig(BaseModel):
     min_sort_interval_seconds: float = Field(0.0, ge=0.0, le=300.0)
-    busy_settle_seconds: float = Field(0.35, ge=0.0, le=30.0)
-    min_stable_frames: int = Field(1, ge=1, le=30)
-    empty_rearm_seconds: float = Field(0.8, ge=0.0, le=60.0)
-    empty_rearm_frames: int = Field(3, ge=1, le=300)
+    busy_settle_seconds: float = Field(0.8, ge=0.0, le=30.0)
+    min_stable_frames: int = Field(2, ge=1, le=30)
+    empty_rearm_seconds: float = Field(1.2, ge=0.0, le=60.0)
+    empty_rearm_frames: int = Field(6, ge=1, le=300)
     require_roi_for_dispatch: bool = True
     max_objects_per_dispatch: int = Field(1, ge=1, le=5)
     max_classes_per_dispatch: int = Field(1, ge=1, le=5)
@@ -263,10 +263,10 @@ def default_unknown_object_fallback_config() -> UnknownObjectFallbackConfig:
 def default_dispatch_guard_config() -> DispatchGuardConfig:
     return DispatchGuardConfig(
         min_sort_interval_seconds=0.0,
-        busy_settle_seconds=0.35,
-        min_stable_frames=1,
-        empty_rearm_seconds=0.8,
-        empty_rearm_frames=3,
+        busy_settle_seconds=0.8,
+        min_stable_frames=2,
+        empty_rearm_seconds=1.2,
+        empty_rearm_frames=6,
         require_roi_for_dispatch=True,
         max_objects_per_dispatch=1,
         max_classes_per_dispatch=1,
@@ -413,17 +413,20 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     if cfg.manual_reference_recognition.cache_refresh_seconds == 3.0:
         cfg.manual_reference_recognition.cache_refresh_seconds = 30.0
         changed = True
-    if cfg.dispatch_guard.empty_rearm_seconds == 2.0:
-        cfg.dispatch_guard.empty_rearm_seconds = 0.8
+    if cfg.dispatch_guard.busy_settle_seconds == 0.35:
+        cfg.dispatch_guard.busy_settle_seconds = 0.8
         changed = True
-    if cfg.dispatch_guard.empty_rearm_frames == 10:
-        cfg.dispatch_guard.empty_rearm_frames = 3
+    if cfg.dispatch_guard.empty_rearm_seconds in {0.8, 2.0}:
+        cfg.dispatch_guard.empty_rearm_seconds = 1.2
+        changed = True
+    if cfg.dispatch_guard.empty_rearm_frames in {3, 10}:
+        cfg.dispatch_guard.empty_rearm_frames = 6
         changed = True
     if cfg.dispatch_guard.min_sort_interval_seconds == 12.0:
         cfg.dispatch_guard.min_sort_interval_seconds = 0.0
         changed = True
-    if cfg.dispatch_guard.min_stable_frames == 3:
-        cfg.dispatch_guard.min_stable_frames = 1
+    if cfg.dispatch_guard.min_stable_frames in {1, 3}:
+        cfg.dispatch_guard.min_stable_frames = 2
         changed = True
     if not cfg.manual_reference_recognition.allow_unknown_matches:
         cfg.manual_reference_recognition.allow_unknown_matches = True

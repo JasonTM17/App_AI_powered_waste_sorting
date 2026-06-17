@@ -25,10 +25,10 @@ class DispatchGuard:
         self,
         *,
         min_sort_interval_seconds: float = 0.0,
-        busy_settle_seconds: float = 0.35,
-        min_stable_frames: int = 3,
-        empty_rearm_seconds: float = 2.0,
-        empty_rearm_frames: int = 10,
+        busy_settle_seconds: float = 0.8,
+        min_stable_frames: int = 2,
+        empty_rearm_seconds: float = 1.2,
+        empty_rearm_frames: int = 6,
     ) -> None:
         self.configure(
             min_sort_interval_seconds=min_sort_interval_seconds,
@@ -120,12 +120,7 @@ class DispatchGuard:
         if stable_frames < self.min_stable_frames:
             return self._block("waiting stable")
         if not self._armed:
-            if self._is_new_track_after_dispatch(track_id):
-                self._armed = True
-                self._empty_since = None
-                self._empty_frames = 0
-            else:
-                return self._block("waiting empty tray")
+            return self._block("waiting empty tray")
         if self._last_dispatch_started_at is not None:
             elapsed = now - self._last_dispatch_started_at
             if elapsed < self.min_sort_interval_seconds:
@@ -166,13 +161,6 @@ class DispatchGuard:
 
     def _is_busy(self, now: float) -> bool:
         return self._busy_track_id is not None or now < self._busy_until
-
-    def _is_new_track_after_dispatch(self, track_id: int) -> bool:
-        return (
-            self.state == "WAITING_EMPTY"
-            and self._last_dispatch_track_id is not None
-            and int(track_id) != self._last_dispatch_track_id
-        )
 
     def _expire_busy(self, now: float) -> None:
         if self._busy_track_id is not None and now >= self._busy_until:
