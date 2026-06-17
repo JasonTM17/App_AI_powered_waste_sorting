@@ -14,6 +14,7 @@ PREFERRED_DUPLICATE_SOURCES = {
     "visual_correction:eggshell": 1,
     "visual_correction:ceramic_dish": 1,
     "visual_correction:wooden_utensil": 1,
+    "visual_correction:metal_utensil": 1,
     "visual_correction:plastic_bottle": 1,
     "YOLO": 2,
     "kaggle_three_bin_classifier": 3,

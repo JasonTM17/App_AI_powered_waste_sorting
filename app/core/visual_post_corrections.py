@@ -49,8 +49,23 @@ def apply_visual_post_corrections(
                 cls_id=UNKNOWN_OBJECT_CLASS_ID,
                 source="visual_correction:low_conf_glass",
             )
+        elif detection.cls_name == "Paper" and detection.conf <= 0.35:
+            if _looks_like_metal_utensil(frame_bgr, detection.xyxy):
+                corrected = _replace_detection(
+                    detection,
+                    "Iron utensils",
+                    source="visual_correction:metal_utensil",
+                    operator_label="Muong kim loai",
+                )
         elif detection.cls_name == unknown_class_name:
-            if _looks_like_eggshell(frame_bgr, detection.xyxy):
+            if _looks_like_metal_utensil(frame_bgr, detection.xyxy):
+                corrected = _replace_detection(
+                    detection,
+                    "Iron utensils",
+                    source="visual_correction:metal_utensil",
+                    operator_label="Muong kim loai",
+                )
+            elif _looks_like_eggshell(frame_bgr, detection.xyxy):
                 corrected = _replace_detection(
                     detection,
                     "Eggshell",
@@ -117,6 +132,49 @@ def _looks_like_elongated_wooden_utensil(
         and 95.0 <= stats["value_mean"] <= 235.0
         and 5.0 <= stats["saturation_mean"] <= 95.0
         and stats["warmth"] >= 7.0
+    )
+
+
+def _looks_like_metal_utensil(
+    frame_bgr: np.ndarray,
+    xyxy: tuple[int, int, int, int],
+) -> bool:
+    crop = _crop(frame_bgr, xyxy, pad_ratio=0.02)
+    if crop is None:
+        return False
+
+    box_w = max(1, int(xyxy[2]) - int(xyxy[0]))
+    box_h = max(1, int(xyxy[3]) - int(xyxy[1]))
+    box_aspect = box_w / float(box_h)
+    if not (box_aspect >= 1.45 or box_aspect <= 0.69):
+        return False
+
+    mask = _foreground_mask(crop)
+    stats = _mask_stats(crop, mask)
+    if stats is None:
+        return False
+
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    saturation = hsv[:, :, 1]
+    value = hsv[:, :, 2]
+    low_saturation_ratio = float(np.mean(saturation < 58))
+    colored_ratio = float(np.mean(saturation > 90))
+    glare_ratio = float(np.mean((saturation < 42) & (value > 205)))
+    dark_metal_ratio = float(np.mean((saturation < 70) & (value < 115)))
+    contrast = float(np.std(gray))
+
+    return (
+        stats["area_ratio"] >= 0.055
+        and stats["extent"] >= 0.08
+        and stats["oriented_aspect"] >= 2.05
+        and stats["saturation_mean"] <= 58.0
+        and abs(stats["warmth"]) <= 24.0
+        and low_saturation_ratio >= 0.60
+        and colored_ratio <= 0.18
+        and (glare_ratio >= 0.004 or dark_metal_ratio >= 0.05)
+        and contrast >= 16.0
+        and stats["edge_ratio"] >= 0.0025
     )
 
 

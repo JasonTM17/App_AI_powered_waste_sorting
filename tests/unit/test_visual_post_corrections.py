@@ -125,7 +125,7 @@ def test_visual_correction_expands_tiny_unknown_fold_to_crumpled_paper():
     assert corrected[0].xyxy[2] > detection.xyxy[2]
 
 
-def test_visual_correction_keeps_elongated_metal_unknown_from_becoming_paper():
+def test_visual_correction_relabels_elongated_metal_unknown_as_iron_utensils():
     frame = np.full((260, 360, 3), 228, dtype=np.uint8)
     cv2.line(frame, (35, 210), (245, 70), (92, 92, 92), 24)
     cv2.ellipse(frame, (280, 48), (54, 36), -24, 0, 360, (70, 70, 72), -1)
@@ -133,7 +133,25 @@ def test_visual_correction_keeps_elongated_metal_unknown_from_becoming_paper():
 
     corrected = apply_visual_post_corrections(frame, [detection])
 
-    assert corrected[0].cls_name == "Unknown object"
+    assert corrected[0].cls_name == "Iron utensils"
+    assert corrected[0].source == "visual_correction:metal_utensil"
+
+
+def test_visual_correction_relabels_shiny_metal_spoon_unknown_as_iron_utensils():
+    frame = np.full((260, 420, 3), 230, dtype=np.uint8)
+    cv2.line(frame, (22, 174), (258, 142), (82, 82, 82), 34)
+    cv2.line(frame, (22, 160), (258, 130), (168, 168, 166), 14)
+    cv2.ellipse(frame, (312, 128), (74, 56), -8, 0, 360, (76, 76, 78), -1)
+    cv2.ellipse(frame, (292, 122), (46, 28), -10, 0, 360, (168, 168, 166), -1)
+    cv2.circle(frame, (330, 94), 12, (250, 250, 250), -1)
+    cv2.circle(frame, (350, 96), 8, (245, 245, 245), -1)
+    detection = Detection(-1, "Unknown object", 0.14, (8, 54, 394, 220))
+
+    corrected = apply_visual_post_corrections(frame, [detection])
+
+    assert corrected[0].cls_name == "Iron utensils"
+    assert corrected[0].source == "visual_correction:metal_utensil"
+    assert corrected[0].operator_label == "Muong kim loai"
 
 
 def test_visual_correction_does_not_claim_low_conf_glass_bottle():

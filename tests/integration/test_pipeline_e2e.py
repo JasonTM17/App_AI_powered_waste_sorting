@@ -312,6 +312,13 @@ class _TinyUnknownOnPaperInfer:
         return [Detection(999, "Unknown object", 0.39, (156, 94, 186, 168))]
 
 
+class _LowConfidencePaperSpoonInfer:
+    class_names: ClassVar[dict[int, str]] = {18: "Paper"}
+
+    def predict(self, frame):
+        return [Detection(18, "Paper", 0.14, (8, 54, 394, 220))]
+
+
 class _BlankTrayPaperInfer:
     class_names: ClassVar[dict[int, str]] = {18: "Paper"}
 
@@ -368,6 +375,17 @@ def _crumpled_paper_frame() -> np.ndarray:
     cv2.line(frame, (72, 123), (286, 87), (56, 56, 58), 18)
     cv2.line(frame, (94, 176), (250, 188), (74, 74, 76), 14)
     cv2.line(frame, (112, 88), (210, 210), (190, 190, 192), 7)
+    return frame
+
+
+def _metal_spoon_frame() -> np.ndarray:
+    frame = np.full((260, 420, 3), 230, dtype=np.uint8)
+    cv2.line(frame, (22, 174), (258, 142), (82, 82, 82), 34)
+    cv2.line(frame, (22, 160), (258, 130), (168, 168, 166), 14)
+    cv2.ellipse(frame, (312, 128), (74, 56), -8, 0, 360, (76, 76, 78), -1)
+    cv2.ellipse(frame, (292, 122), (46, 28), -10, 0, 360, (168, 168, 166), -1)
+    cv2.circle(frame, (330, 94), 12, (250, 250, 250), -1)
+    cv2.circle(frame, (350, 96), 8, (245, 245, 245), -1)
     return frame
 
 
@@ -1458,6 +1476,32 @@ def test_pipeline_expands_tiny_unknown_fold_and_allows_one_crumpled_paper(
     assert [(item.cls_name, item.source) for item in detections] == [
         ("Paper", "visual_correction:crumpled_paper")
     ]
+    assert p.dispatch_status == "TEST OFF"
+    assert uart.sent == []
+    assert speaker.texts == []
+    p.close()
+
+
+def test_pipeline_routes_low_conf_paper_like_spoon_as_inorganic_utensil(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config()
+    cfg.model.conf_threshold = 0.4
+    cfg.unknown_fallback.stable_frames = 1
+    uart = _StubUart()
+    speaker = _StubSpeaker()
+    p = Pipeline(cfg, _LowConfidencePaperSpoonInfer(), uart, tmp_path / "h.db", speaker=speaker)
+    p.set_hardware_dispatch_enabled(False)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(_metal_spoon_frame(), ts=datetime.now(UTC))
+
+    assert [(item.cls_name, item.source, item.operator_label) for item in detections] == [
+        ("Iron utensils", "visual_correction:metal_utensil", "Muong kim loai")
+    ]
+    assert p._mapping_for_detection(detections[0]).command == "R"
     assert p.dispatch_status == "TEST OFF"
     assert uart.sent == []
     assert speaker.texts == []
