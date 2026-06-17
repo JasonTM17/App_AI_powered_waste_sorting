@@ -15,6 +15,12 @@ from app.core.balanced_trainset import export_balanced_trainset  # noqa: E402
 from app.core.common_waste_catalog import common_waste_class_names  # noqa: E402
 from app.core.waste_categories import TRAINING_CLASS_ORDER_45  # noqa: E402
 
+MANUAL_LEARN_NOW_SOURCES = (
+    "manual_camera_capture",
+    "manual_import",
+    "manual_phone_import",
+)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -40,6 +46,11 @@ def main() -> int:
         action="store_true",
         help="Only export samples explicitly reviewed in the manual annotation UI.",
     )
+    parser.add_argument(
+        "--manual-sources-only",
+        action="store_true",
+        help="Only export operator camera/manual samples; excludes Roboflow/web/augmented sources.",
+    )
     parser.add_argument("--generated-cap-ratio", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
@@ -57,6 +68,7 @@ def main() -> int:
         min_box_area=args.min_box_area,
         min_box_side=args.min_box_side,
         require_reviewed=args.require_reviewed,
+        allowed_sources=MANUAL_LEARN_NOW_SOURCES if args.manual_sources_only else (),
         generated_cap_ratio=args.generated_cap_ratio,
         seed=args.seed,
     )

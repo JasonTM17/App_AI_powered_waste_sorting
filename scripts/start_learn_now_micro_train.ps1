@@ -2,13 +2,23 @@ param(
     [string]$ClassName = "Pen",
     [Alias("Profile")]
     [ValidateSet("micro", "strong")]
-    [string]$TrainProfile = "micro"
+    [string]$TrainProfile = "micro",
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$ClassNameTail = @()
 )
 
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
+
+$extraClassNameParts = @(
+    $ClassNameTail |
+        Where-Object { $_ -and -not $_.StartsWith("-") }
+)
+if ($extraClassNameParts.Count -gt 0) {
+    $ClassName = (@($ClassName) + $extraClassNameParts) -join " "
+}
 
 $logDir = Join-Path $root "runs\train_logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
@@ -66,6 +76,8 @@ try {
         "--legacy-quota", "$legacyQuota",
         "--focus-class", $ClassName,
         "--include-common-waste",
+        "--require-reviewed",
+        "--manual-sources-only",
         "--min-box-area", "0.001",
         "--min-box-side", "0.005"
     )

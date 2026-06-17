@@ -38,6 +38,7 @@ def export_balanced_trainset(
     min_box_area: float = 0.0,
     min_box_side: float = 0.0,
     require_reviewed: bool = False,
+    allowed_sources: tuple[str, ...] = (),
     generated_cap_ratio: float = GENERATED_CAP_RATIO,
     seed: int = 42,
 ) -> dict[str, object]:
@@ -49,6 +50,7 @@ def export_balanced_trainset(
         blocked_labels=blocked_labels,
         blocked_items=blocked_items,
         require_reviewed=require_reviewed,
+        allowed_sources=set(allowed_sources),
     )
     selected = _select_items(
         items,
@@ -72,6 +74,7 @@ def export_balanced_trainset(
         "min_box_area": min_box_area,
         "min_box_side": min_box_side,
         "require_reviewed": require_reviewed,
+        "allowed_sources": list(allowed_sources),
         "generated_cap_ratio": generated_cap_ratio,
         "skipped_small_boxes": 0,
         "skipped_unknown_boxes": 0,
@@ -124,6 +127,7 @@ def _load_items(
     blocked_labels: Counter[str],
     blocked_items: Counter[str],
     require_reviewed: bool,
+    allowed_sources: set[str],
 ) -> list[QueueItem]:
     items: list[QueueItem] = []
     for image_path in queue_dir.glob("*.jpg"):
@@ -139,6 +143,10 @@ def _load_items(
             continue
         if not isinstance(meta, dict):
             blocked_items["invalid_meta"] += 1
+            continue
+        source = str(meta.get("source") or "unknown")
+        if allowed_sources and source not in allowed_sources:
+            blocked_items["source_not_allowed"] += 1
             continue
         decision = classify_dataset_item(meta)
         class_names: set[str] = set()

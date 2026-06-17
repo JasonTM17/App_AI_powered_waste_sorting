@@ -33,6 +33,7 @@ def _write_alias_item(
     name: str,
     cls_name: str,
     *,
+    source: str = "manual_camera_capture",
     generated: bool = False,
     augmented: bool = False,
     split: str = "train",
@@ -40,7 +41,7 @@ def _write_alias_item(
     image_path = queue / f"{name}.jpg"
     Image.new("RGB", (100, 60), (40, 40, 40)).save(image_path)
     meta = {
-        "source": "manual_camera_capture",
+        "source": source,
         "reviewed": True,
         "bbox_reviewed": True,
         "generated": generated,
@@ -173,3 +174,27 @@ def test_balanced_export_purges_stale_ultralytics_cache(tmp_path):
     )
 
     assert not list(out.glob("*.cache"))
+
+
+def test_balanced_export_can_limit_to_operator_sources(tmp_path):
+    queue = tmp_path / "queue"
+    queue.mkdir()
+    _write_alias_item(queue, "camera_pen", "Pen", source="manual_camera_capture")
+    _write_alias_item(queue, "external_pen", "Pen", source="roboflow_version2")
+    out = tmp_path / "fast"
+
+    stats = export_balanced_trainset(
+        queue,
+        out,
+        ("Pen",),
+        max_images=10,
+        legacy_quota=10,
+        require_reviewed=True,
+        allowed_sources=("manual_camera_capture", "manual_import", "manual_phone_import"),
+    )
+
+    assert stats["images"] == 1
+    assert stats["sources"] == {"manual_camera_capture": 1}
+    assert stats["blocked_items"]["source_not_allowed"] == 1
+    assert list((out / "images" / "train").glob("camera_pen.jpg"))
+    assert not list((out / "images").glob("**/external_pen.jpg"))

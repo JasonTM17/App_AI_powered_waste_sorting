@@ -47,6 +47,20 @@ def test_learn_now_counts_reviewed_references_and_routes_pen(tmp_path):
     assert selected["ready_for_micro_train"] is True
 
 
+def test_learn_now_one_reviewed_sample_enables_immediate_reference_only(tmp_path):
+    queue = tmp_path / "queue"
+    queue.mkdir()
+    _write_item(queue, "pen_0", "but bi")
+
+    selected = build_learn_now_status(queue, "cay but")["selected"]
+
+    assert selected["class_name"] == "Pen"
+    assert selected["reference_count"] == 1
+    assert selected["ready_for_reference"] is True
+    assert selected["ready_for_micro_train"] is False
+    assert selected["missing_for_micro_train"] == 5
+
+
 def test_selected_learn_now_uses_catalog_and_reads_only_selected_class(tmp_path):
     queue = tmp_path / "queue"
     queue.mkdir()
