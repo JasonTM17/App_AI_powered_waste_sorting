@@ -1406,7 +1406,7 @@ def test_pipeline_routes_three_representative_classes_to_three_bins(tmp_path, mo
     p.close()
 
 
-def test_pipeline_rearms_and_dispatches_five_consecutive_stable_objects(tmp_path, monkeypatch):
+def test_pipeline_rearms_and_dispatches_many_consecutive_stable_objects(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config(
         mappings=[ClassMapping(class_name="Organic", command="O", bin_index=1)]
@@ -1414,7 +1414,8 @@ def test_pipeline_rearms_and_dispatches_five_consecutive_stable_objects(tmp_path
     cfg.model.conf_threshold = 0.3
     cfg.dispatch_guard.min_stable_frames = 2
     frames = []
-    for index in range(5):
+    dispatch_count = 20
+    for index in range(dispatch_count):
         x_offset = index * 3
         frames.extend(
             [
@@ -1430,7 +1431,7 @@ def test_pipeline_rearms_and_dispatches_five_consecutive_stable_objects(tmp_path
     empty_frame = np.full_like(object_frame, 232)
     p.reset_dispatch_state(arm_immediately=True)
 
-    for index in range(5):
+    for index in range(dispatch_count):
         first = p.process_frame(object_frame, ts=datetime(2026, 6, 17, 8, index, 0, tzinfo=UTC))
         assert len(first) == 1
         assert len(uart.sent) == index
@@ -1450,10 +1451,10 @@ def test_pipeline_rearms_and_dispatches_five_consecutive_stable_objects(tmp_path
         p.process_frame(empty_frame, ts=datetime(2026, 6, 17, 8, index, 3, tzinfo=UTC))
         assert p.auto_sort_state == "READY"
 
-    assert [item[1] for item in uart.sent] == ["O", "O", "O", "O", "O"]
+    assert [item[1] for item in uart.sent] == ["O"] * dispatch_count
     rows = list(reversed(p.history.query(limit=10)))
-    assert [row.uart_command for row in rows] == ["O", "O", "O", "O", "O"]
-    assert [row.ack_status for row in rows] == ["ok", "ok", "ok", "ok", "ok"]
+    assert [row.uart_command for row in rows] == ["O"] * 10
+    assert [row.ack_status for row in rows] == ["ok"] * 10
     p.close()
 
 
