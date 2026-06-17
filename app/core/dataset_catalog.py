@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -15,16 +16,24 @@ from sqlalchemy import (
     String,
     Table,
     create_engine,
+    event,
     func,
     or_,
     select,
     text,
 )
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.exc import OperationalError
 
 from app.core.waste_categories import canonical_class_name
 
 metadata = MetaData()
+DATASET_SQLITE_TIMEOUT_SECONDS = 30.0
+DATASET_SQLITE_BUSY_TIMEOUT_MS = int(DATASET_SQLITE_TIMEOUT_SECONDS * 1000)
+_SCHEMA_LOCK = threading.RLock()
+_SCHEMA_READY_PATHS: set[Path] = set()
+_WRITE_LOCKS_GUARD = threading.Lock()
+_WRITE_LOCKS: dict[Path, threading.RLock] = {}
 
 dataset_items = Table(
     "dataset_items",
@@ -69,22 +78,23 @@ class DatasetCatalog:
     """Small SQLite index for files in dataset_v2/low_conf_queue."""
 
     def __init__(self, db_path: Path):
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._engine: Engine = create_engine(f"sqlite:///{db_path}", future=True)
-        metadata.create_all(self._engine)
-        with self._engine.begin() as conn:
-            self._ensure_columns(conn)
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_source ON dataset_items(source)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_cls ON dataset_items(cls_name)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_trusted ON dataset_items(trusted)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_trust_state ON dataset_items(trust_state)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_reviewed ON dataset_items(reviewed)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_boxes_item ON dataset_boxes(item_id)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_boxes_cls ON dataset_boxes(cls_name)"))
+        self._db_path = Path(db_path)
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._engine: Engine = create_engine(
+            f"sqlite:///{self._db_path}",
+            future=True,
+            connect_args={
+                "timeout": DATASET_SQLITE_TIMEOUT_SECONDS,
+                "check_same_thread": False,
+            },
+        )
+        self._write_lock = _write_lock_for(self._db_path.resolve())
+        self._install_sqlite_pragmas()
+        self._ensure_schema_ready()
 
     def upsert_item(self, image_path: Path, meta: dict[str, Any]) -> None:
         values = self._values_for_item(image_path, meta)
-        with self._engine.begin() as conn:
+        with self._write_lock, self._engine.begin() as conn:
             self._upsert_values(conn, values, meta)
 
     def index_queue(self, queue_dir: Path) -> int:
@@ -92,15 +102,18 @@ class DatasetCatalog:
             return 0
         indexed = 0
         seen_item_ids: list[str] = []
-        with self._engine.begin() as conn:
-            for image_path in sorted(queue_dir.glob("*.jpg")):
-                meta = self._read_meta(image_path)
-                if meta is None:
-                    continue
-                values = self._values_for_item(image_path, meta)
+        prepared: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for image_path in sorted(queue_dir.glob("*.jpg")):
+            meta = self._read_meta(image_path)
+            if meta is None:
+                continue
+            values = self._values_for_item(image_path, meta)
+            prepared.append((values, meta))
+            seen_item_ids.append(values["item_id"])
+            indexed += 1
+        with self._write_lock, self._engine.begin() as conn:
+            for values, meta in prepared:
                 self._upsert_values(conn, values, meta)
-                seen_item_ids.append(values["item_id"])
-                indexed += 1
             self._delete_missing_queue_items(conn, seen_item_ids)
         return indexed
 
@@ -108,7 +121,7 @@ class DatasetCatalog:
         item_ids = [p.stem for p in image_paths]
         if not item_ids:
             return
-        with self._engine.begin() as conn:
+        with self._write_lock, self._engine.begin() as conn:
             conn.execute(dataset_boxes.delete().where(dataset_boxes.c.item_id.in_(item_ids)))
             conn.execute(dataset_items.delete().where(dataset_items.c.item_id.in_(item_ids)))
 
@@ -287,6 +300,55 @@ class DatasetCatalog:
     def close(self) -> None:
         self._engine.dispose()
 
+    def _ensure_schema_ready(self) -> None:
+        path_key = self._db_path.resolve()
+        if path_key in _SCHEMA_READY_PATHS and self._db_path.exists():
+            return
+        with _SCHEMA_LOCK:
+            if path_key in _SCHEMA_READY_PATHS and self._db_path.exists():
+                return
+            try:
+                self._create_schema()
+            except OperationalError as exc:
+                if is_sqlite_database_locked(exc):
+                    self._engine.dispose()
+                raise
+            _SCHEMA_READY_PATHS.add(path_key)
+
+    def _create_schema(self) -> None:
+        with self._write_lock:
+            if self._engine.dialect.name == "sqlite":
+                with self._engine.connect() as conn:
+                    conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+            metadata.create_all(self._engine)
+        with self._write_lock, self._engine.begin() as conn:
+            self._configure_sqlite_connection(conn)
+            self._ensure_columns(conn)
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_source ON dataset_items(source)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_cls ON dataset_items(cls_name)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_trusted ON dataset_items(trusted)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_trust_state ON dataset_items(trust_state)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_reviewed ON dataset_items(reviewed)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_boxes_item ON dataset_boxes(item_id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_boxes_cls ON dataset_boxes(cls_name)"))
+
+    @staticmethod
+    def _configure_sqlite_connection(conn: Connection) -> None:
+        if conn.dialect.name != "sqlite":
+            return
+        conn.execute(text(f"PRAGMA busy_timeout={DATASET_SQLITE_BUSY_TIMEOUT_MS}"))
+        conn.execute(text("PRAGMA synchronous=NORMAL"))
+
+    def _install_sqlite_pragmas(self) -> None:
+        @event.listens_for(self._engine, "connect")
+        def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute(f"PRAGMA busy_timeout={DATASET_SQLITE_BUSY_TIMEOUT_MS}")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+            finally:
+                cursor.close()
+
     def _upsert_values(self, conn: Connection, values: dict[str, Any], meta: dict[str, Any]) -> None:
         existing = conn.execute(
             select(dataset_items.c.id).where(dataset_items.c.item_id == values["item_id"])
@@ -424,6 +486,19 @@ def _chunks(values: list[str], size: int) -> list[list[str]]:
     return [values[i : i + size] for i in range(0, len(values), size)]
 
 
+def is_sqlite_database_locked(exc: BaseException) -> bool:
+    return "database is locked" in str(exc).casefold()
+
+
+def _write_lock_for(path: Path) -> threading.RLock:
+    with _WRITE_LOCKS_GUARD:
+        lock = _WRITE_LOCKS.get(path)
+        if lock is None:
+            lock = threading.RLock()
+            _WRITE_LOCKS[path] = lock
+        return lock
+
+
 def _meta_reviewed(meta: dict[str, Any]) -> bool:
     return bool(meta.get("reviewed"))
 
@@ -440,4 +515,4 @@ def _meta_trust_state(meta: dict[str, Any]) -> str:
     return classify_dataset_item(meta).state.value
 
 
-__all__ = ["DatasetCatalog", "dataset_boxes", "dataset_items"]
+__all__ = ["DatasetCatalog", "dataset_boxes", "dataset_items", "is_sqlite_database_locked"]

@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import AppConfig
-from app.core.dataset_catalog import DatasetCatalog
+from app.core.dataset_catalog import DatasetCatalog, is_sqlite_database_locked
 from app.core.dataset_trust import DatasetTrustState, classify_dataset_item
 from app.core.waste_categories import (
     TRAINING_CLASS_ORDER_45,
@@ -84,15 +84,27 @@ class _TrainingDataWorker(QThread):
             self.failed.emit(self._request_id, str(exc))
 
     def _load_catalog_payload(self) -> dict[str, object]:
-        catalog = DatasetCatalog(self._catalog_path)
         try:
+            catalog = DatasetCatalog(self._catalog_path)
             all_rows, all_total = catalog.list_items_for_box_class(
                 self._class_name,
                 limit=None,
             )
             catalog_total = catalog.count_total()
+        except Exception as exc:
+            if is_sqlite_database_locked(exc):
+                rows, total, counts = self._fallback_scan()
+                return {
+                    "rows": rows,
+                    "total": total,
+                    "counts": counts,
+                    "source": "fallback_locked",
+                    "catalog_total": 0,
+                }
+            raise
         finally:
-            catalog.close()
+            if "catalog" in locals():
+                catalog.close()
         rows = [
             row
             for row in all_rows
@@ -232,6 +244,7 @@ class TrainingPage(QWidget):
         self._loaded = False
         self._load_request_id = 0
         self._load_workers: list[_TrainingDataWorker] = []
+        self._reload_pending = False
         self._grid_items: dict[str, QListWidgetItem] = {}
         self._reload_timer = QTimer(self)
         self._reload_timer.setSingleShot(True)
@@ -463,8 +476,15 @@ class TrainingPage(QWidget):
     def reload(self) -> None:
         started = time.perf_counter()
         self._loaded = True
-        for previous in self._load_workers:
-            previous.requestInterruption()
+        if self._load_workers:
+            self._load_request_id += 1
+            self._reload_pending = True
+            for previous in self._load_workers:
+                previous.requestInterruption()
+            raw, canonical, _cls_id = self._label_target()
+            self.stats.setText(f"Dang chuan bi tai mau {canonical or raw or ''}...")
+            return
+        self._reload_pending = False
         self._load_request_id += 1
         request_id = self._load_request_id
         self.grid.clear()
@@ -576,6 +596,9 @@ class TrainingPage(QWidget):
     def _forget_load_worker(self, worker: _TrainingDataWorker) -> None:
         with suppress(ValueError):
             self._load_workers.remove(worker)
+        if not self._load_workers and self._reload_pending:
+            self._reload_pending = False
+            QTimer.singleShot(0, self.reload)
 
     @staticmethod
     def _label_for_catalog_row(row: dict[str, object]) -> str:

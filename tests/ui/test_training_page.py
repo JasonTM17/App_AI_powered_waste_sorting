@@ -9,6 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QFileDialog, QPushButton
+from sqlalchemy.exc import OperationalError
 
 import app.ui.pages.training as training_module
 from app.core.config import AppConfig, ClassMapping
@@ -231,6 +232,8 @@ def test_training_page_training_running_disables_train_and_enables_stop(tmp_path
 
 
 def test_training_page_reload_returns_before_slow_worker_finishes(tmp_path, qtbot, monkeypatch):
+    started_workers: list[object] = []
+
     class DeferredWorker(QThread):
         metadata_ready = Signal(int, object)
         thumbnails_ready = Signal(int, object)
@@ -239,9 +242,17 @@ def test_training_page_reload_returns_before_slow_worker_finishes(tmp_path, qtbo
         def __init__(self, request_id, *_args):
             super().__init__()
             self.request_id = request_id
+            self.interrupted = False
 
         def start(self):
+            started_workers.append(self)
             return None
+
+        def requestInterruption(self):  # noqa: N802
+            self.interrupted = True
+
+        def isInterruptionRequested(self):  # noqa: N802
+            return self.interrupted
 
     monkeypatch.setattr(training_module, "_TrainingDataWorker", DeferredWorker)
     page = TrainingPage(_config_for_dataset(tmp_path / "dataset"))
@@ -252,7 +263,70 @@ def test_training_page_reload_returns_before_slow_worker_finishes(tmp_path, qtbo
     elapsed = time.perf_counter() - started
 
     assert elapsed < 0.3
+    assert len(started_workers) == 1
     assert "Đang tải mẫu Pen" in page.stats.text()
+
+
+def test_training_page_coalesces_reload_while_worker_is_running(tmp_path, qtbot, monkeypatch):
+    started_workers: list[object] = []
+
+    class DeferredWorker(QThread):
+        metadata_ready = Signal(int, object)
+        thumbnails_ready = Signal(int, object)
+        failed = Signal(int, str)
+
+        def __init__(self, request_id, *_args):
+            super().__init__()
+            self.request_id = request_id
+            self.interrupted = False
+
+        def start(self):
+            started_workers.append(self)
+            return None
+
+        def requestInterruption(self):  # noqa: N802
+            self.interrupted = True
+
+        def isInterruptionRequested(self):  # noqa: N802
+            return self.interrupted
+
+    monkeypatch.setattr(training_module, "_TrainingDataWorker", DeferredWorker)
+    page = TrainingPage(_config_for_dataset(tmp_path / "dataset"))
+    qtbot.addWidget(page)
+
+    page.reload()
+    page.reload()
+
+    assert len(started_workers) == 1
+    assert page._reload_pending is True
+    assert page._load_workers[0].isInterruptionRequested() is True
+
+    page._forget_load_worker(page._load_workers[0])
+    qtbot.waitUntil(lambda: len(started_workers) == 2, timeout=500)
+
+
+def test_training_data_worker_falls_back_when_catalog_is_locked(tmp_path, monkeypatch):
+    qdir = tmp_path / "dataset" / "low_conf_queue"
+    qdir.mkdir(parents=True)
+    image_path = qdir / "pen_0.jpg"
+    cv2.imwrite(str(image_path), np.full((24, 32, 3), 120, dtype=np.uint8))
+    image_path.with_suffix(".json").write_text(
+        '{"source":"manual_camera_capture","reviewed":true,"bbox_reviewed":true,'
+        '"boxes":[{"cls_id":42,"cls_name":"Pen","conf":1.0,"xyxy":[0,0,32,24]}]}',
+        encoding="utf-8",
+    )
+
+    class LockedCatalog:
+        def __init__(self, *_args, **_kwargs):
+            raise OperationalError("PRAGMA", {}, Exception("database is locked"))
+
+    monkeypatch.setattr(training_module, "DatasetCatalog", LockedCatalog)
+
+    worker = training_module._TrainingDataWorker(1, tmp_path / "dataset.db", qdir, "Pen")
+    payload = worker._load_catalog_payload()
+
+    assert payload["source"] == "fallback_locked"
+    assert payload["total"] == 1
 
 
 def test_training_page_ignores_metadata_from_stale_class_request(tmp_path, qtbot):

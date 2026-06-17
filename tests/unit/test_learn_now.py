@@ -1,6 +1,7 @@
 import json
 
 from PIL import Image
+from sqlalchemy.exc import OperationalError
 
 from app.core.dataset_catalog import DatasetCatalog
 from app.core.learn_now import build_learn_now_status, build_selected_learn_now_status
@@ -81,6 +82,25 @@ def test_selected_learn_now_uses_catalog_and_reads_only_selected_class(tmp_path)
     assert status["selected"]["reviewed_count"] == 6
     assert status["selected_images_scanned"] == 6
     assert status["total_images"] == 10
+
+
+def test_selected_learn_now_falls_back_to_queue_when_catalog_is_locked(tmp_path, monkeypatch):
+    queue = tmp_path / "queue"
+    queue.mkdir()
+    for index in range(6):
+        _write_item(queue, f"pen_{index}", "Pen")
+
+    class LockedCatalog:
+        def __init__(self, *_args, **_kwargs):
+            raise OperationalError("PRAGMA", {}, Exception("database is locked"))
+
+    monkeypatch.setattr("app.core.learn_now.DatasetCatalog", LockedCatalog)
+
+    status = build_selected_learn_now_status(queue, "Pen", tmp_path / "dataset.db")
+
+    assert status["selected"]["class_name"] == "Pen"
+    assert status["selected"]["reviewed_count"] == 6
+    assert status["total_images"] == 6
 
 
 def test_learn_now_textile_aliases_route_and_unlock_candidate_readiness(tmp_path):

@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import cv2
@@ -229,5 +230,40 @@ def test_catalog_filters_unknown_labels_as_untrusted(tmp_path: Path):
         rows, total = catalog.list_items(trusted=False)
         assert total == 1
         assert rows[0]["trusted"] == 0
+    finally:
+        catalog.close()
+
+
+def test_catalog_handles_parallel_open_read_and_index_queue(tmp_path: Path):
+    qdir = tmp_path / "queue"
+    for index in range(18):
+        _make_item(qdir, f"manual_{index:02d}", reviewed=True)
+    db_path = tmp_path / "dataset.db"
+
+    def index_once() -> int:
+        catalog = DatasetCatalog(db_path)
+        try:
+            return catalog.index_queue(qdir)
+        finally:
+            catalog.close()
+
+    def read_once() -> int:
+        catalog = DatasetCatalog(db_path)
+        try:
+            return catalog.count_total()
+        finally:
+            catalog.close()
+
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = [pool.submit(index_once), *(pool.submit(read_once) for _ in range(12))]
+        results = [future.result(timeout=10) for future in futures]
+
+    assert results[0] == 18
+    assert max(results[1:]) <= 18
+
+    catalog = DatasetCatalog(db_path)
+    try:
+        assert catalog.count_total() == 18
+        assert catalog.count_boxes_total() == 18
     finally:
         catalog.close()

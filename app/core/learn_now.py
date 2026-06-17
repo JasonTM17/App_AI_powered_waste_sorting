@@ -7,7 +7,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 from app.core.common_waste_catalog import common_waste_class_names
-from app.core.dataset_catalog import DatasetCatalog
+from app.core.dataset_catalog import DatasetCatalog, is_sqlite_database_locked
 from app.core.dataset_queue import is_trainable_meta, is_trusted_meta
 from app.core.licensed_source_ingestion import (
     GENERATED_CAP_RATIO,
@@ -86,13 +86,18 @@ def build_selected_learn_now_status(
     if not selected:
         return build_learn_now_status(queue_dir, selected_class)
 
-    catalog = DatasetCatalog(catalog_path)
     try:
+        catalog = DatasetCatalog(catalog_path)
         rows, selected_total = catalog.list_items_for_box_class(selected, limit=None)
         catalog_total = catalog.count_total()
         total_boxes = catalog.count_boxes_total()
+    except Exception as exc:
+        if is_sqlite_database_locked(exc):
+            return build_learn_now_status(queue_dir, selected)
+        raise
     finally:
-        catalog.close()
+        if "catalog" in locals():
+            catalog.close()
     if catalog_total == 0 and queue_dir.exists() and any(queue_dir.glob("*.jpg")):
         return build_learn_now_status(queue_dir, selected)
 
