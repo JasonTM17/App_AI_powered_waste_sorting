@@ -1,6 +1,7 @@
 import numpy as np
 
 from app.core.detection_filtering import (
+    collapse_duplicate_physical_detections,
     find_ambiguous_organic_candidate,
     is_low_detail_empty_tray,
     is_uniform_empty_tray_artifact,
@@ -40,6 +41,28 @@ def test_suppress_overlapping_detections_handles_large_container_box():
     filtered = suppress_overlapping_detections(detections)
 
     assert [item.cls_name for item in filtered] == ["Aluminum can"]
+
+
+def test_collapse_duplicate_physical_detections_prefers_known_label_over_unknown():
+    detections = [
+        Detection(999, "Unknown object", 0.77, (24, 22, 338, 230)),
+        Detection(18, "Paper", 0.52, (42, 45, 318, 224)),
+    ]
+
+    filtered = collapse_duplicate_physical_detections(detections)
+
+    assert [item.cls_name for item in filtered] == ["Paper"]
+
+
+def test_collapse_duplicate_physical_detections_keeps_far_objects_separate():
+    detections = [
+        Detection(42, "Pen", 0.77, (10, 20, 140, 60)),
+        Detection(18, "Paper", 0.72, (210, 70, 320, 190)),
+    ]
+
+    filtered = collapse_duplicate_physical_detections(detections)
+
+    assert [item.cls_name for item in filtered] == ["Pen", "Paper"]
 
 
 def test_uniform_empty_tray_rejects_full_frame_false_positive():

@@ -21,6 +21,7 @@ from app.core.config import (
     normalize_multi_class_warning_text,
 )
 from app.core.detection_filtering import (
+    collapse_duplicate_physical_detections,
     find_ambiguous_organic_candidate,
     is_low_detail_empty_tray,
     is_uniform_empty_tray_artifact,
@@ -45,6 +46,7 @@ from app.core.three_bin_classifier import (
 from app.core.tracker import Tracker
 from app.core.uart_protocol import encode_sort
 from app.core.unknown_object_fallback import UnknownObjectFallback
+from app.core.visual_post_corrections import apply_visual_post_corrections
 from app.core.voice_pack import sort_voice_path
 from app.core.waste_categories import (
     category_for_class,
@@ -113,6 +115,28 @@ def _box_area_ratio(
         return 0.0
     x1, y1, x2, y2 = _clamp_box(xyxy, width, height)
     return float((x2 - x1) * (y2 - y1)) / float(width * height)
+
+
+def _boxes_overlap(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+    *,
+    iou_threshold: float,
+) -> bool:
+    ax1, ay1, ax2, ay2 = first
+    bx1, by1, bx2, by2 = second
+    intersection = max(0, min(ax2, bx2) - max(ax1, bx1)) * max(
+        0,
+        min(ay2, by2) - max(ay1, by1),
+    )
+    first_area = max(0, ax2 - ax1) * max(0, ay2 - ay1)
+    second_area = max(0, bx2 - bx1) * max(0, by2 - by1)
+    union = first_area + second_area - intersection
+    smaller = max(1, min(first_area, second_area))
+    return (
+        intersection / max(union, 1) >= iou_threshold
+        or intersection / smaller >= 0.85
+    )
 
 
 class _NoopUart:
@@ -610,11 +634,7 @@ class Pipeline:
                 mode = "unknown"
             elif detection.cls_name in correctable_classes:
                 area_ratio = _box_area_ratio(detection.xyxy, width, height)
-                confidence_limited_classes = {"Glass bottle", "Pen"}
-                confidence_ok = (
-                    detection.cls_name not in confidence_limited_classes
-                    or detection.conf <= ref_cfg.max_correction_confidence
-                )
+                confidence_ok = detection.conf <= ref_cfg.max_correction_confidence
                 if area_ratio >= ref_cfg.min_correction_area_ratio and confidence_ok:
                     mode = "correction"
             if not mode:
@@ -633,6 +653,16 @@ class Pipeline:
                 frame_bgr,
                 detection,
                 allowed_classes=allowed_classes or None,
+                min_similarity=(
+                    ref_cfg.unknown_min_similarity
+                    if mode == "unknown"
+                    else None
+                ),
+                min_votes=(
+                    ref_cfg.unknown_min_votes
+                    if mode == "unknown"
+                    else None
+                ),
             )
             if match is None:
                 out.append(detection)
@@ -678,6 +708,37 @@ class Pipeline:
                     match.image_path,
                 )
         return out
+
+    def _manual_reference_correction_candidates(
+        self,
+        frame_bgr: np.ndarray,
+        raw: list[Detection],
+        _filtered: list[Detection],
+    ) -> list[Detection]:
+        """Rescue weak YOLO guesses only when reviewed references can correct them."""
+        recognizer = self._manual_reference_recognizer
+        ref_cfg = self.cfg.manual_reference_recognition
+        if recognizer is None or not ref_cfg.enabled or not raw:
+            return []
+        correctable_classes = {
+            str(name).strip()
+            for name in ref_cfg.correctable_yolo_classes
+            if str(name).strip()
+        }
+        if not correctable_classes:
+            return []
+        height, width = frame_bgr.shape[:2] if frame_bgr.ndim >= 2 else (0, 0)
+        candidates: list[Detection] = []
+        for detection in raw:
+            if detection.source != "YOLO" or detection.cls_name not in correctable_classes:
+                continue
+            if detection.conf < max(0.05, self.cfg.model.conf_threshold * 0.20):
+                continue
+            area_ratio = _box_area_ratio(detection.xyxy, width, height)
+            if area_ratio < ref_cfg.min_correction_area_ratio:
+                continue
+            candidates.append(detection)
+        return suppress_overlapping_detections(candidates, iou_threshold=0.55)
 
     def _apply_three_bin_classifier(
         self,
@@ -864,13 +925,33 @@ class Pipeline:
             )
         ]
         filtered = suppress_overlapping_detections(filtered)
+        manual_candidates = self._manual_reference_correction_candidates(
+            frame_bgr,
+            raw,
+            filtered,
+        )
+        if manual_candidates:
+            manual_corrected = self._apply_manual_references(frame_bgr, manual_candidates)
+            filtered.extend(
+                detection
+                for detection in manual_corrected
+                if detection.source == "manual_reference"
+            )
+            filtered = collapse_duplicate_physical_detections(filtered)
         filtered_in_roi = [d for d in filtered if self._in_roi(d.xyxy)]
         unknown_candidate = self._unknown_detection(frame_bgr, raw, filtered_in_roi)
         unknown = None if low_detail_empty else unknown_candidate
         if unknown is not None:
             filtered.append(unknown)
         filtered = self._apply_manual_references(frame_bgr, filtered)
+        filtered = apply_visual_post_corrections(
+            frame_bgr,
+            filtered,
+            unknown_class_name=self.cfg.unknown_fallback.class_name,
+        )
         filtered = self._apply_three_bin_classifier(frame_bgr, filtered)
+        filtered = suppress_overlapping_detections(filtered, iou_threshold=0.55)
+        filtered = collapse_duplicate_physical_detections(filtered)
         self._save_low_conf_frame(frame_bgr, raw, ts)
         tracked = self.tracker.update(filtered)
         detections_for_render = [t.detection for t in tracked]
@@ -912,6 +993,8 @@ class Pipeline:
             roi_ready=roi_ready,
             now=now_mono,
         )
+        if roi_ready and not visible_in_roi and self._dispatch_guard.state == "READY":
+            self.tracker.clear_active()
         self.dispatch_status = self._dispatch_guard.last_reason
         if self._hardware_dispatch_enabled and (
             self._dispatch_guard.state in {"SORTING", "RETURNING"}

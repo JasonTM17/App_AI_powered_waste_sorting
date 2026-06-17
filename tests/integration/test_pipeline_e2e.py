@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import ClassVar
 
+import cv2
 import numpy as np
 from PIL import Image
 
@@ -50,6 +51,21 @@ class _SequenceInfer:
         if not self._items:
             return []
         return [self._items.pop(0)]
+
+
+class _ScriptedInfer:
+    class_names: ClassVar[dict[int, str]] = {
+        0: "Organic",
+        1: "Plastic bottle",
+    }
+
+    def __init__(self, frames):
+        self._frames = list(frames)
+
+    def predict(self, frame):
+        if not self._frames:
+            return []
+        return list(self._frames.pop(0))
 
 
 class _LowConfidencePenInfer:
@@ -115,11 +131,35 @@ class _LowConfidenceGlassBottleInfer:
         return [Detection(12, "Glass bottle", 0.68, (5, 10, 75, 35))]
 
 
+class _LowConfidencePlasticCupInfer:
+    class_names: ClassVar[dict[int, str]] = {24: "Plastic cup"}
+
+    def predict(self, frame):
+        return [Detection(24, "Plastic cup", 0.12, (5, 5, 75, 35))]
+
+
 class _ForkAsPenInfer:
     class_names: ClassVar[dict[int, str]] = {42: "Pen"}
 
     def predict(self, frame):
         return [Detection(42, "Pen", 0.68, (5, 8, 75, 36))]
+
+
+class _PaperAsOrganicInfer:
+    class_names: ClassVar[dict[int, str]] = {17: "Organic"}
+
+    def predict(self, frame):
+        return [Detection(17, "Organic", 0.55, (5, 5, 75, 35))]
+
+
+class _OverlappingWrongPaperInfer:
+    class_names: ClassVar[dict[int, str]] = {17: "Organic", 18: "Paper"}
+
+    def predict(self, frame):
+        return [
+            Detection(17, "Organic", 0.55, (5, 5, 75, 35)),
+            Detection(18, "Paper", 0.12, (5, 5, 75, 35)),
+        ]
 
 
 class _HighConfidencePenInfer:
@@ -255,6 +295,23 @@ class _WidePenInfer:
         return [Detection(42, "Pen", 0.93, (20, 20, 285, 205))]
 
 
+class _OverlappingPaperUnknownInfer:
+    class_names: ClassVar[dict[int, str]] = {18: "Paper", 999: "Unknown object"}
+
+    def predict(self, frame):
+        return [
+            Detection(999, "Unknown object", 0.77, (24, 22, 338, 230)),
+            Detection(18, "Paper", 0.52, (42, 45, 318, 224)),
+        ]
+
+
+class _TinyUnknownOnPaperInfer:
+    class_names: ClassVar[dict[int, str]] = {999: "Unknown object"}
+
+    def predict(self, frame):
+        return [Detection(999, "Unknown object", 0.39, (156, 94, 186, 168))]
+
+
 class _BlankTrayPaperInfer:
     class_names: ClassVar[dict[int, str]] = {18: "Paper"}
 
@@ -294,6 +351,26 @@ def _arm_dispatch(p: Pipeline) -> None:
     p._dispatch_guard.observe_frame(has_visible_object=False, roi_ready=True, now=time.monotonic())
 
 
+def _crumpled_paper_frame() -> np.ndarray:
+    frame = np.full((260, 360, 3), 228, dtype=np.uint8)
+    paper = np.array(
+        [
+            [82, 76],
+            [268, 50],
+            [314, 145],
+            [236, 218],
+            [94, 199],
+            [46, 126],
+        ],
+        dtype=np.int32,
+    )
+    cv2.fillPoly(frame, [paper], (218, 220, 222))
+    cv2.line(frame, (72, 123), (286, 87), (56, 56, 58), 18)
+    cv2.line(frame, (94, 176), (250, 188), (74, 74, 76), 14)
+    cv2.line(frame, (112, 88), (210, 210), (190, 190, 192), 7)
+    return frame
+
+
 def _write_manual_reference(
     queue_dir: Path,
     *,
@@ -302,9 +379,10 @@ def _write_manual_reference(
     rgb_color: tuple[int, int, int] = (220, 30, 30),
     operator_label: str = "",
     recognition_only: bool = False,
+    count: int = 3,
 ) -> None:
     queue_dir.mkdir(parents=True, exist_ok=True)
-    for index in range(3):
+    for index in range(count):
         image = Image.new("RGB", (80, 40), (20, 20, 20))
         for x in range(15, 65):
             for y in range(12, 28):
@@ -393,6 +471,33 @@ def test_pipeline_labels_unknown_with_reviewed_manual_reference(tmp_path, monkey
     assert uart.sent == []
 
 
+def test_pipeline_labels_unknown_with_one_fresh_reviewed_reference(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
+    )
+    cfg.capture.output_dir = str(tmp_path / "dataset_v2")
+    cfg.model.conf_threshold = 0.3
+    cfg.manual_reference_recognition.allow_unknown_matches = True
+    cfg.manual_reference_recognition.unknown_min_similarity = 0.92
+    cfg.manual_reference_recognition.unknown_min_votes = 1
+    _write_manual_reference(Path(cfg.capture.output_dir) / "low_conf_queue", count=1)
+    uart = _StubUart()
+    p = Pipeline(cfg, _UnknownInfer(), uart, tmp_path / "h.db")
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.zeros((40, 80, 3), dtype=np.uint8)
+    frame[:, :] = (20, 20, 20)
+    frame[12:28, 15:65] = (30, 30, 220)
+
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(d.cls_name, d.source) for d in detections] == [("Pen", "manual_reference")]
+    assert detections[0].conf >= 0.92
+    assert uart.sent == []
+    p.close()
+
+
 def test_pipeline_routes_unknown_with_legacy_common_reference_alias(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
@@ -455,6 +560,35 @@ def test_pipeline_dispatches_next_new_object_after_ack_and_empty_tray(tmp_path):
     p.process_frame(frame, datetime.now(UTC))
 
     assert [item[1] for item in uart.sent] == ["O", "I"]
+
+
+def test_pipeline_clears_emitted_track_after_empty_rearm_for_next_object(tmp_path):
+    cfg = _dispatch_ready_config()
+    uart = _StubUart()
+    same_box = (10, 10, 100, 100)
+    p = Pipeline(
+        cfg,
+        _ScriptedInfer(
+            [
+                [Detection(0, "Organic", 0.92, same_box)],
+                [],
+                [Detection(1, "Plastic bottle", 0.91, same_box)],
+            ]
+        ),
+        uart,
+        tmp_path / "h.db",
+    )
+    p.reset_dispatch_state(arm_immediately=True)
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+    p.process_frame(frame, datetime.now(UTC))
+    first_track, first_command, _ = uart.sent[0]
+    p.on_ack(first_track, first_command, "ok", 3200)
+    p.process_frame(frame, datetime.now(UTC))
+    p.process_frame(frame, datetime.now(UTC))
+
+    assert [item[1] for item in uart.sent] == ["O", "I"]
+    p.close()
 
 
 def test_pipeline_corrects_large_cardboard_cloth_to_textile_reference(tmp_path, monkeypatch):
@@ -600,7 +734,7 @@ def test_pipeline_corrects_glass_bottle_to_wooden_spoon(
     detections = p.process_frame(frame, datetime.now(UTC))
 
     assert [(d.cls_name, d.operator_label) for d in detections] == [("Wood", "Thìa gỗ")]
-    assert uart.sent == [(1, "O", detections[0].conf)]
+    assert uart.sent == [(1, "R", detections[0].conf)]
 
 
 def test_pipeline_corrects_pen_to_disposable_fork(tmp_path, monkeypatch):
@@ -637,6 +771,115 @@ def test_pipeline_corrects_pen_to_disposable_fork(tmp_path, monkeypatch):
     meta = json.loads(Path(rows[0].meta_path).read_text(encoding="utf-8"))
     assert meta["display_name"] == "Nĩa nhựa dùng một lần"
     assert meta["review_required"] is False
+    p.close()
+
+
+def test_pipeline_rescues_low_conf_plastic_cup_as_metal_utensil(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
+    cfg = _dispatch_ready_config()
+    cfg.capture.output_dir = str(tmp_path / "dataset_v2")
+    cfg.model.conf_threshold = 0.4
+    cfg.manual_reference_recognition.min_similarity = 0.9
+    cfg.manual_reference_recognition.top_k = 3
+    cfg.manual_reference_recognition.min_votes = 3
+    cfg.manual_reference_recognition.min_correction_area_ratio = 0.2
+    _write_manual_reference(
+        Path(cfg.capture.output_dir) / "low_conf_queue",
+        cls_name="Iron utensils",
+        cls_id=13,
+        rgb_color=(70, 70, 70),
+        operator_label="Nia kim loai",
+        recognition_only=True,
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, _LowConfidencePlasticCupInfer(), uart, tmp_path / "h.db")
+    frame = np.full((40, 80, 3), 220, dtype=np.uint8)
+    frame[5:35, 5:75] = (70, 70, 70)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(d.cls_name, d.operator_label, d.source) for d in detections] == [
+        ("Iron utensils", "Nia kim loai", "manual_reference")
+    ]
+    assert uart.sent == [(1, "R", detections[0].conf)]
+    p.close()
+
+
+def test_pipeline_general_reference_correction_rescues_wrong_yolo_class(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
+    cfg = _dispatch_ready_config(
+        mappings=[
+            ClassMapping(class_name="Organic", command="O", bin_index=1),
+            ClassMapping(class_name="Paper", command="I", bin_index=3),
+        ]
+    )
+    cfg.capture.output_dir = str(tmp_path / "dataset_v2")
+    cfg.model.conf_threshold = 0.3
+    cfg.manual_reference_recognition.min_similarity = 0.9
+    cfg.manual_reference_recognition.top_k = 3
+    cfg.manual_reference_recognition.min_votes = 3
+    cfg.manual_reference_recognition.min_correction_area_ratio = 0.2
+    _write_manual_reference(
+        Path(cfg.capture.output_dir) / "low_conf_queue",
+        cls_name="Paper",
+        cls_id=18,
+        rgb_color=(210, 210, 210),
+        recognition_only=True,
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, _PaperAsOrganicInfer(), uart, tmp_path / "h.db")
+    frame = np.full((40, 80, 3), 20, dtype=np.uint8)
+    frame[5:35, 5:75] = (210, 210, 210)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(d.cls_name, d.source) for d in detections] == [("Paper", "manual_reference")]
+    assert uart.sent == [(1, "I", detections[0].conf)]
+    p.close()
+
+
+def test_pipeline_manual_reference_rescues_overlapping_low_conf_raw_candidate(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
+    cfg = _dispatch_ready_config(
+        mappings=[
+            ClassMapping(class_name="Organic", command="O", bin_index=1),
+            ClassMapping(class_name="Paper", command="I", bin_index=3),
+        ]
+    )
+    cfg.capture.output_dir = str(tmp_path / "dataset_v2")
+    cfg.model.conf_threshold = 0.3
+    cfg.manual_reference_recognition.min_similarity = 0.9
+    cfg.manual_reference_recognition.top_k = 3
+    cfg.manual_reference_recognition.min_votes = 3
+    cfg.manual_reference_recognition.min_correction_area_ratio = 0.2
+    _write_manual_reference(
+        Path(cfg.capture.output_dir) / "low_conf_queue",
+        cls_name="Paper",
+        cls_id=18,
+        rgb_color=(210, 210, 210),
+        recognition_only=True,
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, _OverlappingWrongPaperInfer(), uart, tmp_path / "h.db")
+    frame = np.full((40, 80, 3), 20, dtype=np.uint8)
+    frame[5:35, 5:75] = (210, 210, 210)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(d.cls_name, d.source) for d in detections] == [("Paper", "manual_reference")]
+    assert uart.sent == [(1, "I", detections[0].conf)]
     p.close()
 
 
@@ -691,6 +934,35 @@ def test_pipeline_routes_unknown_with_kaggle_three_bin_classifier(tmp_path, monk
     assert meta["display_name"] == "Nhóm Tái chế (chưa xác định vật cụ thể)"
     assert meta["review_required"] is True
     assert meta["training_excluded"] is True
+    p.close()
+
+
+def test_pipeline_corrects_crumpled_paper_before_three_bin_inorganic_fallback(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Paper", command="I", bin_index=3)]
+    )
+    cfg.model.conf_threshold = 0.3
+    cfg.three_bin_classifier.enabled = True
+    cfg.three_bin_classifier.unknown_only = True
+    infer = _ScriptedInfer(
+        [[Detection(999, "Unknown object", 0.77, (42, 45, 318, 224))]]
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, infer, uart, tmp_path / "h.db")
+    p._three_bin_classifier = _StubThreeBinClassifier("R")
+    frame = _crumpled_paper_frame()
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(item.cls_name, item.source) for item in detections] == [
+        ("Paper", "visual_correction:crumpled_paper")
+    ]
+    assert uart.sent == [(1, "I", detections[0].conf)]
     p.close()
 
 
@@ -1140,6 +1412,55 @@ def test_pipeline_allows_split_foreground_inside_one_yolo_object(tmp_path, monke
     assert [item.cls_name for item in detections] == ["Pen"]
     assert p.dispatch_status == "TEST OFF"
     assert p.uart.sent == []
+    p.close()
+
+
+def test_pipeline_collapses_overlapping_labels_for_one_paper_object(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Paper", command="I", bin_index=3)]
+    )
+    cfg.model.conf_threshold = 0.3
+    uart = _StubUart()
+    speaker = _StubSpeaker()
+    p = Pipeline(cfg, _OverlappingPaperUnknownInfer(), uart, tmp_path / "h.db", speaker=speaker)
+    p.set_hardware_dispatch_enabled(False)
+    frame = _crumpled_paper_frame()
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert [item.cls_name for item in detections] == ["Paper"]
+    assert p.dispatch_status == "TEST OFF"
+    assert uart.sent == []
+    assert speaker.texts == []
+    p.close()
+
+
+def test_pipeline_expands_tiny_unknown_fold_and_allows_one_crumpled_paper(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Paper", command="I", bin_index=3)]
+    )
+    cfg.model.conf_threshold = 0.3
+    uart = _StubUart()
+    speaker = _StubSpeaker()
+    p = Pipeline(cfg, _TinyUnknownOnPaperInfer(), uart, tmp_path / "h.db", speaker=speaker)
+    p.set_hardware_dispatch_enabled(False)
+    frame = _crumpled_paper_frame()
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert [(item.cls_name, item.source) for item in detections] == [
+        ("Paper", "visual_correction:crumpled_paper")
+    ]
+    assert p.dispatch_status == "TEST OFF"
+    assert uart.sent == []
+    assert speaker.texts == []
     p.close()
 
 

@@ -8,6 +8,17 @@ import numpy as np
 from app.core.events import Detection
 
 PAPER_LIKE_CLASSES = {"Paper", "Paper bag"}
+PREFERRED_DUPLICATE_SOURCES = {
+    "manual_reference": 0,
+    "visual_correction:crumpled_paper": 1,
+    "visual_correction:eggshell": 1,
+    "visual_correction:ceramic_dish": 1,
+    "visual_correction:wooden_utensil": 1,
+    "visual_correction:plastic_bottle": 1,
+    "YOLO": 2,
+    "kaggle_three_bin_classifier": 3,
+}
+UNKNOWN_CLASS_NAMES = {"Unknown object"}
 
 
 def suppress_overlapping_detections(
@@ -29,6 +40,33 @@ def suppress_overlapping_detections(
             continue
         kept.append(detection)
     return kept
+
+
+def collapse_duplicate_physical_detections(
+    detections: list[Detection],
+    *,
+    iou_threshold: float = 0.30,
+) -> list[Detection]:
+    """Merge boxes that are different labels for the same visible object."""
+    clusters: list[list[Detection]] = []
+    for detection in detections:
+        for cluster in clusters:
+            if any(
+                _same_physical_object(
+                    detection.xyxy,
+                    item.xyxy,
+                    iou_threshold=iou_threshold,
+                )
+                or _same_local_object(detection.xyxy, item.xyxy)
+                for item in cluster
+            ):
+                cluster.append(detection)
+                break
+        else:
+            clusters.append([detection])
+
+    collapsed = [_best_duplicate_candidate(cluster) for cluster in clusters]
+    return sorted(collapsed, key=lambda item: item.conf, reverse=True)
 
 
 def find_ambiguous_organic_candidate(
@@ -152,6 +190,50 @@ def _intersection_area(
     return max(0, min(ax2, bx2) - max(ax1, bx1)) * max(0, min(ay2, by2) - max(ay1, by1))
 
 
+def _box_area(xyxy: tuple[int, int, int, int]) -> int:
+    x1, y1, x2, y2 = xyxy
+    return max(0, x2 - x1) * max(0, y2 - y1)
+
+
+def _same_local_object(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+) -> bool:
+    first_area = _box_area(first)
+    second_area = _box_area(second)
+    if first_area <= 0 or second_area <= 0:
+        return False
+
+    largest = first if first_area >= second_area else second
+    smallest = second if first_area >= second_area else first
+    lx1, ly1, lx2, ly2 = largest
+    sx1, sy1, sx2, sy2 = smallest
+    largest_width = max(1, lx2 - lx1)
+    largest_height = max(1, ly2 - ly1)
+    expand_x = max(10, round(largest_width * 0.12))
+    expand_y = max(10, round(largest_height * 0.12))
+    center_x = (sx1 + sx2) / 2.0
+    center_y = (sy1 + sy2) / 2.0
+    center_inside = (
+        lx1 - expand_x <= center_x <= lx2 + expand_x
+        and ly1 - expand_y <= center_y <= ly2 + expand_y
+    )
+    if not center_inside:
+        return False
+
+    union_area = first_area + second_area - _intersection_area(first, second)
+    return union_area / max(first_area, second_area) <= 1.55
+
+
+def _best_duplicate_candidate(cluster: list[Detection]) -> Detection:
+    def rank(detection: Detection) -> tuple[int, int, float]:
+        source_rank = PREFERRED_DUPLICATE_SOURCES.get(detection.source, 4)
+        known_rank = 1 if detection.cls_name in UNKNOWN_CLASS_NAMES else 0
+        return source_rank, known_rank, -float(detection.conf)
+
+    return min(cluster, key=rank)
+
+
 def _same_physical_object(
     first: tuple[int, int, int, int],
     second: tuple[int, int, int, int],
@@ -170,6 +252,7 @@ def _same_physical_object(
 
 
 __all__ = [
+    "collapse_duplicate_physical_detections",
     "find_ambiguous_organic_candidate",
     "is_low_detail_empty_tray",
     "is_uniform_empty_tray_artifact",
