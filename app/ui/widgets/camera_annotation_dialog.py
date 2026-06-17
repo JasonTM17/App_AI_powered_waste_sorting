@@ -5,7 +5,17 @@ from __future__ import annotations
 import numpy as np
 from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+MIN_DIALOG_BBOX_AREA_RATIO = 0.01
 
 
 class AnnotationCanvas(QWidget):
@@ -29,6 +39,9 @@ class AnnotationCanvas(QWidget):
 
     def bbox_xyxy(self) -> tuple[int, int, int, int] | None:
         return self._bbox
+
+    def frame_size(self) -> tuple[int, int]:
+        return self._frame_size
 
     def set_bbox_xyxy(self, bbox: tuple[int, int, int, int] | None) -> None:
         self._bbox = self._clamp_bbox(bbox)
@@ -185,12 +198,36 @@ class CameraAnnotationDialog(QDialog):
         return self._approve_now
 
     def _accept_approved(self) -> None:
+        if not self._validate_bbox_for_save():
+            return
         self._approve_now = True
         self.accept()
 
     def _accept_pending(self) -> None:
+        if not self._validate_bbox_for_save():
+            return
         self._approve_now = False
         self.accept()
+
+    def _validate_bbox_for_save(self) -> bool:
+        bbox = self.canvas.bbox_xyxy()
+        if bbox is None:
+            QMessageBox.warning(self, "Thiếu bbox", "Vui lòng kéo vẽ bbox quanh vật trước khi lưu.")
+            return False
+        width, height = self.canvas.frame_size()
+        if width <= 0 or height <= 0:
+            QMessageBox.warning(self, "Ảnh lỗi", "Frame camera không hợp lệ.")
+            return False
+        x1, y1, x2, y2 = bbox
+        area_ratio = max(0, x2 - x1) * max(0, y2 - y1) / float(width * height)
+        if area_ratio < MIN_DIALOG_BBOX_AREA_RATIO:
+            QMessageBox.warning(
+                self,
+                "BBox quá nhỏ",
+                "BBox quá nhỏ nên dễ làm bẩn dữ liệu train. Hãy đưa vật gần camera hơn hoặc vẽ rộng sát quanh vật.",
+            )
+            return False
+        return True
 
 
 __all__ = ["AnnotationCanvas", "CameraAnnotationDialog"]

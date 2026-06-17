@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -60,10 +60,21 @@ class VideoView(QWidget):
         size = (self.width(), self.height())
         if self._scaled is not None and self._scaled_for_size == size:
             return self._scaled
+        if self._frame_w <= 0 or self._frame_h <= 0:
+            return self._pixmap
+        scale = min(
+            1.0,
+            self.width() / float(self._frame_w),
+            self.height() / float(self._frame_h),
+        )
+        target_size = QSize(
+            max(1, round(self._frame_w * scale)),
+            max(1, round(self._frame_h * scale)),
+        )
         self._scaled = self._pixmap.scaled(
-            self.size(),
+            target_size,
             Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.FastTransformation,
+            Qt.TransformationMode.SmoothTransformation,
         )
         self._scaled_for_size = size
         return self._scaled

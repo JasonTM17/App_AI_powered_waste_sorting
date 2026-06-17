@@ -30,3 +30,16 @@ def test_video_view_keeps_camera_aspect_ratio(qtbot):
     assert scaled is not None
     assert scaled.width() == 533
     assert scaled.height() == 400
+
+
+def test_video_view_does_not_upscale_low_resolution_camera(qtbot):
+    v = VideoView()
+    qtbot.addWidget(v)
+    v.resize(1400, 900)
+    v.set_frame(np.zeros((480, 640, 3), dtype=np.uint8))
+
+    scaled = v._ensure_scaled()
+
+    assert scaled is not None
+    assert scaled.width() == 640
+    assert scaled.height() == 480

@@ -15,6 +15,10 @@ from app.utils.camera_source import backend_hint, normalize_camera_source
 from app.utils.logging import logger
 from app.utils.shared_camera_stream import read_shared_frame
 
+CAMERA_TARGET_FPS = 24.0
+CAMERA_FRAME_INTERVAL_S = 1.0 / CAMERA_TARGET_FPS
+CAMERA_FAILURE_BACKOFF_S = 0.05
+
 
 class CameraWorker(QThread):
     frame_ready = Signal(np.ndarray)
@@ -62,6 +66,8 @@ class CameraWorker(QThread):
                         cv2.CAP_PROP_FOURCC,
                         cv2.VideoWriter_fourcc(*"MJPG"),
                     )
+                with suppress(Exception):
+                    cap.set(cv2.CAP_PROP_FPS, CAMERA_TARGET_FPS)
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
             with suppress(Exception):
@@ -97,6 +103,7 @@ class CameraWorker(QThread):
         consecutive_fail = 0
         retry_attempts = 0
         while not self._stop:
+            frame_started = time.monotonic()
             if self._cap is None:
                 if self._open():
                     self.connected.emit(True)
@@ -121,6 +128,7 @@ class CameraWorker(QThread):
                     cap.release()
                     self._cap = None
                     self.connected.emit(False)
+                time.sleep(CAMERA_FAILURE_BACKOFF_S)
                 continue
             quality = evaluate_frame_quality(frame)
             if not quality.usable:
@@ -130,6 +138,7 @@ class CameraWorker(QThread):
                     cap.release()
                     self._cap = None
                     self.connected.emit(False)
+                time.sleep(CAMERA_FAILURE_BACKOFF_S)
                 continue
             consecutive_fail = 0
             frame = apply_camera_transform(
@@ -138,6 +147,7 @@ class CameraWorker(QThread):
                 rotation=self._rotation,
             )
             self.frame_ready.emit(frame)
+            _sleep_remaining_frame_interval(frame_started)
         if self._cap is not None:
             self._cap.release()
 
@@ -163,6 +173,20 @@ def _capture_best_quality(cap, *, frames: int = 5):
             item.variance,
         ),
     )
+
+
+def _sleep_remaining_frame_interval(
+    started: float,
+    *,
+    now: float | None = None,
+    sleep_fn=time.sleep,
+) -> float:
+    elapsed = (time.monotonic() if now is None else now) - started
+    remaining = CAMERA_FRAME_INTERVAL_S - elapsed
+    if remaining > 0:
+        sleep_fn(remaining)
+        return remaining
+    return 0.0
 
 
 class SharedCameraWorker(QThread):

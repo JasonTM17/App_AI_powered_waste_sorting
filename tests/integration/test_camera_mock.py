@@ -8,7 +8,11 @@ from PySide6.QtCore import QCoreApplication
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from app.core.camera import CameraWorker
+from app.core.camera import (
+    CAMERA_FRAME_INTERVAL_S,
+    CameraWorker,
+    _sleep_remaining_frame_interval,
+)
 
 
 @pytest.fixture
@@ -49,3 +53,17 @@ def test_camera_emits_error_on_bad_source(qtbot):
     worker.stop()
     worker.wait(2000)
     assert errors
+
+
+def test_camera_frame_interval_helper_sleeps_only_remaining_time():
+    slept: list[float] = []
+
+    remaining = _sleep_remaining_frame_interval(
+        10.0,
+        now=10.01,
+        sleep_fn=slept.append,
+    )
+
+    assert remaining == pytest.approx(CAMERA_FRAME_INTERVAL_S - 0.01)
+    assert slept == [remaining]
+    assert _sleep_remaining_frame_interval(10.0, now=11.0, sleep_fn=slept.append) == 0.0
