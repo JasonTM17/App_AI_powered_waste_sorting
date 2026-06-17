@@ -523,7 +523,6 @@ def main(*, require_admin_login: bool = True) -> int:
         tray.show_requested.connect(window.restore_window)
         tray.quit_requested.connect(window.force_quit)
         window.tray = tray
-        window._minimize_to_tray = cfg.minimize_to_tray
         uart_tray_state = {"was_connected": False}
 
         def _notify_uart_disconnect(ok: bool) -> None:

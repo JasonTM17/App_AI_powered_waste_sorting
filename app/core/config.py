@@ -343,7 +343,7 @@ class AppConfig(BaseModel):
     )
     theme: Literal["dark", "light"] = "dark"
     language: Literal["vi", "en"] = "vi"
-    minimize_to_tray: bool = True
+    minimize_to_tray: bool = False
     autostart: bool = False
 
 

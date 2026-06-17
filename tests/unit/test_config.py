@@ -84,7 +84,7 @@ def _default_dict():
         },
         "theme": "dark",
         "language": "vi",
-        "minimize_to_tray": True,
+        "minimize_to_tray": False,
         "autostart": False,
     }
 

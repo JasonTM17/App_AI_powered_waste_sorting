@@ -698,6 +698,6 @@
   },
   "theme": "dark",
   "language": "vi",
-  "minimize_to_tray": true,
+  "minimize_to_tray": false,
   "autostart": false
 }

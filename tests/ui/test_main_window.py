@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QGuiApplication, QIcon
+from PySide6.QtGui import QCloseEvent, QGuiApplication, QIcon
 from PySide6.QtWidgets import QAbstractScrollArea, QLabel, QPushButton, QSizePolicy
 
 from app.core.config import AppConfig
@@ -252,3 +252,14 @@ def test_main_window_clamps_restored_window_to_available_screen(qtbot):
     assert frame.height() <= available.height()
     assert frame.left() >= available.left()
     assert frame.top() >= available.top()
+
+
+def test_close_event_exits_even_when_tray_is_available(qtbot):
+    window = MainWindow(cfg=AppConfig())
+    qtbot.addWidget(window)
+    window.tray = object()
+
+    event = QCloseEvent()
+    window.closeEvent(event)
+
+    assert event.isAccepted()

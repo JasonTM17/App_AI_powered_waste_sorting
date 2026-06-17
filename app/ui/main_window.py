@@ -57,8 +57,6 @@ class MainWindow(QMainWindow):
         self._lazy_page_factories: dict[int, tuple[str, object]] = {}
         self._lazy_page_hosts: dict[int, tuple[QVBoxLayout, QWidget]] = {}
         self.setWindowIcon(brand_icon())
-        self._force_quit = False
-        self._minimize_to_tray = False
         self._initial_geometry_done = False
         self._user_minimized = False
         self._was_maximized_before_minimize = False
@@ -407,17 +405,9 @@ class MainWindow(QMainWindow):
         self._ensure_on_screen(center=center)
 
     def closeEvent(self, event):  # noqa: N802
-        if getattr(self, "_force_quit", False):
-            event.accept()
-            return
-        if getattr(self, "_minimize_to_tray", False) and getattr(self, "tray", None) is not None:
-            event.ignore()
-            self.hide()
-        else:
-            event.accept()
+        event.accept()
 
     def force_quit(self):
-        self._force_quit = True
         self.close()
 
     def _sync_responsive_shell(self) -> None:

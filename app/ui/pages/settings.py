@@ -479,7 +479,7 @@ class SettingsPage(QWidget):
         self.lang_select = SafeComboBox()
         self.lang_select.addItems(["vi", "en"])
         self.lang_select.setCurrentText(self._cfg.language)
-        self.tray_check = QCheckBox("Minimize ra system tray")
+        self.tray_check = QCheckBox("Hien icon system tray (bam X van thoat han)")
         self.tray_check.setChecked(self._cfg.minimize_to_tray)
         self.autostart_check = QCheckBox("Khởi động cùng Windows")
         self.autostart_check.setChecked(self._cfg.autostart)
