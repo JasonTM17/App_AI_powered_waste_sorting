@@ -371,8 +371,18 @@ class HistoryPage(QWidget):
                 until=until_dt,
                 ack_status=ack_filter,
             )
-            class_counts = _count_rows_by_class(rows)
-            hourly_counts = _count_rows_by_hour(rows)
+            class_counts = self.history.count_by_class(
+                cls_name=cls,
+                since=since_dt,
+                until=until_dt,
+                ack_status=ack_filter,
+            )
+            hourly_counts = self.history.count_by_hour_range(
+                cls_name=cls,
+                since=since_dt,
+                until=until_dt,
+                ack_status=ack_filter,
+            )
             self.model.set_rows(rows)
             self.empty_label.setVisible(not rows)
             self._refresh_class_filter(filter_counts)

@@ -187,6 +187,12 @@ type CommonWasteCatalogResponse = {
   items: CommonWasteItem[];
 };
 
+type BinFullPopupState = {
+  title: string;
+  severity: string;
+  messages: string[];
+};
+
 const DATASET_LIMIT = 60;
 
 const BIN_LABELS: Record<string, string> = {
@@ -296,6 +302,7 @@ export function DashboardClient() {
   const [commonWasteItems, setCommonWasteItems] = useState<CommonWasteItem[]>([]);
   const [agentError, setAgentError] = useState("");
   const [notice, setNotice] = useState("");
+  const [binFullPopup, setBinFullPopup] = useState<BinFullPopupState | null>(null);
   const [manualFiles, setManualFiles] = useState<FileList | null>(null);
   const [manualPhoneFiles, setManualPhoneFiles] = useState<FileList | null>(null);
   const [manualClass, setManualClass] = useState("");
@@ -317,6 +324,7 @@ export function DashboardClient() {
   const [chatBusy, setChatBusy] = useState(false);
   const userOperationsRefreshInFlightRef = useRef(false);
   const userOperationsInteractionUntilRef = useRef(0);
+  const shownBinFullAlertRanksRef = useRef<Map<string, number>>(new Map());
 
   const cameraStream = useMemo(() => {
     if (!cameraStreamTicket) {
@@ -587,6 +595,44 @@ export function DashboardClient() {
     }
   }
 
+  function showNewBinFullnessPopup(alertsData: AlertsResponse, scope: "admin" | "user") {
+    const activeFullnessKeys = new Set<string>();
+    const freshAlerts = alertsData.alerts.filter((alert) => {
+      if (alert.source !== "derived_fullness") {
+        return false;
+      }
+      if (alert.status === "resolved") {
+        return false;
+      }
+      if (alert.severity !== "danger" && alert.severity !== "warning") {
+        return false;
+      }
+      const key = `${scope}:${alert.alert_id}`;
+      const rank = alert.severity === "danger" ? 2 : 1;
+      activeFullnessKeys.add(key);
+      if ((shownBinFullAlertRanksRef.current.get(key) ?? 0) >= rank) {
+        return false;
+      }
+      shownBinFullAlertRanksRef.current.set(key, rank);
+      return true;
+    });
+    for (const key of shownBinFullAlertRanksRef.current.keys()) {
+      if (key.startsWith(`${scope}:`) && !activeFullnessKeys.has(key)) {
+        shownBinFullAlertRanksRef.current.delete(key);
+      }
+    }
+    if (freshAlerts.length === 0) {
+      return;
+    }
+    const hasDanger = freshAlerts.some((alert) => alert.severity === "danger");
+    setBinFullPopup({
+      title: hasDanger ? "Có thùng rác đã đầy" : "Có thùng rác gần đầy",
+      severity: hasDanger ? "danger" : "warning",
+      messages: freshAlerts.map((alert) => alert.message || alert.title)
+    });
+    setNotice(freshAlerts[0].message || freshAlerts[0].title);
+  }
+
   async function refreshUserDashboard() {
     setBusy(true);
     try {
@@ -616,6 +662,7 @@ export function DashboardClient() {
       setUserExperience(experienceData);
       setUserBinMap(binMapData);
       setUserAlerts(alertsData);
+      showNewBinFullnessPopup(alertsData, "user");
       setUserSchedules(schedulesData);
       setUserOperationsLastUpdatedAt(new Date().toISOString());
       setUserOperationsRefreshError("");
@@ -726,6 +773,7 @@ export function DashboardClient() {
     setOperationDevices(devicesData);
     setAdminBinMap(binMapData);
     setAdminAlerts(alertsData);
+    showNewBinFullnessPopup(alertsData, "admin");
     setAdminSchedules(schedulesData);
     setOperationsHealth(healthData);
   }
@@ -748,6 +796,7 @@ export function DashboardClient() {
       ]);
       setUserBinMap(binMapData);
       setUserAlerts(alertsData);
+      showNewBinFullnessPopup(alertsData, "user");
       setUserSchedules(schedulesData);
       setUserOperationsLastUpdatedAt(new Date().toISOString());
       setUserOperationsRefreshError("");
@@ -2395,6 +2444,28 @@ export function DashboardClient() {
 
         {agentError ? <div className="alert">Agent chưa sẵn sàng: {agentError}</div> : null}
         {notice && !agentError ? <div className="success">{notice}</div> : null}
+        {binFullPopup ? (
+          <div
+            aria-live="assertive"
+            className={`bin-full-popup ${binFullPopup.severity === "danger" ? "danger" : "warning"}`}
+            role="alertdialog"
+          >
+            <div>
+              <strong>{binFullPopup.title}</strong>
+              {binFullPopup.messages.map((message) => (
+                <p key={message}>{message}</p>
+              ))}
+            </div>
+            <button
+              aria-label="Đóng cảnh báo thùng đầy"
+              className="icon-button"
+              onClick={() => setBinFullPopup(null)}
+              type="button"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        ) : null}
 
         {active === "live" ? (
           <LivePanel

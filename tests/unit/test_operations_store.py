@@ -167,6 +167,8 @@ def test_bin_fullness_update_is_scoped_and_creates_derived_alert(tmp_path):
             alert["source"] == "derived_fullness"
             and alert["severity"] == "danger"
             and alert["bin_id"] == "td-bin-001-R"
+            and alert["title"] == "Thùng rác đã đầy"
+            and alert["message"] == "Thùng Vô cơ đã đầy 95%."
             for alert in user_alerts
         )
         assert store.list_alerts(owner_username="other", include_resolved=False) == []

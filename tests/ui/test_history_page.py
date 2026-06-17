@@ -65,6 +65,33 @@ def test_history_page_filters_charts_and_table_to_selected_date(tmp_path, qtbot)
     svc.close()
 
 
+def test_history_page_chart_counts_full_filtered_range_not_table_limit(tmp_path, qtbot):
+    svc = HistoryService(tmp_path / "history.db")
+    for index in range(520):
+        svc.insert(
+            track_id=index,
+            ts=datetime(2026, 6, 5, 9, 0, tzinfo=UTC),
+            cls_id=1,
+            cls_name="Aluminum can",
+            conf=0.58,
+            bbox=(0, 0, 10, 10),
+            thumbnail=b"",
+            uart_command="I",
+            ack_status="ok",
+        )
+    page = HistoryPage(svc)
+    qtbot.addWidget(page)
+
+    page.date_from.setDate(QDate(2026, 6, 5))
+    page.date_to.setDate(QDate(2026, 6, 5))
+    page.reload()
+
+    assert page.model.rowCount() == 500
+    assert page._bar_signature == (("Aluminum can", 520),)
+    assert page._area_signature[9] == 520
+    svc.close()
+
+
 def test_history_page_uses_safe_even_filter_controls(tmp_path, qtbot):
     svc = HistoryService(tmp_path / "history.db")
     page = HistoryPage(svc)

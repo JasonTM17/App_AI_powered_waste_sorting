@@ -305,11 +305,14 @@ class HistoryService:
 
     def count_by_class(
         self,
+        cls_name: str | None = None,
         since: datetime | None = None,
         until: datetime | None = None,
         ack_status: str | None = None,
     ) -> dict[str, int]:
         stmt = select(detections.c.cls_name, func.count()).group_by(detections.c.cls_name)
+        if cls_name:
+            stmt = stmt.where(detections.c.cls_name == cls_name)
         if since:
             stmt = stmt.where(detections.c.ts >= since.isoformat())
         if until:
@@ -318,6 +321,33 @@ class HistoryService:
             stmt = stmt.where(detections.c.ack_status == ack_status)
         with self._engine.begin() as conn:
             return {name: int(cnt) for name, cnt in conn.execute(stmt).all()}
+
+    def count_by_hour_range(
+        self,
+        *,
+        cls_name: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        ack_status: str | None = None,
+    ) -> dict[int, int]:
+        stmt = select(detections.c.ts)
+        if cls_name:
+            stmt = stmt.where(detections.c.cls_name == cls_name)
+        if since:
+            stmt = stmt.where(detections.c.ts >= since.isoformat())
+        if until:
+            stmt = stmt.where(detections.c.ts <= until.isoformat())
+        if ack_status:
+            stmt = stmt.where(detections.c.ack_status == ack_status)
+        out: dict[int, int] = {h: 0 for h in range(24)}
+        with self._engine.begin() as conn:
+            for (ts,) in conn.execute(stmt).all():
+                try:
+                    hour = int(str(ts)[11:13])
+                    out[hour] = out.get(hour, 0) + 1
+                except (ValueError, IndexError):
+                    continue
+        return out
 
     def count_by_hour(self, date: datetime) -> dict[int, int]:
         prefix = date.strftime("%Y-%m-%d")

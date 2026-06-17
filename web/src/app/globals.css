@@ -1078,6 +1078,46 @@ input[type="file"] {
   padding: 12px 14px;
 }
 
+.bin-full-popup {
+  align-items: flex-start;
+  background: #fffaf0;
+  border: 1px solid #f0c46d;
+  border-left: 6px solid #f59e0b;
+  border-radius: 14px;
+  box-shadow: 0 18px 44px rgba(17, 24, 39, 0.18);
+  color: #4a3210;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 16px 18px;
+  position: fixed;
+  right: 24px;
+  top: 84px;
+  width: min(420px, calc(100vw - 48px));
+  z-index: 90;
+}
+
+.bin-full-popup.danger {
+  background: #fff1ef;
+  border-color: #f2b8b3;
+  border-left-color: #ef4444;
+  color: #7f1d1d;
+}
+
+.bin-full-popup strong {
+  display: block;
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+
+.bin-full-popup p {
+  margin: 4px 0 0;
+}
+
+.bin-full-popup .icon-button {
+  flex: 0 0 auto;
+}
+
 .full-span {
   grid-column: 1 / -1;
 }

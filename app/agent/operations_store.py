@@ -162,6 +162,11 @@ CHILD_BIN_SEEDS = [
     {"suffix": "R", "command": "R", "bin_index": 2, "label": "Vo co"},
     {"suffix": "I", "command": "I", "bin_index": 3, "label": "Tai che"},
 ]
+DISPLAY_BIN_LABELS = {
+    1: "Hữu cơ",
+    2: "Vô cơ",
+    3: "Tái chế",
+}
 
 
 def configured_operations_database_url() -> str:
@@ -948,10 +953,15 @@ def _derived_alerts(self, *, owner_username: str | None) -> list[dict[str, objec
             continue
         if fullness >= 95:
             severity = "danger"
+            title = "Thùng rác đã đầy"
+            state_text = "đã đầy"
         elif fullness >= 80:
             severity = "warning"
+            title = "Thùng rác gần đầy"
+            state_text = "gần đầy"
         else:
             continue
+        label = DISPLAY_BIN_LABELS.get(int(item.get("bin_index") or 0), str(item["label"]))
         out.append(
             {
                 "alert_id": f"derived-fullness-{item['bin_id']}",
@@ -959,8 +969,8 @@ def _derived_alerts(self, *, owner_username: str | None) -> list[dict[str, objec
                 "bin_id": item["bin_id"],
                 "device_id": "",
                 "severity": severity,
-                "title": "Th?ng r?c g?n ??y",
-                "message": f"{item['label']} ?ang ??y {round(float(fullness))}%.",
+                "title": title,
+                "message": f"Thùng {label} {state_text} {round(float(fullness))}%.",
                 "status": "open",
                 "source": "derived_fullness",
                 "created_at": generated_at,
