@@ -975,8 +975,14 @@ class Pipeline:
             roi_ready=roi_ready,
             now=now_mono,
         )
-        if roi_ready and not visible_in_roi and self._dispatch_guard.state == "READY":
+        if (
+            roi_ready
+            and not visible_in_roi
+            and self._dispatch_guard.state == "READY"
+            and self._dispatch_guard.consume_rearmed()
+        ):
             self.tracker.clear_active()
+            self._unknown_fallback.reset()
         self.dispatch_status = self._dispatch_guard.last_reason
         if self._hardware_dispatch_enabled and (
             self._dispatch_guard.state in {"SORTING", "RETURNING"}

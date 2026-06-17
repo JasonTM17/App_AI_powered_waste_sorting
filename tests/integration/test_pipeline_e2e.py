@@ -1367,6 +1367,57 @@ def test_pipeline_routes_three_representative_classes_to_three_bins(tmp_path, mo
     p.close()
 
 
+def test_pipeline_rearms_and_dispatches_five_consecutive_stable_objects(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Organic", command="O", bin_index=1)]
+    )
+    cfg.model.conf_threshold = 0.3
+    cfg.dispatch_guard.min_stable_frames = 2
+    frames = []
+    for index in range(5):
+        x_offset = index * 3
+        frames.extend(
+            [
+                [Detection(0, "Organic", 0.90, (80 + x_offset, 96, 360, 236))],
+                [Detection(0, "Organic", 0.91, (42 + x_offset, 82, 410, 270))],
+                [Detection(0, "Organic", 0.89, (72 + x_offset, 100, 374, 244))],
+                [],
+            ]
+        )
+    uart = _StubUart()
+    p = Pipeline(cfg, _ScriptedInfer(frames), uart, tmp_path / "h.db")
+    object_frame = _leafy_organic_frame()
+    empty_frame = np.full_like(object_frame, 232)
+    p.reset_dispatch_state(arm_immediately=True)
+
+    for index in range(5):
+        first = p.process_frame(object_frame, ts=datetime(2026, 6, 17, 8, index, 0, tzinfo=UTC))
+        assert len(first) == 1
+        assert len(uart.sent) == index
+        assert p.dispatch_status == "waiting stable"
+
+        second = p.process_frame(object_frame, ts=datetime(2026, 6, 17, 8, index, 1, tzinfo=UTC))
+        assert len(second) == 1
+        assert len(uart.sent) == index + 1
+        track_id, command, _conf = uart.sent[-1]
+        assert command == "O"
+        p.on_ack(track_id, command, "ok", 25)
+
+        p.process_frame(object_frame, ts=datetime(2026, 6, 17, 8, index, 2, tzinfo=UTC))
+        assert len(uart.sent) == index + 1
+        assert p.dispatch_status == "waiting empty tray"
+
+        p.process_frame(empty_frame, ts=datetime(2026, 6, 17, 8, index, 3, tzinfo=UTC))
+        assert p.auto_sort_state == "READY"
+
+    assert [item[1] for item in uart.sent] == ["O", "O", "O", "O", "O"]
+    rows = list(reversed(p.history.query(limit=10)))
+    assert [row.uart_command for row in rows] == ["O", "O", "O", "O", "O"]
+    assert [row.ack_status for row in rows] == ["ok", "ok", "ok", "ok", "ok"]
+    p.close()
+
+
 def test_pipeline_blocks_dispatch_and_warns_for_multiple_classes_in_roi(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config()

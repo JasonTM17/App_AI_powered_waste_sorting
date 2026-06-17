@@ -141,6 +141,30 @@ def test_ack_still_blocks_same_track_until_empty_tray():
     assert guard.state == "DETECTING"
 
 
+def test_rearmed_signal_is_emitted_once_after_empty_tray():
+    guard = _guard()
+    guard.min_sort_interval_seconds = 0
+    guard.reset(arm_immediately=True)
+    assert guard.consume_rearmed() is True
+    assert guard.consume_rearmed() is False
+
+    guard.begin_dispatch(track_id=1, now=0.1, ack_timeout_seconds=0)
+    guard.complete_dispatch(track_id=1, now=0.2)
+    guard.observe_frame(has_visible_object=True, roi_ready=True, now=1.3)
+    assert guard.consume_rearmed() is False
+
+    for index in range(10):
+        guard.observe_frame(
+            has_visible_object=False,
+            roi_ready=True,
+            now=1.4 + index * 0.25,
+        )
+
+    assert guard.state == "READY"
+    assert guard.consume_rearmed() is True
+    assert guard.consume_rearmed() is False
+
+
 def test_busy_blocks_until_ack_timeout_and_settle():
     guard = _guard()
     guard.min_sort_interval_seconds = 0

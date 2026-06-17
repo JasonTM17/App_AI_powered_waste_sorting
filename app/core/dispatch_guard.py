@@ -56,6 +56,7 @@ class DispatchGuard:
 
     def reset(self, *, arm_immediately: bool = False) -> None:
         self._armed = bool(arm_immediately)
+        self._rearmed = bool(arm_immediately)
         self._empty_since: float | None = None
         self._empty_frames = 0
         self._last_dispatch_started_at: float | None = None
@@ -69,6 +70,7 @@ class DispatchGuard:
         self._expire_busy(now)
         if not roi_ready:
             self._armed = False
+            self._rearmed = False
             self._empty_since = None
             self._empty_frames = 0
             self.state = "WAITING_EMPTY"
@@ -94,7 +96,9 @@ class DispatchGuard:
             self._empty_frames += 1
         empty_for = now - self._empty_since
         if empty_for >= self.empty_rearm_seconds and self._empty_frames >= self.empty_rearm_frames:
+            was_armed = self._armed
             self._armed = True
+            self._rearmed = not was_armed
             self.state = "READY"
             self.last_reason = ""
         else:
@@ -130,6 +134,7 @@ class DispatchGuard:
 
     def begin_dispatch(self, *, track_id: int, now: float, ack_timeout_seconds: float) -> None:
         self._armed = False
+        self._rearmed = False
         self._empty_since = None
         self._empty_frames = 0
         self._last_dispatch_started_at = now
@@ -161,6 +166,11 @@ class DispatchGuard:
 
     def _is_busy(self, now: float) -> bool:
         return self._busy_track_id is not None or now < self._busy_until
+
+    def consume_rearmed(self) -> bool:
+        rearmed = self._rearmed
+        self._rearmed = False
+        return rearmed
 
     def _expire_busy(self, now: float) -> None:
         if self._busy_track_id is not None and now >= self._busy_until:
