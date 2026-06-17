@@ -145,7 +145,6 @@ def test_rearmed_signal_is_emitted_once_after_empty_tray():
     guard = _guard()
     guard.min_sort_interval_seconds = 0
     guard.reset(arm_immediately=True)
-    assert guard.consume_rearmed() is True
     assert guard.consume_rearmed() is False
 
     guard.begin_dispatch(track_id=1, now=0.1, ack_timeout_seconds=0)

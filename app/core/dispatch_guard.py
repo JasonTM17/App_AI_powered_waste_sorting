@@ -56,11 +56,12 @@ class DispatchGuard:
 
     def reset(self, *, arm_immediately: bool = False) -> None:
         self._armed = bool(arm_immediately)
-        self._rearmed = bool(arm_immediately)
+        self._rearmed = False
         self._empty_since: float | None = None
         self._empty_frames = 0
         self._last_dispatch_started_at: float | None = None
         self._last_dispatch_track_id: int | None = None
+        self._has_dispatched = False
         self._busy_track_id: int | None = None
         self._busy_until = 0.0
         self.state: AutoSortState = "READY" if self._armed else "WAITING_EMPTY"
@@ -98,7 +99,7 @@ class DispatchGuard:
         if empty_for >= self.empty_rearm_seconds and self._empty_frames >= self.empty_rearm_frames:
             was_armed = self._armed
             self._armed = True
-            self._rearmed = not was_armed
+            self._rearmed = self._has_dispatched and not was_armed
             self.state = "READY"
             self.last_reason = ""
         else:
@@ -142,6 +143,7 @@ class DispatchGuard:
         self._busy_track_id = int(track_id)
         timeout = max(0.0, float(ack_timeout_seconds))
         self._busy_until = now + timeout + self.busy_settle_seconds
+        self._has_dispatched = True
         self.state = "SORTING"
         self.last_reason = "sort busy"
 
