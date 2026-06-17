@@ -11,6 +11,17 @@ from app.core.events import Detection
 from app.core.waste_categories import default_class_id_for_name
 
 UNKNOWN_OBJECT_CLASS_ID = -401
+LEAFY_ORGANIC_CORRECTABLE_CLASSES = {
+    "Aluminum can",
+    "Cardboard",
+    "Paper",
+    "Paper bag",
+    "Plastic bag",
+    "Plastic bottle",
+    "Plastic cup",
+    "Textile",
+    "Wood",
+}
 
 
 def apply_visual_post_corrections(
@@ -26,7 +37,16 @@ def apply_visual_post_corrections(
     out: list[Detection] = []
     for detection in detections:
         corrected = detection
-        if detection.cls_name == "Organic" and detection.conf <= 0.68:
+        if _can_correct_leafy_organic(detection, unknown_class_name) and _looks_like_leafy_organic(
+            frame_bgr, detection.xyxy
+        ):
+            corrected = _replace_detection(
+                detection,
+                "Organic",
+                source="visual_correction:leafy_organic",
+                operator_label="La cay",
+            )
+        elif detection.cls_name == "Organic" and detection.conf <= 0.68:
             if _looks_like_elongated_wooden_utensil(frame_bgr, detection.xyxy):
                 corrected = _replace_detection(
                     detection,
@@ -91,6 +111,14 @@ def apply_visual_post_corrections(
                     )
         out.append(corrected)
     return out
+
+
+def _can_correct_leafy_organic(detection: Detection, unknown_class_name: str) -> bool:
+    if detection.cls_name == "Organic":
+        return True
+    if detection.cls_name == unknown_class_name:
+        return True
+    return detection.conf <= 0.62 and detection.cls_name in LEAFY_ORGANIC_CORRECTABLE_CLASSES
 
 
 def _replace_detection(
@@ -182,6 +210,70 @@ def _looks_like_metal_utensil(
         and (glare_ratio >= 0.004 or (dark_metal_ratio >= 0.05 and width_variation >= 0.50))
         and contrast >= 16.0
         and stats["edge_ratio"] >= 0.0025
+    )
+
+
+def _looks_like_leafy_organic(
+    frame_bgr: np.ndarray,
+    xyxy: tuple[int, int, int, int],
+) -> bool:
+    crop = _crop(frame_bgr, xyxy, pad_ratio=0.02)
+    if crop is None:
+        return False
+
+    box_w = max(1, int(xyxy[2]) - int(xyxy[0]))
+    box_h = max(1, int(xyxy[3]) - int(xyxy[1]))
+    box_aspect = box_w / float(box_h)
+
+    mask = _foreground_mask(crop)
+    stats = _mask_stats(crop, mask)
+    if stats is None:
+        return False
+
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    hue = hsv[:, :, 0]
+    saturation = hsv[:, :, 1]
+    value = hsv[:, :, 2]
+    green_pixels = (
+        (hue >= 28)
+        & (hue <= 98)
+        & (saturation > 22)
+        & (value > 22)
+        & (value < 238)
+    )
+    red_or_blue_pixels = (
+        ((hue <= 14) | (hue >= 164) | ((hue >= 100) & (hue <= 132)))
+        & (saturation > 68)
+        & (value > 50)
+    )
+    object_mask = mask > 0
+    if not np.any(object_mask):
+        return False
+
+    object_pixels = crop[object_mask]
+    mean_bgr = object_pixels.mean(axis=0)
+    green_dominance = float(mean_bgr[1] - max(mean_bgr[0], mean_bgr[2]))
+    green_frame_ratio = float(np.mean(green_pixels))
+    green_object_ratio = float(np.mean(green_pixels[object_mask]))
+    red_or_blue_ratio = float(np.mean(red_or_blue_pixels))
+    edges = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 28, 90)
+    edge_ratio = float(np.count_nonzero(edges)) / float(max(1, edges.size))
+
+    return (
+        stats["area_ratio"] >= 0.055
+        and green_frame_ratio >= 0.055
+        and green_object_ratio >= 0.28
+        and green_dominance >= 8.0
+        and red_or_blue_ratio <= 0.16
+        and stats["saturation_mean"] >= 20.0
+        and stats["edge_ratio"] >= 0.0025
+        and edge_ratio >= 0.006
+        and (
+            stats["oriented_aspect"] >= 1.35
+            or box_aspect >= 1.25
+            or box_aspect <= 0.80
+        )
     )
 
 

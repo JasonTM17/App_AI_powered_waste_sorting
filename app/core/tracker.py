@@ -30,7 +30,7 @@ def _iou(a, b):
 class _Track:
     track_id: int
     cls_id: int
-    route_family: str
+    label_signature: str
     xyxy: tuple
     age: int = 0
     stable_frames: int = 1
@@ -63,19 +63,19 @@ class Tracker:
                 self._tracks[tid] = _Track(
                     track_id=tid,
                     cls_id=det.cls_id,
-                    route_family=_route_family(det.cls_name),
+                    label_signature=_label_signature(det),
                     xyxy=det.xyxy,
                 )
                 t = self._tracks[tid]
             else:
                 t = self._tracks[best_id]
                 t.age = 0
-                route_family = _route_family(det.cls_name)
-                if route_family == t.route_family:
+                label_signature = _label_signature(det)
+                if label_signature == t.label_signature:
                     t.stable_frames += 1
                 else:
                     t.stable_frames = 1
-                    t.route_family = route_family
+                    t.label_signature = label_signature
                 t.cls_id = det.cls_id
                 t.xyxy = det.xyxy
             out.append(
@@ -106,6 +106,12 @@ class Tracker:
         self._tracks.clear()
         self._emitted.clear()
         self._next_id = 1
+
+
+def _label_signature(detection) -> str:
+    label = (detection.operator_label or detection.cls_name or "").strip()
+    source = (detection.source or "").strip()
+    return f"{_route_family(detection.cls_name)}|label:{label}|source:{source}"
 
 
 def _route_family(class_name: str) -> str:

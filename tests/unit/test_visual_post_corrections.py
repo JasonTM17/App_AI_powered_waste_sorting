@@ -5,6 +5,18 @@ from app.core.events import Detection
 from app.core.visual_post_corrections import apply_visual_post_corrections
 
 
+def _leafy_frame() -> np.ndarray:
+    frame = np.full((300, 420, 3), 232, dtype=np.uint8)
+    cv2.line(frame, (35, 178), (390, 164), (44, 82, 42), 8)
+    for index, x in enumerate(range(58, 370, 32)):
+        angle = -22 if index % 2 == 0 else 20
+        center_y = 143 if index % 2 == 0 else 197
+        color = (38, 94, 48) if index % 3 else (44, 78, 38)
+        cv2.ellipse(frame, (x, center_y), (18, 48), angle, 0, 360, color, -1)
+        cv2.ellipse(frame, (x + 10, center_y + 2), (8, 36), angle, 0, 360, (52, 112, 58), -1)
+    return frame
+
+
 def test_visual_correction_relabels_low_conf_organic_wooden_utensil():
     frame = np.full((260, 360, 3), 235, dtype=np.uint8)
     cv2.line(frame, (40, 220), (210, 80), (150, 185, 215), 28)
@@ -15,6 +27,38 @@ def test_visual_correction_relabels_low_conf_organic_wooden_utensil():
 
     assert corrected[0].cls_name == "Wood"
     assert corrected[0].operator_label == "Thia go"
+
+
+def test_visual_correction_relabels_leafy_unknown_as_organic():
+    detection = Detection(-1, "Unknown object", 0.39, (25, 74, 398, 248))
+
+    corrected = apply_visual_post_corrections(_leafy_frame(), [detection])
+
+    assert corrected[0].cls_name == "Organic"
+    assert corrected[0].source == "visual_correction:leafy_organic"
+    assert corrected[0].operator_label == "La cay"
+
+
+def test_visual_correction_marks_leafy_organic_operator_label():
+    detection = Detection(17, "Organic", 0.87, (25, 74, 398, 248))
+
+    corrected = apply_visual_post_corrections(_leafy_frame(), [detection])
+
+    assert corrected[0].cls_name == "Organic"
+    assert corrected[0].source == "visual_correction:leafy_organic"
+    assert corrected[0].operator_label == "La cay"
+
+
+def test_visual_correction_keeps_green_plastic_bottle_label():
+    frame = np.full((280, 420, 3), 232, dtype=np.uint8)
+    cv2.rectangle(frame, (96, 112), (330, 176), (48, 128, 52), -1)
+    cv2.rectangle(frame, (330, 126), (380, 160), (48, 128, 52), -1)
+    cv2.rectangle(frame, (180, 116), (252, 172), (220, 220, 225), -1)
+    detection = Detection(3, "Plastic bottle", 0.72, (80, 98, 388, 190))
+
+    corrected = apply_visual_post_corrections(frame, [detection])
+
+    assert corrected[0].cls_name == "Plastic bottle"
 
 
 def test_visual_correction_relabels_round_warm_unknown_as_eggshell():

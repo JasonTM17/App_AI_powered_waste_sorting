@@ -107,6 +107,13 @@ class _UnknownInfer:
         return [Detection(999, "Unknown object", 0.39, (15, 12, 65, 28))]
 
 
+class _UnknownLeafInfer:
+    class_names: ClassVar[dict[int, str]] = {999: "Unknown object"}
+
+    def predict(self, frame):
+        return [Detection(999, "Unknown object", 0.39, (24, 72, 396, 250))]
+
+
 class _OutOfTaxonomyInfer:
     class_names: ClassVar[dict[int, str]] = {123: "Mystery gadget"}
 
@@ -401,6 +408,18 @@ def _metal_spoon_frame() -> np.ndarray:
     cv2.ellipse(frame, (292, 122), (46, 28), -10, 0, 360, (168, 168, 166), -1)
     cv2.circle(frame, (330, 94), 12, (250, 250, 250), -1)
     cv2.circle(frame, (350, 96), 8, (245, 245, 245), -1)
+    return frame
+
+
+def _leafy_organic_frame() -> np.ndarray:
+    frame = np.full((300, 420, 3), 232, dtype=np.uint8)
+    cv2.line(frame, (35, 178), (390, 164), (44, 82, 42), 8)
+    for index, x in enumerate(range(58, 370, 32)):
+        angle = -22 if index % 2 == 0 else 20
+        center_y = 143 if index % 2 == 0 else 197
+        color = (38, 94, 48) if index % 3 else (44, 78, 38)
+        cv2.ellipse(frame, (x, center_y), (18, 48), angle, 0, 360, color, -1)
+        cv2.ellipse(frame, (x + 10, center_y + 2), (8, 36), angle, 0, 360, (52, 112, 58), -1)
     return frame
 
 
@@ -994,6 +1013,75 @@ def test_pipeline_corrects_crumpled_paper_before_three_bin_inorganic_fallback(
         ("Paper", "visual_correction:crumpled_paper")
     ]
     assert uart.sent == [(1, "I", detections[0].conf)]
+    p.close()
+
+
+def test_pipeline_corrects_leafy_unknown_before_three_bin_recycle_fallback(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Organic", command="O", bin_index=1)]
+    )
+    cfg.model.conf_threshold = 0.3
+    cfg.three_bin_classifier.enabled = True
+    cfg.three_bin_classifier.unknown_only = True
+    uart = _StubUart()
+    p = Pipeline(cfg, _UnknownLeafInfer(), uart, tmp_path / "h.db")
+    p._three_bin_classifier = _StubThreeBinClassifier("I")
+
+    _arm_dispatch(p)
+    detections = p.process_frame(_leafy_organic_frame(), datetime.now(UTC))
+
+    assert [(item.cls_name, item.source, item.operator_label) for item in detections] == [
+        ("Organic", "visual_correction:leafy_organic", "La cay")
+    ]
+    assert uart.sent == [(1, "O", detections[0].conf)]
+    p.close()
+
+
+def test_pipeline_requires_same_label_stability_before_dispatch(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[
+            ClassMapping(class_name="Plastic bottle", command="I", bin_index=3),
+            ClassMapping(class_name="Organic", command="O", bin_index=1),
+        ]
+    )
+    cfg.model.conf_threshold = 0.3
+    cfg.dispatch_guard.min_stable_frames = 2
+    cfg.three_bin_classifier.enabled = True
+    cfg.three_bin_classifier.unknown_only = True
+    same_box = (24, 72, 396, 250)
+    infer = _ScriptedInfer(
+        [
+            [Detection(3, "Plastic bottle", 0.85, same_box)],
+            [Detection(999, "Unknown object", 0.39, same_box)],
+            [Detection(999, "Unknown object", 0.39, same_box)],
+        ]
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, infer, uart, tmp_path / "h.db")
+    p._three_bin_classifier = _StubThreeBinClassifier("I")
+    p.reset_dispatch_state(arm_immediately=True)
+    frame = _leafy_organic_frame()
+
+    first = p.process_frame(frame, datetime.now(UTC))
+    second = p.process_frame(frame, datetime.now(UTC))
+
+    assert [item.cls_name for item in first] == ["Plastic bottle"]
+    assert [(item.cls_name, item.operator_label) for item in second] == [("Organic", "La cay")]
+    assert uart.sent == []
+    assert p.dispatch_status == "waiting stable"
+
+    third = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(item.cls_name, item.operator_label) for item in third] == [("Organic", "La cay")]
+    assert uart.sent == [(1, "O", third[0].conf)]
     p.close()
 
 
