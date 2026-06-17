@@ -26,6 +26,50 @@ def _iou(a, b):
     return inter / union if union > 0 else 0.0
 
 
+def _area(box) -> float:
+    x1, y1, x2, y2 = box
+    return float(max(0, x2 - x1) * max(0, y2 - y1))
+
+
+def _intersection_area(a, b) -> float:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    iw = max(0, min(ax2, bx2) - max(ax1, bx1))
+    ih = max(0, min(ay2, by2) - max(ay1, by1))
+    return float(iw * ih)
+
+
+def _center_distance_ratio(a, b) -> float:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    acx = (ax1 + ax2) / 2.0
+    acy = (ay1 + ay2) / 2.0
+    bcx = (bx1 + bx2) / 2.0
+    bcy = (by1 + by2) / 2.0
+    span = max(
+        abs(ax2 - ax1),
+        abs(ay2 - ay1),
+        abs(bx2 - bx1),
+        abs(by2 - by1),
+        1.0,
+    )
+    return (((acx - bcx) ** 2 + (acy - bcy) ** 2) ** 0.5) / span
+
+
+def _tracking_match_score(a, b, *, iou_threshold: float) -> float:
+    iou = _iou(a, b)
+    if iou >= iou_threshold:
+        return 1.0 + iou
+    smaller = min(_area(a), _area(b))
+    if smaller <= 0:
+        return 0.0
+    smaller_overlap = _intersection_area(a, b) / smaller
+    center_ratio = _center_distance_ratio(a, b)
+    if smaller_overlap >= 0.55 and center_ratio <= 0.65:
+        return 0.5 + smaller_overlap - (center_ratio * 0.1)
+    return 0.0
+
+
 @dataclass
 class _Track:
     track_id: int
@@ -49,13 +93,20 @@ class Tracker:
         for t in self._tracks.values():
             t.age += 1
         out = []
+        matched_ids: set[int] = set()
         for det in detections:
             best_id = None
-            best_iou = self._iou_th
+            best_score = 0.0
             for tid, t in self._tracks.items():
-                score = _iou(det.xyxy, t.xyxy)
-                if score > best_iou:
-                    best_iou = score
+                if tid in matched_ids:
+                    continue
+                score = _tracking_match_score(
+                    det.xyxy,
+                    t.xyxy,
+                    iou_threshold=self._iou_th,
+                )
+                if score > best_score:
+                    best_score = score
                     best_id = tid
             if best_id is None:
                 tid = self._next_id
@@ -78,6 +129,7 @@ class Tracker:
                     t.label_signature = label_signature
                 t.cls_id = det.cls_id
                 t.xyxy = det.xyxy
+            matched_ids.add(t.track_id)
             out.append(
                 TrackedDetection(
                     track_id=t.track_id,

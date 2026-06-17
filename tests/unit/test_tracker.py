@@ -22,6 +22,26 @@ def test_same_object_keeps_id_across_frames():
     assert b.stable_frames == 2
 
 
+def test_same_object_keeps_id_when_bbox_jitters_and_resizes():
+    tr = Tracker()
+    first = tr.update([_det(xyxy=(90, 120, 360, 245))])[0]
+    second = tr.update([_det(xyxy=(40, 98, 410, 282))])[0]
+    third = tr.update([_det(xyxy=(112, 130, 335, 238))])[0]
+
+    assert second.track_id == first.track_id
+    assert third.track_id == first.track_id
+    assert third.stable_frames == 3
+
+
+def test_resized_bbox_does_not_match_far_object():
+    tr = Tracker()
+    first = tr.update([_det(xyxy=(20, 20, 150, 130))])[0]
+    second = tr.update([_det(xyxy=(270, 210, 430, 350))])[0]
+
+    assert second.track_id != first.track_id
+    assert second.stable_frames == 1
+
+
 def test_different_object_gets_different_id():
     tr = Tracker()
     out_a = tr.update([_det(xyxy=(10, 10, 50, 50))])
