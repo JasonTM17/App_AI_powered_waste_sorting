@@ -48,7 +48,11 @@ from app.core.voice_pack import (
     AUDIO_EVENT_TRACKS,
     normalize_voice_gender,
 )
-from app.core.waste_categories import TRAINING_CLASS_ORDER_45, canonical_class_name
+from app.core.waste_categories import (
+    TRAINING_CLASS_ORDER_45,
+    canonical_class_name,
+    category_for_bin_index,
+)
 from app.utils import serial_enum
 from app.utils.camera_frame_quality import evaluate_frame_quality
 from app.utils.camera_source import backend_hint, normalize_camera_source
@@ -56,6 +60,10 @@ from app.utils.logging import logger
 from app.utils.paths import dataset_db_path, resolve_data_path
 from app.utils.runtime_lock import RuntimeLock, RuntimeLockError, acquire_runtime_lock
 from app.utils.shared_camera_stream import SharedFramePublisher
+
+MIN_TRAINING_BBOX_AREA_RATIO = 0.01
+BIN_WARNING_THRESHOLD_PERCENT = 80
+BIN_FULL_THRESHOLD_PERCENT = 95
 
 
 class _CamProbe(QThread):
@@ -280,6 +288,7 @@ class AppController(QObject):
     recognition_test_state_changed = Signal(object)
     recognition_test_trial_saved = Signal(object)
     recognition_test_action_result = Signal(bool, str)
+    bin_fullness_alert = Signal(int, int, str, str)
     _recognition_dispatch_started = Signal(object)
     _recognition_dispatch_completed = Signal(object)
 
@@ -288,8 +297,10 @@ class AppController(QObject):
         self.cfg = cfg
         self.config_path = config_path
         self.db_path = db_path
+        self.operations_db_path = db_path.with_name("operations.db")
         self._engine: InferenceEngine | None = None
         self._camera: CameraWorker | SharedCameraWorker | None = None
+        self._stopping_cameras: list[CameraWorker | SharedCameraWorker] = []
         self._camera_lock: RuntimeLock | None = None
         self._camera_shared_mode = False
         self._shared_publisher = SharedFramePublisher()
@@ -324,9 +335,11 @@ class AppController(QObject):
         self._pending_learn_now_class: str | None = None
         self._training_status_worker: _TrainingStatusWorker | None = None
         self._training_status_pending = False
+        self._auto_loaded_candidate_path = ""
         self._qa_model_hash = ""
         self._qa_dispatch_armed = False
         self._qa_authorized_route = ""
+        self._bin_fullness_status: dict[int, str] = {}
         self._recognition_test = RecognitionTestRunner(
             on_state=self._on_recognition_test_state,
             on_trial_ready=self._save_recognition_test_trial,
@@ -413,6 +426,7 @@ class AppController(QObject):
         self._inference_worker.start()
         self.model_status.emit(True)
         logger.info("model ready in background elapsed_ms={:.0f}", elapsed_s * 1000)
+        QTimer.singleShot(0, self.refresh_training_status)
         if self._pending_camera_start:
             self._pending_camera_start = False
             QTimer.singleShot(0, self.start_camera)
@@ -507,6 +521,7 @@ class AppController(QObject):
         )
         worker.connected.connect(self._on_uart_connected)
         worker.ack_received.connect(self._on_uart_ack)
+        worker.bin_received.connect(self._on_uart_bin_fullness)
         if self._pipeline is not None:
             self._pipeline.set_uart(worker)
         self._uart = worker
@@ -556,6 +571,8 @@ class AppController(QObject):
             worker.connected.disconnect(self._on_uart_connected)
         with suppress(RuntimeError, TypeError):
             worker.ack_received.disconnect(self._on_uart_ack)
+        with suppress(RuntimeError, TypeError):
+            worker.bin_received.disconnect(self._on_uart_bin_fullness)
         if self._pipeline is not None:
             self._pipeline.set_uart(None)
         worker.stop()
@@ -609,7 +626,75 @@ class AppController(QObject):
         if self._pipeline is not None:
             self._pipeline.on_ack(track_id, command, status, rtt_ms)
 
+    def _on_uart_bin_fullness(self, bin_index: int, percent: int) -> None:
+        try:
+            bin_index = int(bin_index)
+            percent = max(0, min(100, int(percent)))
+        except (TypeError, ValueError):
+            return
+        if bin_index < 1 or bin_index > 3:
+            return
+        self._persist_bin_fullness(bin_index, percent)
+        status = self._bin_fullness_status_for_percent(percent)
+        previous = self._bin_fullness_status.get(bin_index, "unknown")
+        if previous == "full" and status == "warning":
+            self._bin_fullness_status[bin_index] = "full"
+            return
+        self._bin_fullness_status[bin_index] = status
+        if status not in {"warning", "full"} or previous == status:
+            return
+        label = self._bin_fullness_label(bin_index)
+        if status == "full":
+            message = f"Thùng {label} đã đầy {percent}%. Vui lòng thu gom trước khi tiếp tục."
+        else:
+            message = f"Thùng {label} gần đầy {percent}%. Nên chuẩn bị thu gom."
+        self.bin_fullness_alert.emit(bin_index, percent, status, message)
+
+    def _persist_bin_fullness(self, bin_index: int, percent: int) -> None:
+        try:
+            from app.agent.operations_store import OperationsStore
+
+            store = OperationsStore(
+                self.operations_db_path,
+                device_defaults={
+                    "device_id": self.cfg.device.device_id,
+                    "device_name": self.cfg.device.device_name,
+                    "location": self.cfg.device.location,
+                    "owner_username": self.cfg.device.owner_username,
+                },
+            )
+            try:
+                store.update_bin_fullness(
+                    bin_index,
+                    percent,
+                    device_id=self.cfg.device.device_id,
+                    owner_username=self.cfg.device.owner_username,
+                )
+            finally:
+                store.close()
+        except Exception as exc:
+            logger.warning("desktop operations bin fullness persistence failed: {}", exc)
+
+    @staticmethod
+    def _bin_fullness_status_for_percent(percent: int) -> str:
+        if percent >= BIN_FULL_THRESHOLD_PERCENT:
+            return "full"
+        if percent >= BIN_WARNING_THRESHOLD_PERCENT:
+            return "warning"
+        return "normal"
+
+    @staticmethod
+    def _bin_fullness_label(bin_index: int) -> str:
+        category = category_for_bin_index(bin_index)
+        if category is not None:
+            return category.name
+        return f"số {bin_index}"
+
     def start_camera(self) -> None:
+        self._cleanup_stopped_cameras()
+        if self._stopping_cameras:
+            self.camera_error.emit("Camera đang dừng, vui lòng chờ một chút rồi bật lại.")
+            return
         if self._camera is not None and self._camera.isRunning():
             return
         if self._pipeline is None or self._inference_worker is None:
@@ -651,6 +736,7 @@ class AppController(QObject):
             rotation=self.cfg.camera.rotation,
         )
         self._camera.connected.connect(self.camera_status.emit)
+        self._camera.error.connect(self.camera_error.emit)
         self._camera.frame_ready.connect(self._on_frame)
         self._camera.start()
         logger.info("camera start requested source={}", self.cfg.camera.source)
@@ -659,6 +745,7 @@ class AppController(QObject):
         self._camera_shared_mode = True
         self._camera = SharedCameraWorker()
         self._camera.connected.connect(self.camera_status.emit)
+        self._camera.error.connect(self.camera_error.emit)
         self._camera.frame_ready.connect(self._on_frame)
         self._camera.start()
         self.camera_error.emit("Camera đang chạy qua shared stream từ runtime khác.")
@@ -683,14 +770,35 @@ class AppController(QObject):
         self._camera_shared_mode = False
         with suppress(RuntimeError, TypeError):
             cam.frame_ready.disconnect(self._on_frame)
+        with suppress(RuntimeError, TypeError):
+            cam.error.disconnect(self.camera_error.emit)
         cam.stop()
-        cam.wait(2000)
-        cam.deleteLater()
+        if cam.wait(5000):
+            cam.deleteLater()
+            self._release_camera_runtime_lock()
+        else:
+            logger.warning("camera worker did not stop within timeout; deferring cleanup")
+            self._stopping_cameras.append(cam)
+            cam.finished.connect(lambda c=cam: self._finalize_stopped_camera(c))
+        self.camera_status.emit(False)
+        logger.info("camera stopped")
+
+    def _release_camera_runtime_lock(self) -> None:
         if self._camera_lock is not None:
             self._camera_lock.release()
             self._camera_lock = None
-        self.camera_status.emit(False)
-        logger.info("camera stopped")
+
+    def _cleanup_stopped_cameras(self) -> None:
+        for cam in list(self._stopping_cameras):
+            if cam.isRunning():
+                continue
+            self._finalize_stopped_camera(cam)
+
+    def _finalize_stopped_camera(self, cam: CameraWorker | SharedCameraWorker) -> None:
+        with suppress(ValueError):
+            self._stopping_cameras.remove(cam)
+        self._release_camera_runtime_lock()
+        cam.deleteLater()
 
     def is_camera_running(self) -> bool:
         return self._camera is not None and self._camera.isRunning()
@@ -1364,6 +1472,7 @@ class AppController(QObject):
             logger.warning("training status failed: {}", error)
             return
         self.training_status_changed.emit(status)
+        self._auto_load_completed_candidate(status)
 
     def _on_training_status_worker_finished(self, worker: _TrainingStatusWorker) -> None:
         if self._training_status_worker is worker:
@@ -1378,6 +1487,12 @@ class AppController(QObject):
             return
         profile = "strong" if str(profile).strip().lower() == "strong" else "micro"
         if self.is_actuation_test_mode_enabled():
+            self.learn_now_action_result.emit(
+                False,
+                "Tat phan loai tu dong truoc khi huan luyen phan mem.",
+            )
+            return
+        if False:
             self.learn_now_action_result.emit(
                 False,
                 "Tắt Bật gửi Arduino trước khi huấn luyện phần mềm.",
@@ -1458,6 +1573,18 @@ class AppController(QObject):
             True,
             f"Loaded candidate tạm thời: {len(new_engine.class_names)} classes. Config production chưa đổi.",
         )
+
+    def _auto_load_completed_candidate(self, status: object) -> None:
+        if not isinstance(status, dict) or status.get("running"):
+            return
+        path = str(status.get("best_model_path") or "").strip()
+        if not path or path == self._auto_loaded_candidate_path:
+            return
+        if not Path(path).exists():
+            return
+        self._auto_loaded_candidate_path = path
+        logger.info("candidate model ready; auto-loading for live test path={}", path)
+        self.load_candidate_model_for_test(path)
 
     def reload_model(self, path: str) -> None:
         try:
@@ -1557,6 +1684,13 @@ class AppController(QObject):
                     break
         if class_id is None:
             class_id = 0
+        bbox = self._suggest_annotation_bbox(self._last_frame, cls_name)
+        if bbox is None:
+            self.snapshot_saved.emit(
+                False,
+                "Chua thay vat ro trong khay. Dat 1 vat len khay, doi 1-2 giay roi chup lai.",
+            )
+            return
         queue_dir = resolve_data_path(self.cfg.capture.output_dir) / "low_conf_queue"
         try:
             img_path = import_manual_camera_frame(
@@ -1564,6 +1698,7 @@ class AppController(QObject):
                 queue_dir,
                 cls_name,
                 class_id,
+                xyxy=bbox,
                 catalog_path=dataset_db_path(),
             )
         except Exception as e:
@@ -1578,11 +1713,23 @@ class AppController(QObject):
         self.refresh_learn_now_status(cls_name)
 
     def camera_annotation_snapshot(self, cls_name: str):
+        from app.core.detection_filtering import is_low_detail_empty_tray
+
         if not self.is_camera_running() or self._last_frame is None:
             return False, "Bật camera và chờ có frame trước khi chụp & gắn nhãn.", None, None
         frame = self._last_frame.copy()
-        self._annotation_frame = frame.copy()
         bbox = self._suggest_annotation_bbox(frame, cls_name)
+        if bbox is None:
+            if not is_low_detail_empty_tray(frame, list(self._last_detections or [])):
+                self._annotation_frame = frame.copy()
+                return True, "", frame, None
+            return (
+                False,
+                "Chua thay vat ro trong khay. Dat dung 1 vat len khay, doi 1-2 giay roi chup lai.",
+                None,
+                None,
+            )
+        self._annotation_frame = frame.copy()
         return True, "", frame, bbox
 
     def capture_reviewed_camera_sample(
@@ -1610,6 +1757,12 @@ class AppController(QObject):
             return
         if xyxy is None:
             self.snapshot_saved.emit(False, "Vui lòng vẽ bbox trước khi lưu mẫu.")
+            return
+        if not self._is_trainable_annotation_bbox(frame, xyxy):
+            self.snapshot_saved.emit(
+                False,
+                "BBox qua nho hoac khong thay vat ro. Ve sat quanh vat, khong ve khay trong.",
+            )
             return
         queue_dir = self._capture_queue_dir()
         try:
@@ -1674,7 +1827,7 @@ class AppController(QObject):
     def _capture_queue_dir(self) -> Path:
         return resolve_data_path(self.cfg.capture.output_dir) / "low_conf_queue"
 
-    def _suggest_annotation_bbox(self, frame, cls_name: str) -> tuple[int, int, int, int]:
+    def _suggest_annotation_bbox(self, frame, cls_name: str) -> tuple[int, int, int, int] | None:
         from app.core.multi_object_dispatch import foreground_object_boxes
         from app.core.waste_categories import canonical_class_name
 
@@ -1691,29 +1844,85 @@ class AppController(QObject):
             if (canonical_class_name(det.cls_name) or det.cls_name) == target
         ]
         if matching:
-            return self._clamp_bbox(max(matching, key=_area), width, height)
+            box = self._clamp_bbox(max(matching, key=_area), width, height)
+            return box if self._is_trainable_annotation_bbox(frame, box) else None
         all_boxes = [tuple(int(value) for value in det.xyxy) for det in detections]
         if all_boxes:
-            return self._clamp_bbox(max(all_boxes, key=_area), width, height)
+            box = self._clamp_bbox(max(all_boxes, key=_area), width, height)
+            return box if self._is_trainable_annotation_bbox(frame, box) else None
         foreground = foreground_object_boxes(
             frame,
             roi=self.cfg.roi,
-            min_area_ratio=self.cfg.unknown_fallback.min_area_ratio,
+            min_area_ratio=max(self.cfg.unknown_fallback.min_area_ratio, MIN_TRAINING_BBOX_AREA_RATIO),
         )
         if foreground:
-            return self._clamp_bbox(foreground[0], width, height)
-        if self.cfg.roi.enabled and self.cfg.roi.width > 0 and self.cfg.roi.height > 0:
-            return self._clamp_bbox(
-                (
-                    self.cfg.roi.x,
-                    self.cfg.roi.y,
-                    self.cfg.roi.x + self.cfg.roi.width,
-                    self.cfg.roi.y + self.cfg.roi.height,
-                ),
-                width,
-                height,
-            )
-        return (0, 0, width, height)
+            box = self._clamp_bbox(foreground[0], width, height)
+            return box if self._is_trainable_annotation_bbox(frame, box) else None
+        edge_box = self._edge_detail_annotation_bbox(frame)
+        if edge_box is not None:
+            box = self._clamp_bbox(edge_box, width, height)
+            return box if self._is_trainable_annotation_bbox(frame, box) else None
+        return None
+
+    @staticmethod
+    def _edge_detail_annotation_bbox(frame) -> tuple[int, int, int, int] | None:
+        """Find transparent or low-saturation objects that color masks miss."""
+        try:
+            import cv2
+            import numpy as np
+        except Exception:
+            return None
+        if frame is None or getattr(frame, "ndim", 0) != 3 or frame.size == 0:
+            return None
+        height, width = frame.shape[:2]
+        if width <= 0 or height <= 0:
+            return None
+        gray = cv2.cvtColor(frame[:, :, :3], cv2.COLOR_BGR2GRAY)
+        if float(np.std(gray)) < 6.0:
+            return None
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 18, 58)
+        kernel = np.ones((7, 7), dtype=np.uint8)
+        mask = cv2.dilate(edges, kernel, iterations=2)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+        count, _labels, stats, _centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        frame_area = float(max(1, width * height))
+        min_box_area = frame_area * max(0.006, MIN_TRAINING_BBOX_AREA_RATIO * 0.7)
+        candidates: list[tuple[int, int, int, int, int]] = []
+        for idx in range(1, count):
+            area = int(stats[idx, cv2.CC_STAT_AREA])
+            if area < 96:
+                continue
+            left = int(stats[idx, cv2.CC_STAT_LEFT])
+            top = int(stats[idx, cv2.CC_STAT_TOP])
+            box_width = int(stats[idx, cv2.CC_STAT_WIDTH])
+            box_height = int(stats[idx, cv2.CC_STAT_HEIGHT])
+            if box_width <= 0 or box_height <= 0:
+                continue
+            right = left + box_width
+            bottom = top + box_height
+            box_area = box_width * box_height
+            coverage = box_area / frame_area
+            touches_border = left <= 2 or top <= 2 or right >= width - 2 or bottom >= height - 2
+            if box_area < min_box_area or coverage > 0.90:
+                continue
+            if touches_border and coverage < 0.04:
+                continue
+            aspect = box_width / max(box_height, 1)
+            if aspect > 12.0 or aspect < 0.08:
+                continue
+            candidates.append((left, top, right, bottom, box_area))
+        if not candidates:
+            return None
+        left, top, right, bottom, _area = max(candidates, key=lambda item: item[4])
+        pad_x = max(4, round((right - left) * 0.08))
+        pad_y = max(4, round((bottom - top) * 0.08))
+        return (
+            max(0, left - pad_x),
+            max(0, top - pad_y),
+            min(width, right + pad_x),
+            min(height, bottom + pad_y),
+        )
 
     @staticmethod
     def _clamp_bbox(box: tuple[int, int, int, int], width: int, height: int) -> tuple[int, int, int, int]:
@@ -1725,6 +1934,47 @@ class AppController(QObject):
         if right <= left or bottom <= top:
             return (0, 0, width, height)
         return (left, top, right, bottom)
+
+    @staticmethod
+    def _is_trainable_annotation_bbox(frame, box) -> bool:
+        if frame is None or box is None:
+            return False
+        try:
+            height, width = frame.shape[:2]
+            x1, y1, x2, y2 = (int(value) for value in list(box)[:4])
+        except Exception:
+            return False
+        if width <= 0 or height <= 0:
+            return False
+        x1 = max(0, min(width, x1))
+        y1 = max(0, min(height, y1))
+        x2 = max(0, min(width, x2))
+        y2 = max(0, min(height, y2))
+        box_width = max(0, x2 - x1)
+        box_height = max(0, y2 - y1)
+        box_area = box_width * box_height
+        area_ratio = box_area / float(width * height)
+        if area_ratio > 0.92 or box_area < 64:
+            return False
+        if area_ratio >= MIN_TRAINING_BBOX_AREA_RATIO:
+            return True
+        if area_ratio < 0.003:
+            return False
+        try:
+            import cv2
+            import numpy as np
+        except Exception:
+            return True
+        crop = frame[y1:y2, x1:x2, :3]
+        if crop.size == 0:
+            return False
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+        contrast = float(np.std(gray))
+        colored_ratio = float(np.mean(hsv[:, :, 1] > 45))
+        edges = cv2.Canny(cv2.GaussianBlur(gray, (3, 3), 0), 24, 80)
+        edge_ratio = float(np.count_nonzero(edges)) / float(max(1, gray.size))
+        return contrast >= 7.0 or colored_ratio >= 0.08 or edge_ratio >= 0.006
 
     def stop(self) -> None:
         if self._recognition_test.active:

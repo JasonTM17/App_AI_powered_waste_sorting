@@ -40,6 +40,11 @@ from app.utils.paths import dataset_db_path
 
 TRAINING_GRID_LIMIT = 80
 THUMBNAIL_BATCH_SIZE = 10
+OPERATOR_TRAINING_SOURCES = {
+    "manual_camera_capture",
+    "manual_import",
+    "manual_phone_import",
+}
 
 
 class _TrainingDataWorker(QThread):
@@ -81,20 +86,26 @@ class _TrainingDataWorker(QThread):
     def _load_catalog_payload(self) -> dict[str, object]:
         catalog = DatasetCatalog(self._catalog_path)
         try:
-            rows, total = catalog.list_items_for_box_class(
+            all_rows, all_total = catalog.list_items_for_box_class(
                 self._class_name,
-                limit=TRAINING_GRID_LIMIT,
+                limit=None,
             )
-            counts = catalog.count_trust_states_for_box_class(self._class_name)
             catalog_total = catalog.count_total()
         finally:
             catalog.close()
+        rows = [
+            row
+            for row in all_rows
+            if str(row.get("source") or "") in OPERATOR_TRAINING_SOURCES
+        ]
+        counts = _trust_counts_from_rows(rows)
         for row in rows:
             row["selected_cls_name"] = self._class_name
         if catalog_total > 0:
             return {
-                "rows": rows,
-                "total": total,
+                "rows": rows[:TRAINING_GRID_LIMIT],
+                "total": len(rows),
+                "all_total": all_total,
                 "counts": counts,
                 "source": "catalog",
                 "catalog_total": catalog_total,
@@ -147,6 +158,9 @@ class _TrainingDataWorker(QThread):
                 break
             meta = _read_meta(image_path)
             if not _meta_has_class(meta, self._class_name):
+                continue
+            source = str(meta.get("source") or "unknown")
+            if source not in OPERATOR_TRAINING_SOURCES:
                 continue
             total += 1
             decision = classify_dataset_item(meta)
@@ -213,6 +227,7 @@ class TrainingPage(QWidget):
         self._catalog_path = dataset_db_path()
         self._learn_now_status: dict[str, object] = {}
         self._training_status: dict[str, object] = {}
+        self._actuation_training_locked = False
         self._icon_cache: dict[str, tuple[int, QIcon]] = {}
         self._loaded = False
         self._load_request_id = 0
@@ -225,6 +240,10 @@ class TrainingPage(QWidget):
         self._training_timer = QTimer(self)
         self._training_timer.setInterval(2500)
         self._training_timer.timeout.connect(self.training_status_requested.emit)
+        self._delayed_capture_remaining = 0
+        self._delayed_capture_timer = QTimer(self)
+        self._delayed_capture_timer.setInterval(1000)
+        self._delayed_capture_timer.timeout.connect(self._tick_delayed_annotation_capture)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(24, 20, 24, 24)
@@ -281,6 +300,11 @@ class TrainingPage(QWidget):
         _fit_button_to_text(self.btn_annotate, 145)
         self.btn_annotate.clicked.connect(self._request_camera_annotation)
         action_row.addWidget(self.btn_annotate)
+        self.btn_delayed_annotate = QPushButton("Chụp sau 5s")
+        self.btn_delayed_annotate.setObjectName("secondary")
+        _fit_button_to_text(self.btn_delayed_annotate, 125)
+        self.btn_delayed_annotate.clicked.connect(self._start_delayed_annotation_capture)
+        action_row.addWidget(self.btn_delayed_annotate)
 
         self.btn_open_web = QPushButton("Mở Web annotate")
         self.btn_open_web.setObjectName("secondary")
@@ -423,6 +447,10 @@ class TrainingPage(QWidget):
             self._training_timer.stop()
         self._update_train_panel()
 
+    def set_actuation_training_locked(self, enabled: bool) -> None:
+        self._actuation_training_locked = bool(enabled)
+        self._update_train_panel()
+
     def set_learn_now_action_result(self, ok: bool, message: str) -> None:
         prefix = "OK" if ok else "Lỗi"
         self.learn_status.setText(f"{prefix}: {message}")
@@ -486,6 +514,7 @@ class TrainingPage(QWidget):
             self.btn_add_phone,
             self.btn_capture_pending,
             self.btn_annotate,
+            self.btn_delayed_annotate,
             self.btn_learn_refresh,
         ):
             button.setEnabled(valid)
@@ -513,11 +542,14 @@ class TrainingPage(QWidget):
         raw, canonical, _cls_id = self._label_target()
         class_name = canonical or raw
         total = int(payload.get("total") or 0)
+        all_total = int(payload.get("all_total") or total)
         counts = payload.get("counts")
         counts = counts if isinstance(counts, dict) else {}
         excluded = int(counts.get(DatasetTrustState.EXCLUDED.value, 0)) + int(
             counts.get(DatasetTrustState.QUARANTINE.value, 0)
         )
+        hidden = max(0, all_total - total)
+        hidden_suffix = f" Đã ẩn {hidden} ảnh nguồn ngoài." if hidden else ""
         self.stats.setText(
             f"{class_name}: {total} ảnh trong queue. "
             f"Đã duyệt/trainable: {int(counts.get(DatasetTrustState.TRAINABLE.value, 0))}, "
@@ -525,6 +557,9 @@ class TrainingPage(QWidget):
             f"holdout: {int(counts.get(DatasetTrustState.HOLDOUT.value, 0))}, "
             f"bị loại/cách ly: {excluded}."
         )
+
+        if hidden_suffix:
+            self.stats.setText(self.stats.text() + hidden_suffix)
 
     def _on_training_thumbnails_ready(self, request_id: int, batch: object) -> None:
         if request_id != self._load_request_id or not isinstance(batch, list):
@@ -578,6 +613,29 @@ class TrainingPage(QWidget):
             QMessageBox.warning(self, "Thiếu nhãn", "Nhập nhãn hợp lệ trước khi chụp & gắn nhãn.")
             return
         self.camera_annotation_requested.emit(canonical, int(cls_id))
+
+    def _start_delayed_annotation_capture(self, seconds: int = 5) -> None:
+        _raw, _canonical, cls_id = self._label_target()
+        if cls_id is None:
+            QMessageBox.warning(self, "Thiếu nhãn", "Nhập nhãn hợp lệ trước khi chụp sau 5 giây.")
+            return
+        if self._delayed_capture_timer.isActive():
+            self._delayed_capture_timer.stop()
+            self._delayed_capture_remaining = 0
+            self.btn_delayed_annotate.setText("Chụp sau 5s")
+            return
+        self._delayed_capture_remaining = max(1, int(seconds))
+        self.btn_delayed_annotate.setText(f"Chụp sau {self._delayed_capture_remaining}s")
+        self._delayed_capture_timer.start()
+
+    def _tick_delayed_annotation_capture(self) -> None:
+        self._delayed_capture_remaining -= 1
+        if self._delayed_capture_remaining > 0:
+            self.btn_delayed_annotate.setText(f"Chụp sau {self._delayed_capture_remaining}s")
+            return
+        self._delayed_capture_timer.stop()
+        self.btn_delayed_annotate.setText("Chụp sau 5s")
+        self._request_camera_annotation()
 
     def _request_learn_status(self) -> None:
         _raw, canonical, cls_id = self._label_target()
@@ -639,6 +697,8 @@ class TrainingPage(QWidget):
             message += f" Còn thiếu {missing_micro} mẫu đã duyệt để train nhanh."
         elif missing_strong or missing_holdout:
             message += f" Train mạnh còn thiếu {missing_strong} mẫu train và {missing_holdout} holdout."
+        if self._actuation_training_locked:
+            message += " Tat phan loai tu dong truoc khi train nhanh."
         self.learn_status.setText(message)
 
         running = bool(self._training_status.get("running"))
@@ -656,11 +716,12 @@ class TrainingPage(QWidget):
         self.candidate_path.setText(f"Candidate: {best_model or '-'}")
         has_status = bool(row)
         valid = cls_id is not None
+        can_start_training = not running and not self._actuation_training_locked
         self.btn_train_micro.setEnabled(
-            valid and has_status and bool(row.get("ready_for_micro_train")) and not running
+            valid and has_status and bool(row.get("ready_for_micro_train")) and can_start_training
         )
         self.btn_train_strong.setEnabled(
-            valid and has_status and bool(row.get("ready_for_strong_train")) and not running
+            valid and has_status and bool(row.get("ready_for_strong_train")) and can_start_training
         )
         self.btn_stop_training.setEnabled(running)
         self.btn_load_candidate.setEnabled(bool(best_model) and not running)
@@ -728,6 +789,15 @@ def _read_meta(image_path: Path) -> dict[str, object]:
     except Exception:
         return {}
     return meta if isinstance(meta, dict) else {}
+
+
+def _trust_counts_from_rows(rows: list[dict[str, object]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        state = str(row.get("trust_state") or "")
+        if state:
+            counts[state] += 1
+    return dict(counts)
 
 
 def _meta_has_class(meta: dict[str, object], class_name: str) -> bool:

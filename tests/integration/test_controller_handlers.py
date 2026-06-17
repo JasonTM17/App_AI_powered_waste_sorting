@@ -88,6 +88,7 @@ class _PipelineSpy:
 
 class _FakeUartWorker(QThread):
     ack_received = Signal(int, str, str, object)
+    bin_received = Signal(int, int)
     connected = Signal(bool)
     instances: ClassVar[list] = []
 
@@ -196,6 +197,45 @@ class _StopWorkerSpy:
         self.quit_called = True
 
 
+class _SignalSpy:
+    def __init__(self):
+        self._callbacks = []
+
+    def connect(self, callback):
+        self._callbacks.append(callback)
+
+    def disconnect(self, _callback):
+        return None
+
+    def emit(self):
+        for callback in list(self._callbacks):
+            callback()
+
+
+class _SlowCameraWorkerSpy:
+    def __init__(self):
+        self.frame_ready = _SignalSpy()
+        self.error = _SignalSpy()
+        self.finished = _SignalSpy()
+        self.stopped = False
+        self.waited: list[int] = []
+        self.deleted = False
+        self.running = True
+
+    def stop(self):
+        self.stopped = True
+
+    def wait(self, ms: int):
+        self.waited.append(ms)
+        return False
+
+    def isRunning(self):  # noqa: N802
+        return self.running
+
+    def deleteLater(self):  # noqa: N802
+        self.deleted = True
+
+
 class _LockSpy:
     def __init__(self):
         self.released = False
@@ -211,6 +251,12 @@ class _ClosablePipelineSpy(_PipelineSpy):
 
     def close(self):
         self.closed = True
+
+
+class _FakeInferenceEngine:
+    def __init__(self, path, **_kwargs):
+        self.path = path
+        self.class_names = {24: "Plastic bottle"}
 
 
 def test_uart_preserves_configured_port_when_temporarily_missing(tmp_path, monkeypatch):
@@ -385,6 +431,30 @@ def test_start_camera_defers_until_model_ready(tmp_path):
     controller.stop()
 
 
+def test_stop_camera_defers_delete_when_worker_does_not_exit(tmp_path):
+    cfg = AppConfig()
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    camera = _SlowCameraWorkerSpy()
+    lock = _LockSpy()
+    controller._camera = camera  # type: ignore[assignment]
+    controller._camera_lock = lock  # type: ignore[assignment]
+
+    controller.stop_camera()
+
+    assert camera.stopped is True
+    assert camera.waited == [5000]
+    assert camera.deleted is False
+    assert lock.released is False
+    assert controller._stopping_cameras == [camera]
+
+    camera.running = False
+    camera.finished.emit()
+
+    assert camera.deleted is True
+    assert lock.released is True
+    assert controller._stopping_cameras == []
+
+
 def test_update_config_starts_usb_uart_and_updates_pipeline(tmp_path, monkeypatch):
     _FakeUartWorker.instances.clear()
     monkeypatch.setattr(
@@ -411,6 +481,49 @@ def test_update_config_starts_usb_uart_and_updates_pipeline(tmp_path, monkeypatc
     assert worker.baud == 115200
     assert worker.protocol == "plain_group"
     assert spy.uart is worker
+
+
+def test_uart_bin_fullness_alerts_only_on_status_transition(tmp_path):
+    from app.agent.operations_store import OperationsStore
+
+    cfg = AppConfig()
+    cfg.device.owner_username = "user"
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    alerts: list[tuple[int, int, str, str]] = []
+    controller.bin_fullness_alert.connect(
+        lambda bin_index, percent, status, message: alerts.append(
+            (bin_index, percent, status, message)
+        )
+    )
+
+    controller._on_uart_bin_fullness(2, 79)
+    controller._on_uart_bin_fullness(2, 80)
+    controller._on_uart_bin_fullness(2, 90)
+    controller._on_uart_bin_fullness(2, 95)
+    controller._on_uart_bin_fullness(2, 96)
+    controller._on_uart_bin_fullness(2, 94)
+    controller._on_uart_bin_fullness(2, 96)
+    controller._on_uart_bin_fullness(2, 70)
+    controller._on_uart_bin_fullness(2, 95)
+
+    assert [(item[0], item[1], item[2]) for item in alerts] == [
+        (2, 80, "warning"),
+        (2, 95, "full"),
+        (2, 95, "full"),
+    ]
+    assert "Vô cơ" in alerts[-1][3]
+
+    store = OperationsStore(controller.operations_db_path)
+    try:
+        user_alerts = store.list_alerts(owner_username="user", include_resolved=False)
+    finally:
+        store.close()
+    assert any(
+        item["source"] == "derived_fullness"
+        and item["severity"] == "danger"
+        and item["bin_id"] == "td-bin-001-R"
+        for item in user_alerts
+    )
 
 
 def test_actuation_test_mode_controls_pipeline_dispatch(tmp_path):
@@ -574,6 +687,106 @@ def test_capture_reviewed_camera_sample_writes_trainable_item(tmp_path, monkeypa
     assert refresh.calls == 1
 
 
+def test_camera_annotation_snapshot_rejects_empty_tray(tmp_path):
+    cfg = AppConfig()
+    cfg.capture.output_dir = str(tmp_path / "dataset")
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    controller._last_frame = np.full((120, 160, 3), 230, dtype=np.uint8)
+    controller.is_camera_running = lambda: True  # type: ignore[method-assign]
+
+    ok, message, frame, bbox = controller.camera_annotation_snapshot("Plastic bottle")
+
+    assert ok is False
+    assert "Chua thay vat" in message
+    assert frame is None
+    assert bbox is None
+
+
+def test_camera_annotation_snapshot_allows_manual_box_when_object_is_unclear(tmp_path):
+    cfg = AppConfig()
+    cfg.capture.output_dir = str(tmp_path / "dataset")
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    frame = np.full((120, 160, 3), 220, dtype=np.uint8)
+    frame[38:86, 56:104] = 170
+    controller._last_frame = frame
+    controller.is_camera_running = lambda: True  # type: ignore[method-assign]
+
+    ok, message, returned_frame, bbox = controller.camera_annotation_snapshot("Plastic bottle")
+
+    assert ok is True
+    assert message == ""
+    assert returned_frame is not None
+    assert bbox is None or controller._is_trainable_annotation_bbox(frame, bbox)
+
+
+def test_capture_camera_sample_rejects_empty_tray_pending_item(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = AppConfig()
+    cfg.capture.output_dir = str(tmp_path / "dataset")
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    controller._last_frame = np.full((120, 160, 3), 230, dtype=np.uint8)
+    controller.is_camera_running = lambda: True  # type: ignore[method-assign]
+    messages: list[tuple[bool, str]] = []
+    controller.snapshot_saved.connect(lambda ok, msg: messages.append((ok, msg)))
+
+    controller.capture_camera_sample("Plastic bottle")
+
+    assert messages
+    assert messages[-1][0] is False
+    assert "Chua thay vat" in messages[-1][1]
+    assert not list((Path(cfg.capture.output_dir) / "low_conf_queue").glob("manual_camera_*.jpg"))
+
+
+def test_capture_reviewed_camera_sample_rejects_tiny_bbox(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = AppConfig()
+    cfg.capture.output_dir = str(tmp_path / "dataset")
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    controller._annotation_frame = np.full((120, 160, 3), 230, dtype=np.uint8)
+    messages: list[tuple[bool, str]] = []
+    saved: list[str] = []
+    controller.snapshot_saved.connect(lambda ok, msg: messages.append((ok, msg)))
+    controller.capture_saved.connect(saved.append)
+
+    controller.capture_reviewed_camera_sample("Plastic bottle", 24, (70, 52, 78, 60), True)
+
+    assert not saved
+    assert messages
+    assert messages[-1][0] is False
+    assert "BBox qua nho" in messages[-1][1]
+
+
+def test_training_status_auto_loads_candidate_for_live_test_without_saving_production(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(controller_module, "InferenceEngine", _FakeInferenceEngine)
+    best_model = tmp_path / "runs" / "train" / "learn-now-micro-plastic-bottle" / "weights" / "best.pt"
+    best_model.parent.mkdir(parents=True)
+    best_model.write_bytes(b"fake")
+    cfg = AppConfig()
+    cfg.model.path = "models/production.pt"
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    pipeline = _PipelineSpy()
+    controller._engine = _FakeInferenceEngine("models/production.pt")
+    controller._pipeline = pipeline
+    results: list[tuple[bool, str]] = []
+    controller.reload_model_result.connect(lambda ok, msg: results.append((ok, msg)))
+
+    controller._on_training_status_ready(
+        {"running": False, "best_model_path": str(best_model)},
+        "",
+        0.01,
+    )
+
+    assert controller._engine is not None
+    assert getattr(controller._engine, "path", "") == str(best_model)
+    assert pipeline.reset_count == 1
+    assert controller.cfg.model.path == "models/production.pt"
+    assert results and results[-1][0] is True
+    assert "Loaded candidate" in results[-1][1]
+
+
 def test_import_manual_phone_samples_writes_pending_review_item(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     src = tmp_path / "phone.jpg"
@@ -661,7 +874,18 @@ def test_start_learn_now_candidate_training_blocks_when_actuation_enabled(tmp_pa
 
     assert results
     assert results[0][0] is False
-    assert "Arduino" in results[0][1]
+    assert "phan loai tu dong" in results[0][1]
+
+
+def test_trainable_annotation_accepts_small_detailed_object_box(tmp_path):
+    cfg = AppConfig()
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    frame = np.full((120, 160, 3), 224, dtype=np.uint8)
+    frame[48:68, 66:90] = (36, 58, 186)
+    frame[52:55, 68:88] = (230, 230, 230)
+    frame[62:64, 70:86] = (70, 70, 80)
+
+    assert controller._is_trainable_annotation_bbox(frame, (66, 48, 90, 68)) is True
 
 
 def test_learn_now_status_worker_discards_stale_class_result(tmp_path, monkeypatch, qtbot):

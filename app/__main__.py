@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 import shutil
 import sys
@@ -24,6 +25,7 @@ from app.ui.main_window import (
 from app.ui.widgets.theme import apply_theme
 from app.utils.logging import logger, setup_logging
 from app.utils.paths import config_path, db_path, example_config_path
+from app.utils.runtime_lock import RuntimeLockError, acquire_runtime_lock
 
 
 def _seed_config_if_missing() -> None:
@@ -45,6 +47,12 @@ def _seed_config_if_missing() -> None:
 
 def main(*, require_admin_login: bool = True) -> int:
     setup_logging()
+    try:
+        app_lock = acquire_runtime_lock("desktop_app")
+    except RuntimeLockError as e:
+        logger.warning("desktop app start refused: {}", e)
+        return 0
+    atexit.register(app_lock.release)
     startup_t0 = time.perf_counter()
 
     def _log_startup(marker: str) -> None:
@@ -105,6 +113,7 @@ def main(*, require_admin_login: bool = True) -> int:
         _log_startup("login_dialog_created")
         if login.exec() != 1:
             logger.info("desktop admin login cancelled")
+            app_lock.release()
             return 0
         logger.info(
             "desktop admin login accepted user={}",
@@ -251,6 +260,17 @@ def main(*, require_admin_login: bool = True) -> int:
         t.show_at(window.mapFromGlobal(tr))
 
     controller.camera_error.connect(_on_camera_error)
+
+    def _on_bin_fullness_alert(_bin_index: int, _percent: int, status: str, message: str) -> None:
+        from PySide6.QtCore import QPoint
+
+        from app.ui.widgets.toast import Toast
+
+        level = "error" if status == "full" else "warn"
+        tr = window.mapToGlobal(QPoint(window.width(), 0))
+        Toast(window, message, level=level, duration_ms=9000).show_at(window.mapFromGlobal(tr))
+
+    controller.bin_fullness_alert.connect(_on_bin_fullness_alert)
 
     def _on_config_saved(new_cfg):
         apply_theme(app, new_cfg.theme)
@@ -464,6 +484,8 @@ def main(*, require_admin_login: bool = True) -> int:
         controller.learn_now_status_changed.connect(page.set_learn_now_status)
         controller.learn_now_action_result.connect(page.set_learn_now_action_result)
         controller.training_status_changed.connect(page.set_training_status)
+        controller.actuation_mode_changed.connect(page.set_actuation_training_locked)
+        page.set_actuation_training_locked(controller.is_actuation_test_mode_enabled())
         controller.capture_saved.connect(lambda _p, target=page: target.reload())
         page.camera_annotation_requested.connect(
             lambda cls_name, cls_id, target=page: _open_camera_annotation_dialog(
@@ -530,6 +552,7 @@ def main(*, require_admin_login: bool = True) -> int:
     finally:
         controller.stop()
         history_service.close()
+        app_lock.release()
     return rc
 
 

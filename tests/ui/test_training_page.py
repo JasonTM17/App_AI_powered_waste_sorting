@@ -35,6 +35,7 @@ def test_training_page_defaults_to_pen_and_enables_manual_actions(tmp_path, qtbo
     assert page.btn_add_phone.isEnabled() is True
     assert page.btn_capture_pending.isEnabled() is True
     assert page.btn_annotate.isEnabled() is True
+    assert page.btn_delayed_annotate.isEnabled() is True
     assert page.btn_learn_refresh.isEnabled() is True
     assert page.btn_train_micro.isEnabled() is False
     assert page.btn_train_strong.isEnabled() is False
@@ -49,6 +50,7 @@ def test_training_page_disables_manual_actions_for_invalid_label(tmp_path, qtbot
     assert page.btn_add_phone.isEnabled() is False
     assert page.btn_capture_pending.isEnabled() is False
     assert page.btn_annotate.isEnabled() is False
+    assert page.btn_delayed_annotate.isEnabled() is False
     assert page.btn_learn_refresh.isEnabled() is False
     assert "not-a-canonical-class" in page.label_status.text()
 
@@ -99,6 +101,20 @@ def test_training_page_camera_annotation_button_emits_class_and_id(tmp_path, qtb
     assert blocker.args == ["Textile", 37]
 
 
+def test_training_page_delayed_camera_annotation_emits_after_countdown(tmp_path, qtbot):
+    page = TrainingPage(_config_for_dataset(tmp_path / "dataset"))
+    qtbot.addWidget(page)
+    _set_label(page, "Textile")
+    page._delayed_capture_remaining = 1
+    emitted: list[list[object]] = []
+    page.camera_annotation_requested.connect(lambda cls_name, cls_id: emitted.append([cls_name, cls_id]))
+
+    page._tick_delayed_annotation_capture()
+
+    assert emitted == [["Textile", 37]]
+    assert page.btn_delayed_annotate.text() == "Chụp sau 5s"
+
+
 def test_training_page_manual_training_panel_gates_buttons(tmp_path, qtbot):
     page = TrainingPage(_config_for_dataset(tmp_path / "dataset"))
     qtbot.addWidget(page)
@@ -135,6 +151,40 @@ def test_training_page_manual_training_panel_gates_buttons(tmp_path, qtbot):
     assert page.btn_train_strong.isEnabled() is False
     assert "Textile" in page.learn_route.text()
     assert "Reference: 6/6" in page.learn_counts.text()
+
+
+def test_training_page_disables_fast_train_when_auto_sort_is_enabled(tmp_path, qtbot):
+    page = TrainingPage(_config_for_dataset(tmp_path / "dataset"))
+    qtbot.addWidget(page)
+    _set_label(page, "Textile")
+    page.set_learn_now_status(
+        {
+            "selected": {
+                "class_name": "Textile",
+                "command": "R",
+                "bin_index": 2,
+                "route_label": "Vo co",
+                "reviewed_count": 6,
+                "eligible_reviewed_count": 6,
+                "reference_count": 6,
+                "holdout_count": 0,
+                "source_issue_count": 0,
+                "missing_for_reference": 0,
+                "missing_for_micro_train": 0,
+                "missing_for_strong_train": 18,
+                "missing_holdout_for_strong": 6,
+                "ready_for_micro_train": True,
+                "ready_for_strong_train": False,
+                "message": "Ready for fast candidate micro-train.",
+            }
+        }
+    )
+    page.set_training_status({"running": False, "message": "Training dang tat"})
+
+    page.set_actuation_training_locked(True)
+
+    assert page.btn_train_micro.isEnabled() is False
+    assert "Tat phan loai tu dong" in page.learn_status.text()
 
 
 def test_training_page_training_running_disables_train_and_enables_stop(tmp_path, qtbot):
