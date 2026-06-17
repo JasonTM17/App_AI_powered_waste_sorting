@@ -92,7 +92,13 @@ class UnknownObjectFallback:
         self._last_xyxy = candidate.xyxy
         if self._stable_count < stable_frames:
             return None
-        return Detection(-1, class_name, candidate.confidence, candidate.xyxy)
+        return Detection(
+            -1,
+            class_name,
+            candidate.confidence,
+            candidate.xyxy,
+            source=f"unknown_fallback:{candidate.source}",
+        )
 
     @staticmethod
     def _from_low_conf_yolo(
@@ -102,9 +108,7 @@ class UnknownObjectFallback:
         min_raw_confidence: float,
     ) -> UnknownObjectCandidate | None:
         candidates = [
-            d
-            for d in raw_detections
-            if d.conf >= min_raw_confidence and roi_filter(d.xyxy)
+            d for d in raw_detections if d.conf >= min_raw_confidence and roi_filter(d.xyxy)
         ]
         if not candidates:
             return None

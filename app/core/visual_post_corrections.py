@@ -160,9 +160,13 @@ def _looks_like_metal_utensil(
     value = hsv[:, :, 2]
     low_saturation_ratio = float(np.mean(saturation < 58))
     colored_ratio = float(np.mean(saturation > 90))
+    strong_colored_ratio = float(np.mean((saturation > 105) & (value > 60)))
     glare_ratio = float(np.mean((saturation < 42) & (value > 205)))
     dark_metal_ratio = float(np.mean((saturation < 70) & (value < 115)))
     contrast = float(np.std(gray))
+    width_variation, max_to_median_width = _silhouette_width_variation(
+        mask, horizontal=box_aspect >= 1.0
+    )
 
     return (
         stats["area_ratio"] >= 0.055
@@ -171,11 +175,31 @@ def _looks_like_metal_utensil(
         and stats["saturation_mean"] <= 58.0
         and abs(stats["warmth"]) <= 24.0
         and low_saturation_ratio >= 0.60
-        and colored_ratio <= 0.18
-        and (glare_ratio >= 0.004 or dark_metal_ratio >= 0.05)
+        and colored_ratio <= 0.10
+        and strong_colored_ratio <= 0.045
+        and width_variation >= 0.36
+        and max_to_median_width >= 1.35
+        and (glare_ratio >= 0.004 or (dark_metal_ratio >= 0.05 and width_variation >= 0.50))
         and contrast >= 16.0
         and stats["edge_ratio"] >= 0.0025
     )
+
+
+def _silhouette_width_variation(mask: np.ndarray, *, horizontal: bool) -> tuple[float, float]:
+    """Return how much the object width changes along its long axis."""
+    if mask.size == 0:
+        return 0.0, 0.0
+    axis = 1 if horizontal else 0
+    counts = np.count_nonzero(mask > 0, axis=axis)
+    active = counts[counts > 0]
+    if active.size < 3:
+        return 0.0, 0.0
+    p90 = float(np.percentile(active, 90))
+    p10 = float(np.percentile(active, 10))
+    median = float(np.median(active))
+    variation = (p90 - p10) / max(p90, 1.0)
+    max_to_median = float(np.max(active)) / max(median, 1.0)
+    return variation, max_to_median
 
 
 def _looks_like_eggshell(
@@ -309,7 +333,8 @@ def _looks_like_crumpled_paper(
     return (
         neutral_bright_ratio >= 0.42
         and colored_ratio <= 0.20
-        and (dark_ink_ratio >= 0.035 or shadow_ratio >= 0.10)
+        and 0.035 <= dark_ink_ratio <= 0.28
+        and shadow_ratio <= 0.30
         and edge_ratio >= 0.005
         and contrast >= 13.0
         and 105.0 <= float(np.mean(value)) <= 240.0

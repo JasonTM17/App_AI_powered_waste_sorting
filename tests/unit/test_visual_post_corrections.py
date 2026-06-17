@@ -154,6 +154,29 @@ def test_visual_correction_relabels_shiny_metal_spoon_unknown_as_iron_utensils()
     assert corrected[0].operator_label == "Muong kim loai"
 
 
+def test_visual_correction_keeps_blue_pen_like_unknown():
+    frame = np.full((260, 420, 3), 230, dtype=np.uint8)
+    cv2.line(frame, (28, 176), (372, 142), (92, 92, 92), 28)
+    cv2.line(frame, (32, 160), (360, 130), (166, 166, 164), 10)
+    cv2.rectangle(frame, (86, 158), (160, 190), (210, 70, 20), -1)
+    cv2.rectangle(frame, (330, 126), (394, 158), (210, 70, 20), -1)
+    detection = Detection(-1, "Unknown object", 0.15, (18, 106, 404, 216))
+
+    corrected = apply_visual_post_corrections(frame, [detection])
+
+    assert corrected[0].cls_name == "Unknown object"
+
+
+def test_visual_correction_keeps_plain_dark_bar_unknown():
+    frame = np.full((240, 320, 3), 240, dtype=np.uint8)
+    cv2.rectangle(frame, (80, 90), (220, 130), (20, 20, 20), -1)
+    detection = Detection(-1, "Unknown object", 0.39, (62, 70, 238, 150))
+
+    corrected = apply_visual_post_corrections(frame, [detection])
+
+    assert corrected[0].cls_name == "Unknown object"
+
+
 def test_visual_correction_does_not_claim_low_conf_glass_bottle():
     frame = np.full((240, 320, 3), 230, dtype=np.uint8)
     detection = Detection(12, "Glass bottle", 0.38, (40, 35, 275, 215))

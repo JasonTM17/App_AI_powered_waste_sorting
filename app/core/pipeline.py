@@ -133,10 +133,7 @@ def _boxes_overlap(
     second_area = max(0, bx2 - bx1) * max(0, by2 - by1)
     union = first_area + second_area - intersection
     smaller = max(1, min(first_area, second_area))
-    return (
-        intersection / max(union, 1) >= iou_threshold
-        or intersection / smaller >= 0.85
-    )
+    return intersection / max(union, 1) >= iou_threshold or intersection / smaller >= 0.85
 
 
 class _NoopUart:
@@ -506,10 +503,7 @@ class Pipeline:
         width, height = annotated.size
         x1, y1, x2, y2 = _clamp_box(det.xyxy, width, height)
         font = _load_label_font()
-        label = (
-            f"{object_name} {det.conf:.0%} | {category_name} | "
-            f"Thùng {int(mapping.bin_index)}"
-        )
+        label = f"{object_name} {det.conf:.0%} | {category_name} | Thùng {int(mapping.bin_index)}"
         stroke = (16, 185, 129)
         fill = (4, 54, 38)
         draw.rectangle((x1, y1, x2, y2), outline=stroke, width=4)
@@ -646,23 +640,13 @@ class Pipeline:
                     [],
                 )
             )
-            allowed_classes = (
-                None if mode == "unknown" else source_targets or correction_targets
-            )
+            allowed_classes = None if mode == "unknown" else source_targets or correction_targets
             match = recognizer.classify(
                 frame_bgr,
                 detection,
                 allowed_classes=allowed_classes or None,
-                min_similarity=(
-                    ref_cfg.unknown_min_similarity
-                    if mode == "unknown"
-                    else None
-                ),
-                min_votes=(
-                    ref_cfg.unknown_min_votes
-                    if mode == "unknown"
-                    else None
-                ),
+                min_similarity=(ref_cfg.unknown_min_similarity if mode == "unknown" else None),
+                min_votes=(ref_cfg.unknown_min_votes if mode == "unknown" else None),
             )
             if match is None:
                 out.append(detection)
@@ -721,9 +705,7 @@ class Pipeline:
         if recognizer is None or not ref_cfg.enabled or not raw:
             return []
         correctable_classes = {
-            str(name).strip()
-            for name in ref_cfg.correctable_yolo_classes
-            if str(name).strip()
+            str(name).strip() for name in ref_cfg.correctable_yolo_classes if str(name).strip()
         }
         if not correctable_classes:
             return []
@@ -1083,6 +1065,17 @@ class Pipeline:
                     self.tracker.mark_emitted(t.track_id)
             return detections_for_render
         for t in tracked:
+            if self._low_confidence_dispatch_blocked(t.detection):
+                self.dispatch_status = "low confidence review required"
+                if t.stable_frames == self.cfg.dispatch_guard.min_stable_frames:
+                    logger.info(
+                        "dispatch blocked low confidence track={} cls={} conf={:.2f} source={}",
+                        t.track_id,
+                        t.detection.cls_name,
+                        t.detection.conf,
+                        t.detection.source,
+                    )
+                continue
             if self._unknown_dispatch_blocked(t.detection):
                 should_log = self.tracker.should_emit(t.track_id)
                 self.tracker.mark_emitted(t.track_id)
@@ -1379,6 +1372,12 @@ class Pipeline:
         if detection.cls_name in self._mapping:
             return False
         return not bool(fallback.dispatch_enabled)
+
+    def _low_confidence_dispatch_blocked(self, detection: Detection) -> bool:
+        if detection.source != "visual_correction:metal_utensil":
+            return False
+        threshold = max(0.30, min(float(self.cfg.model.conf_threshold), 0.45) * 0.75)
+        return detection.conf < threshold
 
     def on_ack(self, track_id: int, command: str, status: str, rtt_ms):
         self._dispatch_guard.complete_dispatch(track_id=track_id, now=time.monotonic())

@@ -966,9 +966,7 @@ def test_pipeline_corrects_crumpled_paper_before_three_bin_inorganic_fallback(
     cfg.model.conf_threshold = 0.3
     cfg.three_bin_classifier.enabled = True
     cfg.three_bin_classifier.unknown_only = True
-    infer = _ScriptedInfer(
-        [[Detection(999, "Unknown object", 0.77, (42, 45, 318, 224))]]
-    )
+    infer = _ScriptedInfer([[Detection(999, "Unknown object", 0.77, (42, 45, 318, 224))]])
     uart = _StubUart()
     p = Pipeline(cfg, infer, uart, tmp_path / "h.db")
     p._three_bin_classifier = _StubThreeBinClassifier("R")
@@ -1007,14 +1005,8 @@ def test_pipeline_keeps_generic_three_bin_organic_non_specific(tmp_path, monkeyp
 
 
 def test_three_bin_display_name_does_not_claim_an_exact_class():
-    assert (
-        three_bin_display_name("Kaggle 3-bin O")
-        == "Nhóm Hữu cơ (chưa xác định vật cụ thể)"
-    )
-    assert (
-        three_bin_display_name("Kaggle 3-bin I")
-        == "Nhóm Tái chế (chưa xác định vật cụ thể)"
-    )
+    assert three_bin_display_name("Kaggle 3-bin O") == "Nhóm Hữu cơ (chưa xác định vật cụ thể)"
+    assert three_bin_display_name("Kaggle 3-bin I") == "Nhóm Tái chế (chưa xác định vật cụ thể)"
     assert three_bin_display_name("Plastic bottle") == "Plastic bottle"
 
 
@@ -1505,6 +1497,26 @@ def test_pipeline_routes_low_conf_paper_like_spoon_as_inorganic_utensil(
     assert p.dispatch_status == "TEST OFF"
     assert uart.sent == []
     assert speaker.texts == []
+    p.close()
+
+
+def test_pipeline_blocks_low_conf_visual_metal_utensil_dispatch(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config()
+    cfg.model.conf_threshold = 0.4
+    cfg.unknown_fallback.stable_frames = 1
+    uart = _StubUart()
+    p = Pipeline(cfg, _LowConfidencePaperSpoonInfer(), uart, tmp_path / "h.db")
+
+    _arm_dispatch(p)
+    detections = p.process_frame(_metal_spoon_frame(), ts=datetime.now(UTC))
+
+    assert [(item.cls_name, item.source) for item in detections] == [
+        ("Iron utensils", "visual_correction:metal_utensil")
+    ]
+    assert p.dispatch_status == "low confidence review required"
+    assert uart.sent == []
+    assert p.history.query(limit=10) == []
     p.close()
 
 
