@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import (
+    MANUAL_REFERENCE_CORRECTION_CLASSES,
     MULTI_CLASS_WARNING_TEXT,
     AppConfig,
     load_config,
@@ -96,6 +97,7 @@ def test_app_config_parses_default_dict():
     assert c.model.specialist.enabled is True
     assert c.model.specialist.class_thresholds["Pen"] == 0.45
     assert c.model.class_thresholds["Plastic bottle"] == 0.30
+    assert c.model.class_thresholds["Glass bottle"] == 0.45
     assert c.uart.port == ""
     assert c.uart.protocol == "plain_group"
     assert c.speaker.enabled is False
@@ -114,27 +116,27 @@ def test_app_config_parses_default_dict():
     assert c.dispatch_guard.multi_class_warning_text == MULTI_CLASS_WARNING_TEXT
     assert c.dispatch_guard.multi_class_warning_audio_track == 8
     assert c.manual_reference_recognition.enabled is True
-    assert c.manual_reference_recognition.allow_unknown_matches is False
+    assert c.manual_reference_recognition.allow_unknown_matches is True
     assert c.manual_reference_recognition.min_similarity == 0.88
+    assert c.manual_reference_recognition.unknown_min_similarity == 0.92
     assert c.manual_reference_recognition.min_consensus_similarity == 0.72
     assert c.manual_reference_recognition.min_votes == 4
+    assert c.manual_reference_recognition.unknown_min_votes == 1
     assert c.manual_reference_recognition.top_k == 7
     assert c.manual_reference_recognition.cache_refresh_seconds == 30.0
     assert c.manual_reference_recognition.query_cache_seconds == 1.0
-    assert c.manual_reference_recognition.correctable_yolo_classes == [
-        "Cardboard",
-        "Glass bottle",
-        "Pen",
-        "Plastic cup",
-        "Aluminum can",
-    ]
-    assert c.manual_reference_recognition.correction_target_classes == [
-        "Textile",
-        "Organic",
-        "Wood",
-        "Disposable tableware",
-        "Iron utensils",
+    assert (
+        c.manual_reference_recognition.correctable_yolo_classes
+        == list(MANUAL_REFERENCE_CORRECTION_CLASSES)
+    )
+    assert (
+        c.manual_reference_recognition.correction_target_classes
+        == list(MANUAL_REFERENCE_CORRECTION_CLASSES)
+    )
+    assert c.manual_reference_recognition.correction_targets_by_yolo_class["Ceramic"] == [
         "Plastic bottle",
+        "Glass bottle",
+        "Iron utensils",
     ]
     assert c.manual_reference_recognition.min_correction_area_ratio == 0.25
     assert c.manual_reference_recognition.max_correction_confidence == 0.80
@@ -176,11 +178,11 @@ def test_dispatch_guard_invalid_values_rejected():
 
 
 def test_default_dispatch_return_settle_is_fast() -> None:
+    assert AppConfig().dispatch_guard.busy_settle_seconds == 0.35
     assert AppConfig().dispatch_guard.min_sort_interval_seconds == 0.0
     assert AppConfig().dispatch_guard.min_stable_frames == 1
     assert AppConfig().dispatch_guard.empty_rearm_seconds == 0.8
     assert AppConfig().dispatch_guard.empty_rearm_frames == 3
-    assert AppConfig().dispatch_guard.busy_settle_seconds == 0.35
 
 
 def test_manual_reference_recognition_invalid_values_rejected():
@@ -301,20 +303,18 @@ def test_load_config_repairs_stale_manual_reference_class_lists(tmp_path: Path):
 
     cfg = load_config(cfg_path)
 
-    assert cfg.manual_reference_recognition.correctable_yolo_classes == [
-        "Cardboard",
-        "Glass bottle",
-        "Pen",
-        "Plastic cup",
-        "Aluminum can",
-    ]
-    assert cfg.manual_reference_recognition.correction_target_classes == [
-        "Textile",
-        "Organic",
-        "Wood",
-        "Disposable tableware",
-        "Iron utensils",
+    assert set(cfg.manual_reference_recognition.correctable_yolo_classes) == set(
+        MANUAL_REFERENCE_CORRECTION_CLASSES
+    )
+    assert set(cfg.manual_reference_recognition.correction_target_classes) == set(
+        MANUAL_REFERENCE_CORRECTION_CLASSES
+    )
+    assert cfg.manual_reference_recognition.correctable_yolo_classes[0] == "Cardboard"
+    assert cfg.manual_reference_recognition.correction_target_classes[0] == "Textile"
+    assert cfg.manual_reference_recognition.correction_targets_by_yolo_class["Ceramic"] == [
         "Plastic bottle",
+        "Glass bottle",
+        "Iron utensils",
     ]
 
 

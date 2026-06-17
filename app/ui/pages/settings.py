@@ -125,6 +125,8 @@ class _CameraScan(QThread):
                                     "label": " - ".join(label_parts),
                                     "tag": tag,
                                     "backend": name,
+                                    "width": w,
+                                    "height": h,
                                 },
                             )
                         )
@@ -211,8 +213,10 @@ class SettingsPage(QWidget):
         if normalize_camera_source(initial_source) == "0":
             initial_source = ""
         self._preferred_camera_source = initial_source
+        self._camera_probe_sizes: dict[str, tuple[int, int]] = {}
         self.cam_source.addItem("Đang kiểm tra camera USB...", "")
         self.cam_source.setCurrentIndex(0)
+        self.cam_source.currentIndexChanged.connect(self._sync_camera_size_from_source)
         self.cam_hint = QLabel("Bấm Scan để tìm camera USB đang cắm vào máy.")
         _configure_wrapped_hint(self.cam_hint)
         self.cam_hint.setObjectName("muted")
@@ -593,9 +597,67 @@ class SettingsPage(QWidget):
             else:
                 self.cam_hint.setText("Chưa tìm thấy camera đọc được frame.")
 
-        scan.done.connect(_apply)
+        scan.done.connect(self._apply_camera_scan_payload)
         scan.finished.connect(scan.deleteLater)
         scan.start()
+
+    def _apply_camera_scan_payload(self, payload) -> None:
+        all_rows = payload.get("rows", []) if isinstance(payload, dict) else []
+        devices = payload.get("devices", []) if isinstance(payload, dict) else []
+        usb_rows = [r for r in all_rows if r.get("tag") == "USB"]
+        rows = usb_rows
+        current = self._preferred_camera_source or self._current_camera_source()
+        self._camera_probe_sizes = {}
+        for row in rows:
+            try:
+                width = int(row.get("width") or 0)
+                height = int(row.get("height") or 0)
+            except (TypeError, ValueError):
+                continue
+            if width > 0 and height > 0:
+                self._camera_probe_sizes[normalize_camera_source(row.get("source"))] = (
+                    width,
+                    height,
+                )
+        self.cam_source.blockSignals(True)
+        self.cam_source.clear()
+        if rows:
+            for row in rows:
+                self.cam_source.addItem(row["label"], row["source"])
+            idx = self._find_camera_source(current)
+            if idx >= 0:
+                self.cam_source.setCurrentIndex(idx)
+            else:
+                self.cam_source.setCurrentIndex(0)
+        else:
+            self.cam_source.addItem("ChÆ°a cÃ³ camera USB", "")
+            self.cam_source.setCurrentIndex(0)
+        self.btn_test_cam.setEnabled(bool(rows))
+        self.cam_source.blockSignals(False)
+        self._sync_camera_size_from_source()
+        usb_devices = [d for d in devices if d.get("is_external")]
+        if usb_rows:
+            self.cam_hint.setText(
+                "Da tim thay camera USB doc duoc frame. Chon dong USB roi bam Test camera."
+            )
+        elif usb_devices:
+            names = ", ".join(d.get("name", "USB Camera") for d in usb_devices)
+            self.cam_hint.setText(
+                f"Windows thay {names}, nhung OpenCV chua doc duoc frame. "
+                "Dong app khac dang dung camera, rut/cam lai USB, roi Scan lai."
+            )
+        elif all_rows:
+            self.cam_hint.setText("Chi su dung camera USB, nen da an webcam laptop/camera ao.")
+        else:
+            self.cam_hint.setText("Chua tim thay camera doc duoc frame.")
+
+    def _sync_camera_size_from_source(self) -> None:
+        size = self._camera_probe_sizes.get(normalize_camera_source(self._current_camera_source()))
+        if size is None:
+            return
+        width, height = size
+        self.cam_w.setValue(width)
+        self.cam_h.setValue(height)
 
     def _find_camera_source(self, source: str) -> int:
         normalized = normalize_camera_source(source)

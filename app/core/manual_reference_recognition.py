@@ -143,6 +143,8 @@ class ManualReferenceRecognizer:
         detection: Detection,
         *,
         allowed_classes: set[str] | None = None,
+        min_similarity: float | None = None,
+        min_votes: int | None = None,
     ) -> ManualReferenceMatch | None:
         with self._lock:
             enabled = self.enabled
@@ -163,7 +165,13 @@ class ManualReferenceRecognizer:
         now = time.monotonic()
         best_match: ManualReferenceMatch | None = None
         for crop in crops:
-            match = self._classify_crop(crop, now, references)
+            match = self._classify_crop(
+                crop,
+                now,
+                references,
+                min_similarity=min_similarity,
+                min_votes=min_votes,
+            )
             if match is None:
                 continue
             if best_match is None or match.similarity > best_match.similarity:
@@ -175,8 +183,33 @@ class ManualReferenceRecognizer:
         crop: np.ndarray,
         now: float,
         references: tuple[_Reference, ...],
+        *,
+        min_similarity: float | None = None,
+        min_votes: int | None = None,
     ) -> ManualReferenceMatch | None:
-        cache_key = _difference_hash(crop)
+        with self._lock:
+            top_k = self.top_k
+            active_min_votes = (
+                max(1, min(int(min_votes), top_k))
+                if min_votes is not None
+                else self.min_votes
+            )
+            active_min_similarity = (
+                float(min_similarity)
+                if min_similarity is not None
+                else self.min_similarity
+            )
+            min_consensus_similarity = self.min_consensus_similarity
+            min_margin = self.min_margin
+        reference_scope = tuple(sorted({reference.cls_name for reference in references}))
+        cache_key = hash(
+            (
+                _difference_hash(crop),
+                round(active_min_similarity, 3),
+                active_min_votes,
+                reference_scope,
+            )
+        )
         cache_hit, cached = self._cached_match(cache_key, now)
         if cache_hit:
             return cached
@@ -184,46 +217,36 @@ class ManualReferenceRecognizer:
         if query is None:
             self._store_cached_match(cache_key, None, now)
             return None
-        with self._lock:
-            top_k = self.top_k
-            min_votes = self.min_votes
-            min_similarity = self.min_similarity
-            min_consensus_similarity = self.min_consensus_similarity
-            min_margin = self.min_margin
         ranked = sorted(
             ((reference, cosine_similarity(query, reference.vector)) for reference in references),
             key=lambda item: item[1],
             reverse=True,
         )[:top_k]
-        votes = Counter(
-            (reference.cls_name, reference.operator_label)
-            for reference, _score in ranked
-        )
+        votes = Counter(reference.cls_name for reference, _score in ranked)
         if not votes:
             return None
-        (winner_name, winner_operator_label), winner_votes = votes.most_common(1)[0]
-        if winner_votes < min_votes:
+        winner_name, winner_votes = votes.most_common(1)[0]
+        if winner_votes < active_min_votes:
             self._store_cached_match(cache_key, None, now)
             return None
-        class_scores: dict[tuple[str, str], list[float]] = defaultdict(list)
+        class_scores: dict[str, list[float]] = defaultdict(list)
         for reference, score in ranked:
-            class_scores[(reference.cls_name, reference.operator_label)].append(score)
-        winner_key = (winner_name, winner_operator_label)
-        winner_scores = sorted(class_scores[winner_key], reverse=True)
+            class_scores[reference.cls_name].append(score)
+        winner_scores = sorted(class_scores[winner_name], reverse=True)
         best_score = winner_scores[0]
-        consensus_score = winner_scores[min_votes - 1]
-        winner_score = float(np.mean(winner_scores[:min_votes]))
+        consensus_score = winner_scores[active_min_votes - 1]
+        winner_score = float(np.mean(winner_scores[:active_min_votes]))
         runner_up = max(
             (
                 float(np.mean(scores))
-                for label_key, scores in class_scores.items()
-                if label_key != winner_key
+                for class_name, scores in class_scores.items()
+                if class_name != winner_name
             ),
             default=-1.0,
         )
         margin = winner_score - runner_up if runner_up >= 0 else 1.0
         if (
-            best_score < min_similarity
+            best_score < active_min_similarity
             or consensus_score < min_consensus_similarity
             or margin < min_margin
         ):
@@ -232,8 +255,9 @@ class ManualReferenceRecognizer:
         best_reference, _ = next(
             item
             for item in ranked
-            if (item[0].cls_name, item[0].operator_label) == winner_key
+            if item[0].cls_name == winner_name
         )
+        winner_operator_label = best_reference.operator_label
         match = ManualReferenceMatch(
             cls_id=best_reference.cls_id,
             cls_name=winner_name,

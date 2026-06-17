@@ -60,6 +60,35 @@ def test_settings_collect_uses_camera_item_data(qtbot):
     assert out.camera.rotation == 0
 
 
+def test_settings_scan_uses_detected_camera_resolution(qtbot):
+    cfg = AppConfig()
+    cfg.camera.width = 1200
+    cfg.camera.height = 900
+    page = SettingsPage(cfg)
+    qtbot.addWidget(page)
+
+    page._apply_camera_scan_payload(
+        {
+            "rows": [
+                {
+                    "source": "1 (DSHOW)",
+                    "label": "1 (DSHOW) - USB - USB Camera - 640x480",
+                    "tag": "USB",
+                    "width": 640,
+                    "height": 480,
+                }
+            ],
+            "devices": [],
+        }
+    )
+
+    out = page._collect()
+
+    assert out.camera.source == "1 (DSHOW)"
+    assert (out.camera.width, out.camera.height) == (640, 480)
+    assert (page.cam_w.value(), page.cam_h.value()) == (640, 480)
+
+
 def test_settings_collect_uses_camera_rotation(qtbot):
     cfg = AppConfig()
     page = SettingsPage(cfg)

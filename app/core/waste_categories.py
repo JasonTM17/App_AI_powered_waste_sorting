@@ -172,9 +172,15 @@ VIETNAMESE_CLASS_ALIASES = {
     "thìa gỗ": "Wood",
     "muong go": "Wood",
     "metal spoon": "Iron utensils",
+    "metal fork": "Iron utensils",
+    "steel fork": "Iron utensils",
     "spoon": "Iron utensils",
     "muong kim loai": "Iron utensils",
     "thia kim loai": "Iron utensils",
+    "nia kim loai": "Iron utensils",
+    "nia inox": "Iron utensils",
+    "nĩa kim loại": "Iron utensils",
+    "nĩa inox": "Iron utensils",
     "muỗng gỗ": "Wood",
     "plastic fork": "Disposable tableware",
     "disposable fork": "Disposable tableware",
@@ -191,6 +197,8 @@ VIETNAMESE_CLASS_ALIASES = {
     "ba mia": "Organic",
     "bã mía": "Organic",
     "sugarcane bagasse": "Organic",
+    "vo trung": "Organic",
+    "eggshell": "Organic",
     "lon bia": "Aluminum can",
     "lon nuoc ngot": "Aluminum can",
     "lon nước ngọt": "Aluminum can",
@@ -258,7 +266,6 @@ ORGANIC_CLASSES = frozenset(
         "Organic",
         "Tea leaves",
         "Vegetable scraps",
-        "Wood",
     }
 )
 

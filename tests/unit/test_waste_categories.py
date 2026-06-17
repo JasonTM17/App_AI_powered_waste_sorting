@@ -43,11 +43,15 @@ def test_category_examples_match_three_bin_rules():
     assert category_for_class("Foam food box") == INORGANIC
     assert category_for_class("Disposable tableware") == INORGANIC
     assert category_for_class("Iron utensils") == INORGANIC
+    assert category_for_class("Wood") == INORGANIC
     assert category_for_class("Instant noodle cup") == RECYCLABLE
     assert category_for_class("Styrofoam cup") == RECYCLABLE
     assert category_for_class("Face mask") == INORGANIC
     assert category_for_class("Milk tea cup") == RECYCLABLE
     assert category_for_class("Dirty nylon bag") == RECYCLABLE
+    assert category_for_class("Eggshell") == ORGANIC
+    assert canonical_class_name("vo trung") == "Organic"
+    assert canonical_class_name("eggshell") == "Organic"
 
 
 def test_all_default_classes_are_known_for_config_repair():
@@ -102,3 +106,9 @@ def test_textile_aliases_cover_common_cloth_names():
     assert canonical_class_name("khau trang") == "Textile"
     assert canonical_class_name("khẩu trang") == "Textile"
     assert category_for_class("mieng vai") == INORGANIC
+
+
+def test_metal_fork_aliases_route_to_iron_utensils():
+    assert canonical_class_name("metal fork") == "Iron utensils"
+    assert canonical_class_name("nia kim loai") == "Iron utensils"
+    assert category_for_class("nĩa kim loại") == INORGANIC

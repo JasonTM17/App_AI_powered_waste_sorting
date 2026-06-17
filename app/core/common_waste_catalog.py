@@ -48,7 +48,7 @@ COMMON_WASTE_ITEMS: tuple[CommonWasteItem, ...] = (
     CommonWasteItem("Vo cam/trai cay", "Organic", ("vo cam", "vo trai cay", "fruit peel")),
     CommonWasteItem("Rau thua", "Organic", ("rau thua", "rau cu thua", "vegetable scraps")),
     CommonWasteItem("Com/thuc an thua", "Organic", ("com thua", "thuc an thua", "leftover food")),
-    CommonWasteItem("Vo trung", "Organic", ("vo trung", "eggshell")),
+    CommonWasteItem("Vo trung", "Organic", ("vo trung", "eggshell"), "Runtime display may relabel clear eggshell frames."),
     CommonWasteItem("Ba ca phe/tra", "Organic", ("ba ca phe", "ba tra", "coffee grounds", "tea leaves")),
     CommonWasteItem("La cay", "Organic", ("la cay", "leaf waste", "wood"), "Use Organic for soft leaves."),
     CommonWasteItem("Vo dua/vo trai cay cung", "Organic", ("vo dua", "vo xoai", "vo dua hau", "fruit rind")),

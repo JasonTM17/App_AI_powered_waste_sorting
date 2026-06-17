@@ -15,3 +15,8 @@ def test_waste_display_name_hides_three_bin_internal_label():
 
 def test_waste_display_name_preserves_unknown_custom_class():
     assert waste_display_name("Custom class") == "Custom class"
+
+
+def test_waste_display_name_translates_visual_correction_classes():
+    assert waste_display_name("Eggshell") == "Vỏ trứng"
+    assert waste_display_name("Wood") == "Gỗ/đồ gỗ"

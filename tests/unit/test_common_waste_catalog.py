@@ -14,6 +14,8 @@ def test_common_waste_catalog_routes_examples_to_three_bins():
 
     assert rows["Vo chuoi"].canonical_class == "Organic"
     assert rows["Vo chuoi"].command == ORGANIC.code
+    assert rows["Vo trung"].canonical_class == "Organic"
+    assert rows["Vo trung"].command == ORGANIC.code
     assert rows["Lon nuoc"].canonical_class == "Aluminum can"
     assert rows["Lon nuoc"].command == RECYCLABLE.code
     assert rows["But bi"].canonical_class == "Pen"
@@ -24,6 +26,8 @@ def test_common_waste_catalog_routes_examples_to_three_bins():
 
 def test_common_aliases_canonicalize_to_training_classes():
     assert canonical_class_name("vo chuoi") == "Organic"
+    assert canonical_class_name("vo trung") == "Organic"
+    assert canonical_class_name("eggshell") == "Organic"
     assert canonical_class_name("bã mía") == "Organic"
     assert canonical_class_name("lon nuoc") == "Aluminum can"
     assert canonical_class_name("chai pet") == "Plastic bottle"

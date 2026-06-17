@@ -122,10 +122,12 @@ def test_phase17_vietnam50_aliases_route_to_45_class_and_bin():
     assert map_vietnam_waste50_alias("ceramic_broken") == "Ceramic"
     assert map_vietnam_waste50_alias("small_electronics") == "Electronics"
     assert map_vietnam_waste50_alias("medicine_blister") == "Unknown plastic"
+    assert map_vietnam_waste50_alias("eggshell") == "Organic"
 
     assert category_for_class(map_vietnam_waste50_alias("foam_box")).code == "R"
     for alias in ("ceramic_broken", "small_electronics", "medicine_blister"):
         assert category_for_class(map_vietnam_waste50_alias(alias)).code == "R"
+    assert category_for_class(map_vietnam_waste50_alias("eggshell")).code == "O"
 
 
 def _write_camera_anchor_zip(tmp_path: Path) -> Path:
