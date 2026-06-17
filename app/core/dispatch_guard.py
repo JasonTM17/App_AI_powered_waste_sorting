@@ -24,11 +24,11 @@ class DispatchGuard:
     def __init__(
         self,
         *,
-        min_sort_interval_seconds: float = 0.0,
-        busy_settle_seconds: float = 0.8,
+        min_sort_interval_seconds: float = 2.0,
+        busy_settle_seconds: float = 2.0,
         min_stable_frames: int = 2,
-        empty_rearm_seconds: float = 1.2,
-        empty_rearm_frames: int = 6,
+        empty_rearm_seconds: float = 2.5,
+        empty_rearm_frames: int = 12,
     ) -> None:
         self.configure(
             min_sort_interval_seconds=min_sort_interval_seconds,

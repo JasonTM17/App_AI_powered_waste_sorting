@@ -178,11 +178,38 @@ def test_dispatch_guard_invalid_values_rejected():
 
 
 def test_default_dispatch_guard_filters_post_sort_vibration() -> None:
-    assert AppConfig().dispatch_guard.busy_settle_seconds == 0.8
-    assert AppConfig().dispatch_guard.min_sort_interval_seconds == 0.0
+    assert AppConfig().dispatch_guard.busy_settle_seconds == 2.0
+    assert AppConfig().dispatch_guard.min_sort_interval_seconds == 2.0
     assert AppConfig().dispatch_guard.min_stable_frames == 2
-    assert AppConfig().dispatch_guard.empty_rearm_seconds == 1.2
-    assert AppConfig().dispatch_guard.empty_rearm_frames == 6
+    assert AppConfig().dispatch_guard.empty_rearm_seconds == 2.5
+    assert AppConfig().dispatch_guard.empty_rearm_frames == 12
+
+
+def test_load_config_hardens_legacy_dispatch_guard_against_scale_vibration(
+    tmp_path: Path,
+) -> None:
+    cfg_path = tmp_path / "config.json"
+    data = _default_dict()
+    data["dispatch_guard"]["min_sort_interval_seconds"] = 0.0
+    data["dispatch_guard"]["busy_settle_seconds"] = 0.35
+    data["dispatch_guard"]["min_stable_frames"] = 1
+    data["dispatch_guard"]["empty_rearm_seconds"] = 0.8
+    data["dispatch_guard"]["empty_rearm_frames"] = 3
+    cfg_path.write_text(json.dumps(data), encoding="utf-8")
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.dispatch_guard.min_sort_interval_seconds == 2.0
+    assert cfg.dispatch_guard.busy_settle_seconds == 2.0
+    assert cfg.dispatch_guard.min_stable_frames == 2
+    assert cfg.dispatch_guard.empty_rearm_seconds == 2.5
+    assert cfg.dispatch_guard.empty_rearm_frames == 12
+    raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert raw["dispatch_guard"]["min_sort_interval_seconds"] == 2.0
+    assert raw["dispatch_guard"]["busy_settle_seconds"] == 2.0
+    assert raw["dispatch_guard"]["min_stable_frames"] == 2
+    assert raw["dispatch_guard"]["empty_rearm_seconds"] == 2.5
+    assert raw["dispatch_guard"]["empty_rearm_frames"] == 12
 
 
 def test_manual_reference_recognition_invalid_values_rejected():

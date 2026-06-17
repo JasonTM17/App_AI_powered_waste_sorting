@@ -555,11 +555,11 @@
     "warmup_frames": 6
   },
   "dispatch_guard": {
-    "min_sort_interval_seconds": 0.0,
-    "busy_settle_seconds": 0.8,
+    "min_sort_interval_seconds": 2.0,
+    "busy_settle_seconds": 2.0,
     "min_stable_frames": 2,
-    "empty_rearm_seconds": 1.2,
-    "empty_rearm_frames": 6,
+    "empty_rearm_seconds": 2.5,
+    "empty_rearm_frames": 12,
     "require_roi_for_dispatch": true,
     "max_objects_per_dispatch": 1,
     "max_classes_per_dispatch": 1,

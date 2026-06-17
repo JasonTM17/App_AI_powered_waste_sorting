@@ -70,6 +70,24 @@ def test_same_class_resets_stability_when_operator_label_changes():
     assert second.stable_frames == 1
 
 
+def test_same_visible_label_keeps_stability_when_internal_source_changes():
+    tr = Tracker()
+    yolo = Detection(17, "Organic", 0.7, (10, 10, 100, 100), source="YOLO")
+    corrected = Detection(
+        17,
+        "Organic",
+        0.72,
+        (12, 12, 102, 102),
+        source="visual_correction:leafy_organic",
+    )
+
+    first = tr.update([yolo])[0]
+    second = tr.update([corrected])[0]
+
+    assert second.track_id == first.track_id
+    assert second.stable_frames == 2
+
+
 def test_same_object_resets_stability_when_route_changes():
     tr = Tracker()
     bottle = Detection(24, "Plastic bottle", 0.7, (10, 10, 100, 100))

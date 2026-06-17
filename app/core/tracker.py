@@ -110,8 +110,7 @@ class Tracker:
 
 def _label_signature(detection) -> str:
     label = (detection.operator_label or detection.cls_name or "").strip()
-    source = (detection.source or "").strip()
-    return f"{_route_family(detection.cls_name)}|label:{label}|source:{source}"
+    return f"{_route_family(detection.cls_name)}|label:{label}"
 
 
 def _route_family(class_name: str) -> str:
