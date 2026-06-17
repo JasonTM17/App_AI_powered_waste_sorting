@@ -98,6 +98,10 @@ class Tracker:
     def mark_emitted(self, track_id):
         self._emitted.add(track_id)
 
+    def clear_active(self) -> None:
+        self._tracks.clear()
+        self._emitted.clear()
+
     def reset(self):
         self._tracks.clear()
         self._emitted.clear()

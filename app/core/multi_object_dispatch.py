@@ -125,13 +125,17 @@ def evaluate_foreground_multi_object_dispatch(
     if max_objects <= 0:
         return MultiObjectDecision(allowed=True)
     boxes = _foreground_boxes(frame_bgr, roi=roi, min_area_ratio=min_area_ratio)
+    object_boxes = _cluster_foreground_boxes(boxes)
     references = tuple(reference_boxes)
     unmatched_count = sum(
         1
-        for foreground_box in boxes
-        if not any(_foreground_belongs_to_reference(foreground_box, reference) for reference in references)
+        for foreground_box in object_boxes
+        if not any(
+            _foreground_belongs_to_reference(foreground_box, reference)
+            for reference in references
+        )
     )
-    count = len(references) + unmatched_count if references else len(boxes)
+    count = len(references) + unmatched_count if references else len(object_boxes)
     decision_meta = {
         "object_count": count,
         "foreground_count": len(boxes),
@@ -145,6 +149,51 @@ def evaluate_foreground_multi_object_dispatch(
         class_names=(f"{count} visible objects",),
         reason=f"multiple waste types ({count} visible objects)",
         **decision_meta,
+    )
+
+
+def _cluster_foreground_boxes(
+    boxes: tuple[tuple[int, int, int, int], ...],
+) -> tuple[tuple[int, int, int, int], ...]:
+    clusters: list[list[tuple[int, int, int, int]]] = []
+    for box in boxes:
+        for cluster in clusters:
+            if any(_foreground_fragments_same_object(box, item) for item in cluster):
+                cluster.append(box)
+                break
+        else:
+            clusters.append([box])
+    return tuple(_union_boxes(cluster) for cluster in clusters)
+
+
+def _foreground_fragments_same_object(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+) -> bool:
+    first_area = _box_area(first)
+    second_area = _box_area(second)
+    if first_area <= 0 or second_area <= 0:
+        return False
+    larger = first if first_area >= second_area else second
+    smaller = second if first_area >= second_area else first
+    if min(first_area, second_area) / max(first_area, second_area) > 0.35:
+        return False
+    return _small_foreground_fragment_belongs_to_object(smaller, larger)
+
+
+def _box_area(box: tuple[int, int, int, int]) -> int:
+    x1, y1, x2, y2 = box
+    return max(0, x2 - x1) * max(0, y2 - y1)
+
+
+def _union_boxes(
+    boxes: list[tuple[int, int, int, int]],
+) -> tuple[int, int, int, int]:
+    return (
+        min(box[0] for box in boxes),
+        min(box[1] for box in boxes),
+        max(box[2] for box in boxes),
+        max(box[3] for box in boxes),
     )
 
 
@@ -173,7 +222,54 @@ def _foreground_belongs_to_reference(
         0, min(fy2, ry2) - max(fy1, ry1)
     )
     foreground_area = max(1, max(0, fx2 - fx1) * max(0, fy2 - fy1))
-    return intersection / foreground_area >= 0.5
+    if intersection / foreground_area >= 0.5:
+        return True
+
+    # Thin glossy utensils, pens, and bottle highlights often split into a
+    # shadow/highlight component just outside the detector box. If that
+    # fragment is small, close, and aligned with the detected object, keep it
+    # attached to the same object so the hardware path is not blocked forever.
+    reference_area = max(1, reference_width * reference_height)
+    if foreground_area > reference_area * 0.50:
+        return False
+    horizontal_overlap = max(0, min(fx2, rx2) - max(fx1, rx1))
+    vertical_overlap = max(0, min(fy2, ry2) - max(fy1, ry1))
+    foreground_width = max(1, fx2 - fx1)
+    foreground_height = max(1, fy2 - fy1)
+    horizontal_ratio = horizontal_overlap / min(foreground_width, max(1, reference_width))
+    vertical_ratio = vertical_overlap / min(foreground_height, max(1, reference_height))
+    gap_x = max(rx1 - fx2, fx1 - rx2, 0)
+    gap_y = max(ry1 - fy2, fy1 - ry2, 0)
+    close_gap = max(18, round(max(reference_width, reference_height) * 0.08))
+    if gap_x <= close_gap and vertical_ratio >= 0.35:
+        return True
+    return gap_y <= close_gap and horizontal_ratio >= 0.35
+
+
+def _small_foreground_fragment_belongs_to_object(
+    foreground: tuple[int, int, int, int],
+    reference: tuple[int, int, int, int],
+) -> bool:
+    fx1, fy1, fx2, fy2 = foreground
+    rx1, ry1, rx2, ry2 = reference
+    reference_width = max(1, rx2 - rx1)
+    reference_height = max(1, ry2 - ry1)
+    foreground_width = max(1, fx2 - fx1)
+    foreground_height = max(1, fy2 - fy1)
+    horizontal_overlap = max(0, min(fx2, rx2) - max(fx1, rx1))
+    vertical_overlap = max(0, min(fy2, ry2) - max(fy1, ry1))
+    horizontal_ratio = horizontal_overlap / min(foreground_width, reference_width)
+    vertical_ratio = vertical_overlap / min(foreground_height, reference_height)
+    gap_x = max(rx1 - fx2, fx1 - rx2, 0)
+    gap_y = max(ry1 - fy2, fy1 - ry2, 0)
+    # Crumpled paper and glossy trash often appear as one dominant blob with
+    # smaller fold/shadow fragments separated by bright creases. Keep a wider
+    # attachment band for those small satellites, while the caller still keeps
+    # similarly-sized objects split before this helper is reached.
+    close_gap = max(18, min(64, round(max(reference_width, reference_height) * 0.20)))
+    if gap_x <= close_gap and vertical_ratio >= 0.55:
+        return True
+    return gap_y <= close_gap and horizontal_ratio >= 0.55
 
 
 def foreground_object_boxes(

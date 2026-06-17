@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+import cv2
 import numpy as np
 
 from app.core.events import Detection, TrackedDetection
@@ -96,6 +97,70 @@ def test_foreground_multi_object_dispatch_allows_one_visible_object():
     assert decision.object_count == 1
 
 
+def test_foreground_fragments_without_yolo_reference_count_as_one_object():
+    frame = np.full((240, 320, 3), 245, dtype=np.uint8)
+    frame[86:132, 80:170] = (35, 35, 35)
+    frame[96:124, 180:216] = (70, 70, 70)
+
+    decision = evaluate_foreground_multi_object_dispatch(
+        frame,
+        roi=_roi(),
+        max_objects=1,
+        min_area_ratio=0.002,
+    )
+
+    assert decision.allowed is True
+    assert decision.object_count == 1
+    assert decision.foreground_count == 2
+
+
+def test_crumpled_paper_folds_without_yolo_reference_count_as_one_object():
+    frame = np.full((260, 360, 3), 228, dtype=np.uint8)
+    paper = np.array(
+        [
+            [82, 76],
+            [268, 50],
+            [314, 145],
+            [236, 218],
+            [94, 199],
+            [46, 126],
+        ],
+        dtype=np.int32,
+    )
+    cv2.fillPoly(frame, [paper], (218, 220, 222))
+    cv2.line(frame, (72, 123), (286, 87), (56, 56, 58), 18)
+    cv2.line(frame, (94, 176), (250, 188), (74, 74, 76), 14)
+    cv2.line(frame, (112, 88), (210, 210), (190, 190, 192), 7)
+
+    decision = evaluate_foreground_multi_object_dispatch(
+        frame,
+        roi=_roi(width=360, height=260),
+        max_objects=1,
+        min_area_ratio=0.002,
+    )
+
+    assert decision.allowed is True
+    assert decision.object_count == 1
+    assert decision.foreground_count >= 2
+
+
+def test_close_foreground_objects_without_yolo_reference_stay_blocked():
+    frame = np.full((240, 320, 3), 245, dtype=np.uint8)
+    frame[70:130, 60:130] = (35, 35, 35)
+    frame[75:135, 144:214] = (70, 70, 70)
+
+    decision = evaluate_foreground_multi_object_dispatch(
+        frame,
+        roi=_roi(),
+        max_objects=1,
+        min_area_ratio=0.002,
+    )
+
+    assert decision.allowed is False
+    assert decision.object_count == 2
+    assert decision.foreground_count == 2
+
+
 def test_foreground_components_inside_one_yolo_box_count_as_one_object():
     decision = evaluate_foreground_multi_object_dispatch(
         _two_object_frame(),
@@ -137,6 +202,25 @@ def test_nearby_glossy_fragment_is_grouped_with_reference_object():
         max_objects=1,
         min_area_ratio=0.002,
         reference_boxes=((65, 45, 190, 195),),
+    )
+
+    assert decision.allowed is True
+    assert decision.object_count == 1
+    assert decision.foreground_count == 2
+    assert decision.unmatched_foreground_count == 0
+
+
+def test_adjacent_thin_shadow_is_grouped_with_long_reference_object():
+    frame = np.full((240, 320, 3), 245, dtype=np.uint8)
+    frame[96:126, 42:238] = (35, 35, 35)
+    frame[140:158, 54:220] = (85, 85, 85)
+
+    decision = evaluate_foreground_multi_object_dispatch(
+        frame,
+        roi=_roi(),
+        max_objects=1,
+        min_area_ratio=0.002,
+        reference_boxes=((38, 90, 242, 130),),
     )
 
     assert decision.allowed is True

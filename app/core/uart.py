@@ -37,6 +37,7 @@ class _Cmd:
 
 class UartWorker(QThread):
     ack_received = Signal(int, str, str, object)
+    bin_received = Signal(int, int)
     connected = Signal(bool)
     error = Signal(str)
 
@@ -137,13 +138,47 @@ class UartWorker(QThread):
                 return ("ok", None)
             if kind == "nack" and cmd == expected_cmd:
                 return ("error", payload)
-            if kind == "log":
-                logger.info("uart log: {}", payload)
-            if kind == "profile":
-                logger.info("uart profile: {}", cmd)
-            if kind == "proximity":
-                logger.info("uart proximity: {}", cmd)
+            self._handle_unsolicited_message(kind, cmd, payload)
         return None
+
+    def _read_unsolicited_once(self) -> None:
+        if self._ser is None:
+            return
+        try:
+            raw = self._ser.readline()
+        except Exception:
+            self._close()
+            return
+        if not raw:
+            return
+        parsed = parse_line(raw)
+        if parsed is None:
+            return
+        kind, cmd, payload = parsed
+        self._handle_unsolicited_message(kind, cmd, payload)
+
+    def _handle_unsolicited_message(self, kind: str, cmd, payload) -> None:
+        if kind == "bin":
+            try:
+                self.bin_received.emit(int(cmd), int(payload))
+            except (TypeError, ValueError):
+                return
+            logger.info("uart bin fullness: bin={} percent={}", cmd, payload)
+            return
+        if kind == "log":
+            logger.info("uart log: {}", payload)
+            return
+        if kind == "profile":
+            logger.info("uart profile: {}", cmd)
+            return
+        if kind == "proximity":
+            logger.info("uart proximity: {}", cmd)
+            return
+        if kind == "audio":
+            logger.info("uart audio: command={} payload={}", cmd, payload)
+            return
+        if kind == "mp3":
+            logger.info("uart mp3: event={} detail={}", cmd, payload)
 
     def run(self):
         while not self._stop:
@@ -156,6 +191,7 @@ class UartWorker(QThread):
             try:
                 cmd = self._queue.get(timeout=0.1)
             except queue.Empty:
+                self._read_unsolicited_once()
                 continue
             if cmd.audio_track is None:
                 payload = encode_sort(
@@ -174,6 +210,15 @@ class UartWorker(QThread):
                     self._close()
                     continue
                 self._ser.write(payload)
+                if cmd.audio_track is None:
+                    logger.info(
+                        "uart sort write track={} command={} payload={} expected_ack={} protocol={}",
+                        cmd.track_id,
+                        cmd.command,
+                        payload.decode("utf-8", errors="replace").strip(),
+                        expected_ack,
+                        self._protocol,
+                    )
             except Exception as e:
                 logger.warning("uart write failed: {}", e)
                 self._close()
@@ -195,9 +240,25 @@ class UartWorker(QThread):
                     self.ack_received.emit(cmd.track_id, cmd.command, status, rtt)
                 continue
             if outcome is None:
+                logger.warning(
+                    "uart sort no ack track={} command={} expected_ack={} payload={} rtt_ms={}",
+                    cmd.track_id,
+                    cmd.command,
+                    expected_ack,
+                    payload.decode("utf-8", errors="replace").strip(),
+                    rtt,
+                )
                 self.ack_received.emit(cmd.track_id, cmd.command, "no_ack", rtt)
             else:
                 status, _ = outcome
+                logger.info(
+                    "uart sort ack track={} command={} expected_ack={} status={} rtt_ms={}",
+                    cmd.track_id,
+                    cmd.command,
+                    expected_ack,
+                    status,
+                    rtt,
+                )
                 self.ack_received.emit(cmd.track_id, cmd.command, status, rtt)
         self._close()
 

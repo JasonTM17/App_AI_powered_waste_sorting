@@ -148,6 +148,34 @@ def test_plain_group_silent_sort_sends_audio_free_command(monkeypatch, qtbot):
     assert acks and acks[0] == (4, "I", "ok")
 
 
+def test_idle_uart_emits_bin_fullness(monkeypatch, qtbot):
+    class BinSerial(FakeSerial):
+        def write(self, data):
+            result = super().write(data)
+            if data == b"PROFILE\n":
+                self._rx.append(b"BIN:2:96\n")
+            return result
+
+    instances = []
+
+    def factory(port, baud, timeout=0.1):
+        serial_port = BinSerial(port, baud, timeout)
+        instances.append(serial_port)
+        return serial_port
+
+    monkeypatch.setattr("app.core.uart.serial.Serial", factory)
+    bins = []
+    worker = UartWorker(port="COM_FAKE", baud=9600, ack_timeout_ms=200)
+    worker.bin_received.connect(lambda bin_index, percent: bins.append((bin_index, percent)))
+    worker.start()
+    _wait(lambda: bins, 2.0)
+    worker.stop()
+    worker.wait(2000)
+
+    assert instances[0]._tx == [b"PING\n", b"PROFILE\n"]
+    assert bins == [(2, 96)]
+
+
 def test_audio_only_test_sends_track_and_emits_ack(monkeypatch, qtbot):
     class AudioSerial(FakeSerial):
         def write(self, data):
