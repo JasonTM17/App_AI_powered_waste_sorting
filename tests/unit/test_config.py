@@ -138,8 +138,11 @@ def test_app_config_parses_default_dict():
         "Glass bottle",
         "Iron utensils",
     ]
+    assert c.manual_reference_recognition.correction_targets_by_yolo_class[
+        "Plastic bottle"
+    ] == ["Organic"]
     assert c.manual_reference_recognition.min_correction_area_ratio == 0.25
-    assert c.manual_reference_recognition.max_correction_confidence == 0.80
+    assert c.manual_reference_recognition.max_correction_confidence == 0.90
     assert c.three_bin_classifier.enabled is False
     assert c.three_bin_classifier.model_path == "models/three_bin_classifier.pt"
     assert c.three_bin_classifier.mode == "unknown_only"
@@ -343,6 +346,10 @@ def test_load_config_repairs_stale_manual_reference_class_lists(tmp_path: Path):
         "Glass bottle",
         "Iron utensils",
     ]
+    assert cfg.manual_reference_recognition.correction_targets_by_yolo_class[
+        "Plastic bottle"
+    ] == ["Organic"]
+    assert cfg.manual_reference_recognition.max_correction_confidence == 0.90
 
 
 def test_load_config_keeps_legacy_enabled_speaker_on_hardware_default(tmp_path: Path):

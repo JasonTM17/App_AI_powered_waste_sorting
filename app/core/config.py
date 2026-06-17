@@ -226,12 +226,13 @@ class ManualReferenceRecognitionConfig(BaseModel):
             "Glass bottle": ["Iron utensils", "Wood"],
             "Pen": ["Disposable tableware", "Iron utensils"],
             "Plastic cup": ["Organic", "Iron utensils"],
+            "Plastic bottle": ["Organic"],
             "Aluminum can": ["Plastic bottle"],
             "Ceramic": ["Plastic bottle", "Glass bottle", "Iron utensils"],
         }
     )
     min_correction_area_ratio: float = Field(0.25, ge=0.0, le=1.0)
-    max_correction_confidence: float = Field(0.80, ge=0.0, le=1.0)
+    max_correction_confidence: float = Field(0.90, ge=0.0, le=1.0)
 
 
 class ThreeBinClassifierConfig(BaseModel):
@@ -293,7 +294,7 @@ def default_manual_reference_recognition_config() -> ManualReferenceRecognitionC
         correctable_yolo_classes=list(MANUAL_REFERENCE_CORRECTION_CLASSES),
         correction_target_classes=list(MANUAL_REFERENCE_CORRECTION_CLASSES),
         min_correction_area_ratio=0.25,
-        max_correction_confidence=0.80,
+        max_correction_confidence=0.90,
     )
 
 
@@ -434,6 +435,9 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     if cfg.manual_reference_recognition.unknown_min_similarity < 0.92:
         cfg.manual_reference_recognition.unknown_min_similarity = 0.92
         changed = True
+    if cfg.manual_reference_recognition.max_correction_confidence < 0.90:
+        cfg.manual_reference_recognition.max_correction_confidence = 0.90
+        changed = True
     legacy_thresholds = {
         "Plastic bottle": 0.08,
         "Glass bottle": 0.10,
@@ -485,6 +489,7 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
         "Glass bottle": ["Iron utensils", "Wood"],
         "Pen": ["Disposable tableware", "Iron utensils"],
         "Plastic cup": ["Organic", "Iron utensils"],
+        "Plastic bottle": ["Organic"],
         "Aluminum can": ["Plastic bottle"],
         "Ceramic": ["Plastic bottle", "Glass bottle", "Iron utensils"],
     }

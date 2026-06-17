@@ -641,12 +641,25 @@ class Pipeline:
                 )
             )
             allowed_classes = None if mode == "unknown" else source_targets or correction_targets
+            strict_correction = mode == "correction" and detection.conf > 0.80
             match = recognizer.classify(
                 frame_bgr,
                 detection,
                 allowed_classes=allowed_classes or None,
-                min_similarity=(ref_cfg.unknown_min_similarity if mode == "unknown" else None),
-                min_votes=(ref_cfg.unknown_min_votes if mode == "unknown" else None),
+                min_similarity=(
+                    ref_cfg.unknown_min_similarity
+                    if mode == "unknown"
+                    else max(ref_cfg.min_similarity, 0.92)
+                    if strict_correction
+                    else None
+                ),
+                min_votes=(
+                    ref_cfg.unknown_min_votes
+                    if mode == "unknown"
+                    else max(ref_cfg.min_votes, 4)
+                    if strict_correction
+                    else None
+                ),
             )
             if match is None:
                 out.append(detection)

@@ -550,6 +550,45 @@ def test_pipeline_labels_unknown_with_one_fresh_reviewed_reference(tmp_path, mon
     p.close()
 
 
+def test_pipeline_corrects_high_confidence_plastic_bottle_leaf_reference(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
+    cfg = _dispatch_ready_config(
+        mappings=[
+            ClassMapping(class_name="Plastic bottle", command="I", bin_index=3),
+            ClassMapping(class_name="Organic", command="O", bin_index=1),
+        ]
+    )
+    cfg.capture.output_dir = str(tmp_path / "dataset_v2")
+    cfg.model.conf_threshold = 0.3
+    _write_manual_reference(
+        Path(cfg.capture.output_dir) / "low_conf_queue",
+        cls_name="Organic",
+        cls_id=17,
+        rgb_color=(40, 90, 40),
+        operator_label="La cay",
+        count=4,
+    )
+    infer = _ScriptedInfer([[Detection(1, "Plastic bottle", 0.82, (15, 12, 65, 28))]])
+    uart = _StubUart()
+    p = Pipeline(cfg, infer, uart, tmp_path / "h.db")
+    frame = np.zeros((40, 80, 3), dtype=np.uint8)
+    frame[:, :] = (20, 20, 20)
+    frame[12:28, 15:65] = (40, 90, 40)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(d.cls_name, d.source, d.operator_label) for d in detections] == [
+        ("Organic", "manual_reference", "La cay")
+    ]
+    assert uart.sent == [(1, "O", detections[0].conf)]
+    rows = p.history.query(limit=1)
+    assert rows[0].cls_name == "Organic"
+    assert rows[0].uart_command == "O"
+    p.close()
+
+
 def test_pipeline_routes_unknown_with_legacy_common_reference_alias(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
