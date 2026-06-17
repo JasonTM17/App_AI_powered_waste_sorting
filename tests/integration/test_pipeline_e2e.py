@@ -271,6 +271,21 @@ class _MultiClassInfer:
         ]
 
 
+class _OneObjectManyLabelsInfer:
+    class_names: ClassVar[dict[int, str]] = {
+        2: "Aluminum can",
+        3: "Plastic bottle",
+        42: "Pen",
+    }
+
+    def predict(self, frame):
+        return [
+            Detection(42, "Pen", 0.45, (70, 80, 520, 190)),
+            Detection(3, "Plastic bottle", 0.36, (46, 68, 542, 210)),
+            Detection(2, "Aluminum can", 0.18, (190, 92, 430, 182)),
+        ]
+
+
 class _SameClassPairInfer:
     class_names: ClassVar[dict[int, str]] = {42: "Pen"}
 
@@ -1306,6 +1321,29 @@ def test_pipeline_warns_for_multiple_classes_when_hardware_disabled(tmp_path, mo
     assert uart.audio_tracks == []
     assert p.history.query(limit=10) == []
     assert speaker.spoken == []
+    assert speaker.texts == []
+    p.close()
+
+
+def test_pipeline_collapses_many_labels_on_one_object_without_warning(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
+    )
+    cfg.model.conf_threshold = 0.15
+    uart = _WarningUart()
+    speaker = _StubSpeaker()
+    p = Pipeline(cfg, _OneObjectManyLabelsInfer(), uart, tmp_path / "h.db", speaker=speaker)
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.full((260, 620, 3), 245, dtype=np.uint8)
+    frame[94:174, 78:510] = (35, 80, 170)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert [item.cls_name for item in detections] == ["Pen"]
+    assert p.dispatch_status == "TEST OFF"
+    assert uart.audio_tracks == []
     assert speaker.texts == []
     p.close()
 

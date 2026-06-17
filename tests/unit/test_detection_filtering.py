@@ -65,6 +65,29 @@ def test_collapse_duplicate_physical_detections_keeps_far_objects_separate():
     assert [item.cls_name for item in filtered] == ["Pen", "Paper"]
 
 
+def test_collapse_duplicate_physical_detections_merges_shifted_labels_on_one_object():
+    detections = [
+        Detection(42, "Pen", 0.45, (70, 80, 520, 190)),
+        Detection(1, "Plastic bottle", 0.36, (46, 68, 542, 210)),
+        Detection(2, "Aluminum can", 0.18, (190, 92, 430, 182)),
+    ]
+
+    filtered = collapse_duplicate_physical_detections(detections)
+
+    assert [(item.cls_name, item.conf) for item in filtered] == [("Pen", 0.45)]
+
+
+def test_collapse_duplicate_physical_detections_keeps_nearby_real_objects_separate():
+    detections = [
+        Detection(42, "Pen", 0.77, (40, 80, 180, 130)),
+        Detection(18, "Paper", 0.72, (198, 78, 338, 132)),
+    ]
+
+    filtered = collapse_duplicate_physical_detections(detections)
+
+    assert [item.cls_name for item in filtered] == ["Pen", "Paper"]
+
+
 def test_uniform_empty_tray_rejects_full_frame_false_positive():
     frame = np.full((240, 320, 3), 175, dtype=np.uint8)
     detections = [Detection(18, "Paper", 0.54, (2, 2, 318, 238))]

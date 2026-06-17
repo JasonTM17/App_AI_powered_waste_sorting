@@ -222,8 +222,16 @@ def _same_local_object(
     if not center_inside:
         return False
 
-    union_area = first_area + second_area - _intersection_area(first, second)
-    return union_area / max(first_area, second_area) <= 1.55
+    intersection = _intersection_area(first, second)
+    smaller_coverage = intersection / max(min(first_area, second_area), 1)
+    if (
+        smaller_coverage >= 0.42
+        and min(first_area, second_area) / max(first_area, second_area) <= 0.82
+    ):
+        return True
+
+    union_area = first_area + second_area - intersection
+    return union_area / max(first_area, second_area) <= 1.72
 
 
 def _best_duplicate_candidate(cluster: list[Detection]) -> Detection:
@@ -249,7 +257,27 @@ def _same_physical_object(
     union = first_area + second_area - intersection
     iou = intersection / max(union, 1)
     smaller_coverage = intersection / max(min(first_area, second_area), 1)
-    return iou >= iou_threshold or smaller_coverage >= 0.85
+    if iou >= iou_threshold or smaller_coverage >= 0.65:
+        return True
+
+    if smaller_coverage < 0.38:
+        return False
+    larger = first if first_area >= second_area else second
+    smaller = second if first_area >= second_area else first
+    lx1, ly1, lx2, ly2 = larger
+    sx1, sy1, sx2, sy2 = smaller
+    center_x = (sx1 + sx2) / 2.0
+    center_y = (sy1 + sy2) / 2.0
+    larger_width = max(1, lx2 - lx1)
+    larger_height = max(1, ly2 - ly1)
+    expand_x = max(8, round(larger_width * 0.10))
+    expand_y = max(8, round(larger_height * 0.10))
+    center_inside = (
+        lx1 - expand_x <= center_x <= lx2 + expand_x
+        and ly1 - expand_y <= center_y <= ly2 + expand_y
+    )
+    area_ratio = min(first_area, second_area) / max(first_area, second_area)
+    return center_inside and area_ratio <= 0.75
 
 
 __all__ = [
