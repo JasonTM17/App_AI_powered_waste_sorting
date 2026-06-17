@@ -915,7 +915,6 @@ class Pipeline:
         self.dispatch_status = self._dispatch_guard.last_reason
         if self._hardware_dispatch_enabled and (
             self._dispatch_guard.state in {"SORTING", "RETURNING"}
-            or (roi_ready and self._dispatch_guard.state == "WAITING_EMPTY")
         ):
             return []
         if low_detail_empty and not tracked:

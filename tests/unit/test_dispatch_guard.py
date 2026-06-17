@@ -81,7 +81,7 @@ def test_first_stable_object_dispatches_immediately_when_auto_sort_is_enabled():
     assert guard.state == "DETECTING"
 
 
-def test_ack_requires_empty_tray_after_return_settle():
+def test_ack_rearms_when_next_track_arrives_after_return_settle():
     guard = _guard()
     guard.min_sort_interval_seconds = 0
     guard.reset(arm_immediately=True)
@@ -92,6 +92,27 @@ def test_ack_requires_empty_tray_after_return_settle():
 
     decision = guard.evaluate(
         track_id=2,
+        stable_frames=3,
+        in_roi=True,
+        roi_ready=True,
+        now=1.3,
+    )
+
+    assert decision.allowed is True
+    assert guard.state == "DETECTING"
+
+
+def test_ack_still_blocks_same_track_until_empty_tray():
+    guard = _guard()
+    guard.min_sort_interval_seconds = 0
+    guard.reset(arm_immediately=True)
+    guard.begin_dispatch(track_id=1, now=0.1, ack_timeout_seconds=0)
+    guard.complete_dispatch(track_id=1, now=0.2)
+
+    guard.observe_frame(has_visible_object=True, roi_ready=True, now=1.3)
+
+    decision = guard.evaluate(
+        track_id=1,
         stable_frames=3,
         in_roi=True,
         roi_ready=True,
@@ -122,6 +143,7 @@ def test_ack_requires_empty_tray_after_return_settle():
 
 def test_busy_blocks_until_ack_timeout_and_settle():
     guard = _guard()
+    guard.min_sort_interval_seconds = 0
     _arm(guard)
     guard.begin_dispatch(track_id=1, now=3.0, ack_timeout_seconds=4.5)
 
@@ -132,6 +154,9 @@ def test_busy_blocks_until_ack_timeout_and_settle():
         roi_ready=True,
         now=7.0,
     )
+    assert blocked.allowed is False
+    assert blocked.reason == "sort busy"
+
     expired = guard.evaluate(
         track_id=2,
         stable_frames=3,
@@ -140,11 +165,8 @@ def test_busy_blocks_until_ack_timeout_and_settle():
         now=8.6,
     )
 
-    assert blocked.allowed is False
-    assert blocked.reason == "sort busy"
-    assert guard.state == "WAITING_EMPTY"
-    assert expired.allowed is False
-    assert expired.reason == "waiting empty tray"
+    assert expired.allowed is True
+    assert guard.state == "DETECTING"
 
 
 def test_guard_reports_ready_sorting_returning_and_waiting_states():
