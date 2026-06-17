@@ -30,7 +30,7 @@ def start_learn_now_training(
     if profile == "strong":
         command.extend(["-FocusClass", class_name])
     else:
-        command.extend(["-ClassName", class_name, "-Profile", profile])
+        command.extend(["-ClassName", class_name, "-TrainProfile", profile])
 
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     launcher = popen or subprocess.Popen

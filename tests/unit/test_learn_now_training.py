@@ -28,9 +28,34 @@ def test_start_learn_now_training_invokes_micro_candidate_script(tmp_path):
     assert "start_learn_now_micro_train.ps1" in " ".join(command)
     assert "-ClassName" in command
     assert "Textile" in command
-    assert "-Profile" in command
+    assert "-TrainProfile" in command
     assert "micro" in command
     assert calls[0]["cwd"] == tmp_path
+
+
+def test_start_learn_now_training_preserves_class_names_with_spaces(tmp_path):
+    script = tmp_path / "scripts" / "start_learn_now_micro_train.ps1"
+    script.parent.mkdir(parents=True)
+    script.write_text("param()", encoding="utf-8")
+    calls: list[dict[str, object]] = []
+
+    class FakeProcess:
+        pid = 1234
+
+    def fake_popen(command, **kwargs):
+        calls.append({"command": command, **kwargs})
+        return FakeProcess()
+
+    learn_now_training.start_learn_now_training(
+        tmp_path,
+        "Plastic bottle",
+        "micro",
+        popen=fake_popen,
+    )
+
+    command = calls[0]["command"]
+    class_arg_index = command.index("-ClassName") + 1
+    assert command[class_arg_index] == "Plastic bottle"
 
 
 def test_build_training_status_reports_latest_candidate(tmp_path, monkeypatch):
