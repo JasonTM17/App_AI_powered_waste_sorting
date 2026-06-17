@@ -33,6 +33,14 @@ def resource_path(rel: str | Path) -> Path:
     return bundle_dir() / p
 
 
+def project_root() -> Path:
+    """Resolve the editable project root used by local training scripts."""
+    if getattr(sys, "frozen", False):
+        executable_root = Path(sys.executable).resolve().parent
+        return executable_root.parent.parent
+    return Path(__file__).resolve().parent.parent.parent
+
+
 def resolve_data_path(rel: str | Path) -> Path:
     """Resolve mutable project data for source runs and packaged desktop builds."""
     path = Path(rel).expanduser()
@@ -41,9 +49,7 @@ def resolve_data_path(rel: str | Path) -> Path:
 
     candidates = [Path.cwd() / path, bundle_dir() / path]
     if getattr(sys, "frozen", False):
-        executable_root = Path(sys.executable).resolve().parent
-        project_root = executable_root.parent.parent
-        candidates.append(project_root / path)
+        candidates.append(project_root() / path)
 
     for candidate in candidates:
         if candidate.exists():

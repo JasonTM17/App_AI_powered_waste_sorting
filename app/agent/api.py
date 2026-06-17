@@ -2030,7 +2030,9 @@ def _learn_now_status(runtime: AgentRuntime, cls_name: str = "") -> dict[str, ob
 
 
 def _project_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    from app.utils.paths import project_root
+
+    return project_root()
 
 
 def _issue_stream_token() -> CameraStreamTokenResponse:

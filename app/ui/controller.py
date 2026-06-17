@@ -1608,7 +1608,9 @@ class AppController(QObject):
 
     @staticmethod
     def _project_root() -> Path:
-        return Path(__file__).resolve().parents[2]
+        from app.utils.paths import project_root
+
+        return project_root()
 
     @property
     def history(self):
