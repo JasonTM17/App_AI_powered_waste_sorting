@@ -557,9 +557,9 @@
   "dispatch_guard": {
     "min_sort_interval_seconds": 0.0,
     "busy_settle_seconds": 0.35,
-    "min_stable_frames": 3,
-    "empty_rearm_seconds": 2.0,
-    "empty_rearm_frames": 10,
+    "min_stable_frames": 1,
+    "empty_rearm_seconds": 0.8,
+    "empty_rearm_frames": 3,
     "require_roi_for_dispatch": true,
     "max_objects_per_dispatch": 1,
     "max_classes_per_dispatch": 1,

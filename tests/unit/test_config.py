@@ -59,11 +59,11 @@ def _default_dict():
             "cooldown_seconds": 2.5,
         },
         "dispatch_guard": {
-            "min_sort_interval_seconds": 12.0,
+            "min_sort_interval_seconds": 0.0,
             "busy_settle_seconds": 1.0,
-            "min_stable_frames": 3,
-            "empty_rearm_seconds": 2.0,
-            "empty_rearm_frames": 10,
+            "min_stable_frames": 1,
+            "empty_rearm_seconds": 0.8,
+            "empty_rearm_frames": 3,
             "require_roi_for_dispatch": True,
             "max_objects_per_dispatch": 1,
             "max_classes_per_dispatch": 1,
@@ -105,7 +105,8 @@ def test_app_config_parses_default_dict():
     assert c.unknown_fallback.dispatch_enabled is False
     assert c.unknown_fallback.command == "R"
     assert c.unknown_fallback.bin_index == 2
-    assert c.dispatch_guard.min_sort_interval_seconds == 12.0
+    assert c.dispatch_guard.min_sort_interval_seconds == 0.0
+    assert c.dispatch_guard.min_stable_frames == 1
     assert c.dispatch_guard.require_roi_for_dispatch is True
     assert c.dispatch_guard.max_objects_per_dispatch == 1
     assert c.dispatch_guard.max_classes_per_dispatch == 1
@@ -175,6 +176,10 @@ def test_dispatch_guard_invalid_values_rejected():
 
 
 def test_default_dispatch_return_settle_is_fast() -> None:
+    assert AppConfig().dispatch_guard.min_sort_interval_seconds == 0.0
+    assert AppConfig().dispatch_guard.min_stable_frames == 1
+    assert AppConfig().dispatch_guard.empty_rearm_seconds == 0.8
+    assert AppConfig().dispatch_guard.empty_rearm_frames == 3
     assert AppConfig().dispatch_guard.busy_settle_seconds == 0.35
 
 
