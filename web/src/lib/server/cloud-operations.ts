@@ -361,36 +361,27 @@ export async function cloudSetDemoHardwareTarget(
     return null;
   }
 
-  await ensureDemoHardwareTargetTable();
-
   const ownerFilter = identity.role === "admin" ? text(payload.owner_username) : identity.username;
-  const stationResult = await pool().query<{ station_id: string; assigned_owner_username: string }>(
-    `select station_id, assigned_owner_username
-       from public.bin_stations
-      where station_id = $1
-        and coalesce(active::text, '') not in ('0', 'false', 'f', 'no', '')
-        and ($2::text = '' or assigned_owner_username = $2)
+  const targetScope = await pool().query<{
+    assigned_owner_username: string;
+    bin_id: string;
+    bin_index: number | string;
+  }>(
+    `select station.assigned_owner_username, bin.bin_id, bin.bin_index
+       from public.bin_stations station
+       join public.bins bin on bin.station_id = station.station_id
+      where station.station_id = $1
+        and bin.bin_index = $2
+        and ($3::text = '' or bin.bin_id = $3)
+        and ($4::text = '' or station.assigned_owner_username = $4)
+        and coalesce(station.active::text, '') not in ('0', 'false', 'f', 'no', '')
+        and coalesce(bin.active::text, '') not in ('0', 'false', 'f', 'no', '')
+      order by bin.bin_id
       limit 1`,
-    [stationId, ownerFilter]
+    [stationId, binIndex, requestedBinId, ownerFilter]
   );
-  const station = stationResult.rows[0];
-  if (!station?.assigned_owner_username) {
-    return null;
-  }
-
-  const binResult = await pool().query<{ bin_id: string; bin_index: number | string }>(
-    `select bin_id, bin_index
-       from public.bins
-      where station_id = $1
-        and bin_index = $2
-        and ($3::text = '' or bin_id = $3)
-        and coalesce(active::text, '') not in ('0', 'false', 'f', 'no', '')
-      order by bin_id
-      limit 1`,
-    [stationId, binIndex, requestedBinId]
-  );
-  const bin = binResult.rows[0];
-  if (!bin) {
+  const scopedTarget = targetScope.rows[0];
+  if (!scopedTarget?.assigned_owner_username) {
     return null;
   }
 
@@ -406,7 +397,7 @@ export async function cloudSetDemoHardwareTarget(
        selected_at = excluded.selected_at,
        active = true
      returning owner_username, station_id, bin_id, bin_index, selected_by, selected_at, active`,
-    [station.assigned_owner_username, stationId, bin.bin_id, binIndex, identity.username]
+    [scopedTarget.assigned_owner_username, stationId, scopedTarget.bin_id, binIndex, identity.username]
   );
 
   const target = result.rows[0];
@@ -439,27 +430,6 @@ async function recordCollectionEvent(scheduleId: string, stationId: string, acto
       [scheduleId, stationId, actor, note]
     ).catch(() => undefined);
   }
-}
-
-async function ensureDemoHardwareTargetTable() {
-  await pool().query(`
-    create table if not exists public.demo_hardware_targets (
-      owner_username text primary key,
-      station_id text not null references public.bin_stations(station_id) on delete cascade,
-      bin_id text not null default '',
-      bin_index int not null check (bin_index between 1 and 3),
-      selected_by text not null default '',
-      selected_at timestamptz not null default now(),
-      last_applied_at timestamptz,
-      last_percent numeric(5,2),
-      active boolean not null default true
-    )
-  `);
-  await pool().query(`
-    create index if not exists idx_demo_hardware_targets_station
-      on public.demo_hardware_targets(station_id, bin_index)
-      where active
-  `);
 }
 
 async function ensureUserMapStations(ownerUsername: string) {

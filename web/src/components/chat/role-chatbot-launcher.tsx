@@ -15,6 +15,7 @@ type RoleChatbotLauncherProps = {
   statusText: string;
   title: string;
   defaultOpen?: boolean;
+  onCancel?: () => void;
   onAsk: (value?: string) => void;
   onQuestionChange: (value: string) => void;
 };
@@ -52,6 +53,7 @@ export function RoleChatbotLauncher({
   answer,
   busy,
   defaultOpen = false,
+  onCancel,
   label,
   placeholder,
   question,
@@ -99,7 +101,6 @@ export function RoleChatbotLauncher({
     }
     lastAnswerRef.current = answer;
     const pendingId = pendingAssistantIdRef.current;
-    pendingAssistantIdRef.current = null;
     setTranscript((current) =>
       current.map((message) =>
         message.id === pendingId
@@ -119,7 +120,7 @@ export function RoleChatbotLauncher({
       pendingAssistantIdRef.current = null;
       setTranscript((current) =>
         current.map((message) =>
-          message.id === pendingId
+          message.id === pendingId && message.pending
             ? {
                 id: pendingId,
                 role: "assistant",
@@ -325,7 +326,10 @@ export function RoleChatbotLauncher({
           persona={role === "user" ? "ecopet" : "admin"}
           variant="dock"
           onAsk={askChat}
-          onClose={() => setOpen(false)}
+          onClose={() => {
+            onCancel?.();
+            setOpen(false);
+          }}
           onQuestionChange={onQuestionChange}
         />
       ) : (

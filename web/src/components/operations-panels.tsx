@@ -55,7 +55,9 @@ type AdminBinMapPanelProps = {
   busy: boolean;
   demoTargetEnabled?: boolean;
   map: BinMapResponse | null;
+  pendingDemoBinKey?: string;
   schedules: CollectionSchedulesResponse | null;
+  selectedDemoBinKey?: string;
   onCreateStation: (payload: BinStationCreatePayload) => void;
   onDeleteStation: (stationId: string) => void;
   onSelectDemoBin?: (station: BinStation, bin: BinStation["bins"][number]) => void;
@@ -74,6 +76,7 @@ type UserMapScreenProps = {
   busy: boolean;
   demoTargetEnabled?: boolean;
   map: BinMapResponse | null;
+  pendingDemoBinKey?: string;
   refreshMeta?: {
     lastUpdatedAt: string;
     isRefreshing: boolean;
@@ -82,6 +85,7 @@ type UserMapScreenProps = {
   onMapInteraction?: () => void;
   onRefresh: () => void;
   onSelectDemoBin?: (station: BinStation, bin: BinStation["bins"][number]) => void;
+  selectedDemoBinKey?: string;
 };
 
 type UserAlertsScreenProps = {
@@ -247,7 +251,9 @@ export function AdminBinMapPanel({
   busy,
   demoTargetEnabled,
   map,
+  pendingDemoBinKey,
   schedules,
+  selectedDemoBinKey,
   onCreateStation,
   onDeleteStation,
   onSelectDemoBin,
@@ -271,7 +277,9 @@ export function AdminBinMapPanel({
         busy={busy}
         demoTargetEnabled={demoTargetEnabled}
         map={map}
+        pendingDemoBinKey={pendingDemoBinKey}
         selectedStationId={selected?.station_id}
+        selectedDemoBinKey={selectedDemoBinKey}
         onMoveStation={(stationId, latitude, longitude) =>
           onPatchStation(stationId, { coordinate_verified: true, latitude, longitude })
         }
@@ -356,7 +364,9 @@ export function UserMapScreen({
   busy,
   demoTargetEnabled,
   map,
+  pendingDemoBinKey,
   refreshMeta,
+  selectedDemoBinKey,
   onMapInteraction,
   onRefresh,
   onSelectDemoBin
@@ -369,7 +379,9 @@ export function UserMapScreen({
         busy={busy}
         demoTargetEnabled={demoTargetEnabled}
         map={map}
+        pendingDemoBinKey={pendingDemoBinKey}
         refreshMeta={refreshMeta}
+        selectedDemoBinKey={selectedDemoBinKey}
         selectedStationId={selected?.station_id}
         onInteraction={onMapInteraction}
         onRefresh={onRefresh}

@@ -146,6 +146,7 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
             role="user"
             statusText="EcoPet sẵn sàng đồng hành cùng thói quen phân loại rác của bạn."
             title="EcoPet"
+            onCancel={props.onCancelChat}
             onAsk={props.onChatRequest}
             onQuestionChange={props.onChatQuestionChange}
           />

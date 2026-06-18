@@ -968,6 +968,17 @@ export type AiChatResponse = {
   quota_exceeded?: boolean;
 };
 
+export type UserDashboardSummary = {
+  analytics: UserAnalytics;
+  history: UserHistoryResponse;
+  device: UserDevice;
+  report: UserReport;
+  experience: UserExperience;
+  bin_map: BinMapResponse;
+  alerts: AlertsResponse;
+  schedules: CollectionSchedulesResponse;
+};
+
 export type KnowledgeEntry = {
   id: string;
   title: string;

@@ -37,7 +37,9 @@ export function UserRouteContent(props: UserDashboardPanelProps) {
       <UserMapScreen
         busy={props.busy}
         map={props.binMap}
+        pendingDemoBinKey={props.pendingDemoBinKey}
         refreshMeta={props.operationRefresh}
+        selectedDemoBinKey={props.selectedDemoBinKey}
         onMapInteraction={props.onUserMapInteraction}
         onRefresh={props.onRefreshOperations}
         demoTargetEnabled={process.env.NEXT_PUBLIC_DEMO_HARDWARE_TARGET === "1"}

@@ -26,15 +26,12 @@ describe("cloud DeepSeek client", () => {
     expect(request.messages[1].content).toContain("user_owned_cloud_data");
   });
 
-  it("repairs a long response that has no Vietnamese diacritics", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: "Hom nay minh van on va san sang dong hanh cung ban trong viec phan loai rac nhe." } }] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: "Hôm nay mình vẫn ổn và sẵn sàng đồng hành cùng bạn trong việc phân loại rác nhé." } }] }), { status: 200 }));
+  it("rejects unaccented output without making a second provider request", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: "Hom nay minh van on va san sang dong hanh cung ban trong viec phan loai rac nhe." } }] }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const answer = await askCloudDeepSeek("user", "Hôm nay bạn thế nào?", {});
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(answer).toContain("Hôm nay mình vẫn ổn");
+    await expect(askCloudDeepSeek("user", "Hôm nay bạn thế nào?", {})).rejects.toThrow("provider failed");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("rejects provider errors and empty content", async () => {

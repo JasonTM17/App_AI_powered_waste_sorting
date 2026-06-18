@@ -55,6 +55,7 @@ export type UserDashboardPanelProps = {
     isRefreshing: boolean;
     refreshError: string;
   };
+  pendingDemoBinKey: string;
   imageToken: string;
   passwordConfirm: string;
   passwordCurrent: string;
@@ -62,11 +63,13 @@ export type UserDashboardPanelProps = {
   passwordNew: string;
   rangeDays: AnalyticsRangeDays;
   report: UserReport | null;
+  selectedDemoBinKey: string;
   chatbotEnabled: boolean;
   view: UserView;
   onAdvisorQuestionChange: (value: string) => void;
   onAdvisorRequest: () => void;
   onChangePassword: () => void;
+  onCancelChat: () => void;
   onChatQuestionChange: (value: string) => void;
   onChatRequest: (value?: string) => void;
   onChatbotEnabledChange: (value: boolean) => void;

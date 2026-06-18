@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), generate: vi.fn() }));
+const mocks = vi.hoisted(() => ({ authenticate: vi.fn(), stream: vi.fn() }));
 
 vi.mock("@/lib/server/cloud-auth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/server/cloud-auth")>()),
@@ -9,7 +9,7 @@ vi.mock("@/lib/server/cloud-auth", async (importOriginal) => ({
 }));
 vi.mock("@/lib/server/cloud-chat", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/server/cloud-chat")>()),
-  generateCloudChatResponse: mocks.generate
+  createCloudChatStreamResponse: mocks.stream
 }));
 
 import type { CloudAuthIdentity } from "@/lib/server/cloud-auth";
@@ -38,7 +38,9 @@ describe("cloud chat routes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.authenticate.mockResolvedValue(USER);
-    mocks.generate.mockResolvedValue({ available: true, message: "Xin chào" });
+    mocks.stream.mockResolvedValue(new Response("event: done\ndata: {}\n\n", {
+      headers: { "Content-Type": "text/event-stream" }
+    }));
   });
 
   it("rejects unauthenticated requests", async () => {
@@ -48,11 +50,11 @@ describe("cloud chat routes", () => {
 
   it("keeps User out of the Admin endpoint", async () => {
     expect((await adminPost(request({ message: "Trạng thái camera" }))).status).toBe(403);
-    expect(mocks.generate).not.toHaveBeenCalled();
+    expect(mocks.stream).not.toHaveBeenCalled();
   });
 
   it("maps validated input failures to HTTP 400", async () => {
-    mocks.generate.mockRejectedValue(new CloudChatInputError("Vui lòng nhập câu hỏi."));
+    mocks.stream.mockRejectedValue(new CloudChatInputError("Vui lòng nhập câu hỏi."));
     const response = await userPost(request({ message: "" }));
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ detail: "Vui lòng nhập câu hỏi." });
@@ -61,6 +63,6 @@ describe("cloud chat routes", () => {
   it("passes the authenticated identity and raw message to the chat service", async () => {
     const response = await userPost(request({ message: "Hôm nay bạn thế nào?" }));
     expect(response.status).toBe(200);
-    expect(mocks.generate).toHaveBeenCalledWith(USER, "Hôm nay bạn thế nào?", expect.any(Number));
+    expect(mocks.stream).toHaveBeenCalledWith(USER, "Hôm nay bạn thế nào?", expect.any(Number), expect.any(AbortSignal));
   });
 });

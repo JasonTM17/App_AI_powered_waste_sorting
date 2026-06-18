@@ -32,7 +32,7 @@ import {
   X,
   Zap
 } from "lucide-react";
-import { ChangeEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { TrashSorterLogo } from "@/components/brand/trash-sorter-logo";
 import {
@@ -91,6 +91,7 @@ import {
   UserAdvisorResponse,
   UserAnalytics,
   UserDevice,
+  UserDashboardSummary,
   UserExperience,
   UserHistoryItem,
   UserHistoryResponse,
@@ -133,6 +134,7 @@ import { LivePanel } from "@/components/detection/live-panel";
 import { HardwareProfilePanel } from "@/components/operations/hardware-profile-panel";
 import { MappingPanel } from "@/components/operations/mapping-panel";
 import { SettingsPanel } from "@/components/settings/settings-panel";
+import { streamCloudChat } from "@/lib/cloud-chat-stream";
 
 type TabId =
   | "live"
@@ -193,6 +195,16 @@ type BinFullPopupState = {
   title: string;
   severity: string;
   messages: string[];
+};
+
+type DemoHardwareTargetResponse = {
+  ok: boolean;
+  target?: {
+    station_id: string;
+    bin_id: string;
+    bin_index: number;
+    selected_at: string;
+  };
 };
 
 const DATASET_LIMIT = 60;
@@ -328,6 +340,15 @@ export function DashboardClient() {
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [chatBusy, setChatBusy] = useState(false);
+  const [pendingDemoBinKey, setPendingDemoBinKey] = useState("");
+  const [selectedDemoBinKey, setSelectedDemoBinKey] = useState("");
+  const selectedDemoBinKeyRef = useRef("");
+  const demoTargetAbortRef = useRef<AbortController | null>(null);
+  const demoTargetRequestRef = useRef(0);
+  const chatAbortRef = useRef<AbortController | null>(null);
+  const chatRequestRef = useRef(0);
+  const dashboardAbortRef = useRef<AbortController | null>(null);
+  const dashboardRequestRef = useRef(0);
   const userOperationsRefreshInFlightRef = useRef(false);
   const userOperationsInteractionUntilRef = useRef(0);
   const shownBinFullAlertRanksRef = useRef<Map<string, number>>(new Map());
@@ -658,10 +679,36 @@ export function DashboardClient() {
   }
 
   async function refreshUserDashboard() {
+    const requestId = dashboardRequestRef.current + 1;
+    dashboardRequestRef.current = requestId;
+    dashboardAbortRef.current?.abort();
+    const controller = new AbortController();
+    dashboardAbortRef.current = controller;
     setBusy(true);
     try {
+      if (USE_CLOUD_HARDWARE_BRIDGE) {
+        const summary = await cloudFetch<UserDashboardSummary>(
+          `/api/user/dashboard-summary?range_days=${userRangeDays}`,
+          { signal: controller.signal, timeoutMs: 45_000 },
+          agentToken
+        );
+        if (requestId !== dashboardRequestRef.current) return;
+        setUserAnalytics(summary.analytics);
+        setUserHistoryRows(summary.history.rows);
+        setUserDevice(summary.device);
+        setUserReport(summary.report);
+        setUserExperience(summary.experience);
+        setUserBinMap(summary.bin_map);
+        setUserAlerts(summary.alerts);
+        showNewBinFullnessPopup(summary.alerts, "user");
+        setUserSchedules(summary.schedules);
+        setUserOperationsLastUpdatedAt(new Date().toISOString());
+        setUserOperationsRefreshError("");
+        setAgentError("");
+        return;
+      }
       const dashboardFetch = <T,>(path: string) =>
-        USE_CLOUD_HARDWARE_BRIDGE ? cloudFetch<T>(path, undefined, agentToken) : fetchAgent<T>(path);
+        fetchAgent<T>(path, { signal: controller.signal });
       const dashboardData = Promise.all([
         dashboardFetch<UserAnalytics>(`/api/user/analytics?range_days=${userRangeDays}`),
         dashboardFetch<UserHistoryResponse>("/api/user/history?limit=24"),
@@ -702,9 +749,13 @@ export function DashboardClient() {
         setAgentError("");
       }
     } catch (error) {
+      if (controller.signal.aborted || requestId !== dashboardRequestRef.current) return;
       setAgentError(error instanceof Error ? error.message : "Không tải được dashboard User");
     } finally {
-      setBusy(false);
+      if (requestId === dashboardRequestRef.current) {
+        setBusy(false);
+        dashboardAbortRef.current = null;
+      }
     }
   }
 
@@ -734,24 +785,43 @@ export function DashboardClient() {
 
   async function requestUserChat(value?: string) {
     const message = (value ?? userChatQuestion).trim() || "Hôm nay bạn thấy thói quen bỏ rác của mình thế nào?";
+    const requestId = chatRequestRef.current + 1;
+    chatRequestRef.current = requestId;
+    chatAbortRef.current?.abort();
+    const controller = new AbortController();
+    chatAbortRef.current = controller;
     setChatBusy(true);
     try {
-      const data = await cloudFetch<AiChatResponse>("/api/user/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
-        timeoutMs: 90_000
-      }, agentToken);
+      const data = await streamCloudChat({
+        message,
+        onProgress: setUserChat,
+        path: "/api/user/chat",
+        role: "user",
+        signal: controller.signal,
+        token: agentToken
+      });
+      if (requestId !== chatRequestRef.current) return;
       setUserChat(data);
       setUserChatQuestion("");
       setAgentError("");
     } catch (error) {
+      if (controller.signal.aborted || requestId !== chatRequestRef.current) return;
       const fallback = localChatFailure("user", error);
       setUserChat(fallback);
       setNotice(fallback.message);
     } finally {
-      setChatBusy(false);
+      if (requestId === chatRequestRef.current) {
+        setChatBusy(false);
+        chatAbortRef.current = null;
+      }
     }
+  }
+
+  function cancelChatRequest() {
+    chatRequestRef.current += 1;
+    chatAbortRef.current?.abort();
+    chatAbortRef.current = null;
+    setChatBusy(false);
   }
 
   async function changePassword() {
@@ -959,7 +1029,7 @@ export function DashboardClient() {
     }
   }
 
-  async function selectDemoBinTarget(station: BinStation, bin: BinStation["bins"][number]) {
+  const selectDemoBinTarget = useCallback(async (station: BinStation, bin: BinStation["bins"][number]) => {
     if (process.env.NEXT_PUBLIC_DEMO_HARDWARE_TARGET !== "1") {
       setNotice("Demo cảm biến đầy chưa được bật.");
       return;
@@ -969,13 +1039,24 @@ export function DashboardClient() {
       setAgentError("Bạn cần đăng nhập để chọn thùng demo.");
       return;
     }
-    setBusy(true);
+    const targetKey = `${station.station_id}:${bin.bin_id}`;
+    const previousTargetKey = selectedDemoBinKeyRef.current;
+    const requestId = demoTargetRequestRef.current + 1;
+    demoTargetRequestRef.current = requestId;
+    demoTargetAbortRef.current?.abort();
+    const controller = new AbortController();
+    demoTargetAbortRef.current = controller;
+    setPendingDemoBinKey(targetKey);
+    setSelectedDemoBinKey(targetKey);
+    selectedDemoBinKeyRef.current = targetKey;
+    setAgentError("");
     try {
-      await cloudFetch<{ ok: boolean; message?: string }>(
+      const result = await cloudFetch<DemoHardwareTargetResponse>(
         role === "admin" ? "/api/admin/demo-bin-target" : "/api/user/demo-bin-target",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
           body: JSON.stringify({
             station_id: station.station_id,
             bin_id: bin.bin_id,
@@ -984,18 +1065,29 @@ export function DashboardClient() {
         },
         agentToken
       );
-      setNotice(`Đã chọn ${bin.label || `bin ${bin.bin_index}`} tại ${station.name} làm thùng demo cảm biến.`);
-      if (role === "admin") {
-        await refreshAdminOperations();
-      } else {
-        await refreshUserOperations();
+      if (requestId !== demoTargetRequestRef.current) {
+        return;
       }
+      const persistedKey = result.target
+        ? `${result.target.station_id}:${result.target.bin_id}`
+        : targetKey;
+      setSelectedDemoBinKey(persistedKey);
+      selectedDemoBinKeyRef.current = persistedKey;
+      setNotice(`Đã chọn ${bin.label || `bin ${bin.bin_index}`} tại ${station.name} làm thùng demo cảm biến.`);
     } catch (error) {
+      if (controller.signal.aborted || requestId !== demoTargetRequestRef.current) {
+        return;
+      }
+      setSelectedDemoBinKey(previousTargetKey);
+      selectedDemoBinKeyRef.current = previousTargetKey;
       setAgentError(error instanceof Error ? error.message : "Không chọn được thùng demo cảm biến");
     } finally {
-      setBusy(false);
+      if (requestId === demoTargetRequestRef.current) {
+        setPendingDemoBinKey("");
+        demoTargetAbortRef.current = null;
+      }
     }
-  }
+  }, [agentToken, auth?.role]);
 
   async function reportDeviceIssue(payload: DeviceIssueCreatePayload) {
     setBusy(true);
@@ -1165,23 +1257,35 @@ export function DashboardClient() {
 
   async function requestAdminChat(value?: string) {
     const message = (value ?? adminChatQuestion).trim() || "Tóm tắt hệ thống hôm nay.";
+    const requestId = chatRequestRef.current + 1;
+    chatRequestRef.current = requestId;
+    chatAbortRef.current?.abort();
+    const controller = new AbortController();
+    chatAbortRef.current = controller;
     setChatBusy(true);
     try {
-      const data = await cloudFetch<AiChatResponse>("/api/admin/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message }),
-        timeoutMs: 90_000
-      }, agentToken);
+      const data = await streamCloudChat({
+        message,
+        onProgress: setAdminChat,
+        path: "/api/admin/chat",
+        role: "admin",
+        signal: controller.signal,
+        token: agentToken
+      });
+      if (requestId !== chatRequestRef.current) return;
       setAdminChat(data);
       setAdminChatQuestion("");
       setAgentError("");
     } catch (error) {
+      if (controller.signal.aborted || requestId !== chatRequestRef.current) return;
       const fallback = localChatFailure("admin", error);
       setAdminChat(fallback);
       setNotice(fallback.message);
     } finally {
-      setChatBusy(false);
+      if (requestId === chatRequestRef.current) {
+        setChatBusy(false);
+        chatAbortRef.current = null;
+      }
     }
   }
 
@@ -2439,6 +2543,7 @@ export function DashboardClient() {
         onAdvisorRequest={() => void requestUserAdvisor()}
         onChangePassword={() => void changePassword()}
         onChatQuestionChange={setUserChatQuestion}
+        onCancelChat={cancelChatRequest}
         onChatRequest={(value) => void requestUserChat(value)}
         onChatbotEnabledChange={updateUserChatbotEnabled}
         onCompleteCollection={(scheduleId, note) => void completeCollection(scheduleId, note)}
@@ -2454,7 +2559,9 @@ export function DashboardClient() {
         onRefresh={() => void refreshUserDashboard()}
         onRefreshOperations={() => void refreshUserOperations()}
         onReportDeviceIssue={(payload) => void reportDeviceIssue(payload)}
-        onSelectDemoBin={(station, bin) => void selectDemoBinTarget(station, bin)}
+        pendingDemoBinKey={pendingDemoBinKey}
+        selectedDemoBinKey={selectedDemoBinKey}
+        onSelectDemoBin={selectDemoBinTarget}
         onUserMapInteraction={markUserMapInteraction}
         onViewChange={navigateUserView}
       />
@@ -2628,10 +2735,12 @@ export function DashboardClient() {
             busy={busy}
             demoTargetEnabled={process.env.NEXT_PUBLIC_DEMO_HARDWARE_TARGET === "1"}
             map={adminBinMap}
+            pendingDemoBinKey={pendingDemoBinKey}
             schedules={adminSchedules}
+            selectedDemoBinKey={selectedDemoBinKey}
             onCreateStation={(payload) => void createBinStation(payload)}
             onDeleteStation={(stationId) => void deleteBinStation(stationId)}
-            onSelectDemoBin={(station, bin) => void selectDemoBinTarget(station, bin)}
+            onSelectDemoBin={selectDemoBinTarget}
             onPatchStation={(stationId, payload) => void patchBinStation(stationId, payload)}
             onRefresh={() => void refreshAdminOperations()}
           />
@@ -2803,6 +2912,7 @@ export function DashboardClient() {
             role="admin"
             statusText="Trợ lý AI chạy qua agent backend. Nếu chưa sẵn sàng, cấu hình khóa AI trong môi trường backend rồi khởi động lại agent."
             title="Trợ lý vận hành"
+            onCancel={cancelChatRequest}
             onAsk={(value) => void requestAdminChat(value)}
             onQuestionChange={setAdminChatQuestion}
           />

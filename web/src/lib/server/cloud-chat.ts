@@ -1,6 +1,6 @@
 import type { AiChatResponse } from "@/lib/agent";
 import type { CloudAuthIdentity, CloudAuthRole } from "@/lib/server/cloud-auth";
-import { askCloudDeepSeek, CLOUD_CHAT_MODEL, deepSeekIsConfigured } from "@/lib/server/cloud-chat-ai";
+import { askCloudDeepSeek, CLOUD_CHAT_MODEL, deepSeekIsConfigured, streamCloudDeepSeek } from "@/lib/server/cloud-chat-ai";
 import { buildCloudChatContext, consumeCloudChatQuota, type CloudChatQuota } from "@/lib/server/cloud-chat-context";
 
 const USER_QUICK_PROMPTS = ["Xem Eco Score", "Xem bản đồ thùng", "Báo lỗi thiết bị"];
@@ -55,6 +55,119 @@ export async function generateCloudChatResponse(
   } catch {
     return fallbackResponse(identity.role, message, startedAt, quota, knowledgeUsed);
   }
+}
+
+export async function createCloudChatStreamResponse(
+  identity: CloudAuthIdentity,
+  rawMessage: unknown,
+  startedAt = Date.now(),
+  signal?: AbortSignal
+) {
+  const message = parseCloudChatMessage(rawMessage);
+  const quotaStartedAt = Date.now();
+  const quota = identity.role === "user" ? await consumeCloudChatQuota(identity.account_id) : undefined;
+  const quotaDuration = Date.now() - quotaStartedAt;
+  const contextStartedAt = Date.now();
+  const prepared = quota?.quota_exceeded
+    ? { context: {}, knowledgeUsed: [] as string[] }
+    : await buildCloudChatContext(identity, message);
+  const contextDuration = Date.now() - contextStartedAt;
+  const requestId = crypto.randomUUID();
+  const encoder = new TextEncoder();
+  let streamClosed = false;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const send = (event: string, data: unknown) => {
+        if (streamClosed) return;
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          streamClosed = true;
+        }
+      };
+      heartbeat = setInterval(() => {
+        if (streamClosed) return;
+        try {
+          controller.enqueue(encoder.encode(": heartbeat\n\n"));
+        } catch {
+          streamClosed = true;
+        }
+      }, 10_000);
+      const finish = () => {
+        if (streamClosed) return;
+        streamClosed = true;
+        if (heartbeat) clearInterval(heartbeat);
+        try {
+          controller.close();
+        } catch {
+          // The browser may have cancelled the stream already.
+        }
+      };
+      void (async () => {
+        send("meta", { request_id: requestId, ...quota });
+        if (quota?.quota_exceeded) {
+          const response = quotaResponse(identity.role, quota, startedAt);
+          send("delta", { text: response.message });
+          send("done", response);
+          finish();
+          return;
+        }
+        if (!deepSeekIsConfigured()) {
+          const response = fallbackResponse(identity.role, message, startedAt, quota, prepared.knowledgeUsed);
+          send("delta", { text: response.message });
+          send("done", response);
+          finish();
+          return;
+        }
+        let streamedText = "";
+        try {
+          const answer = await streamCloudDeepSeek(
+            identity.role,
+            message,
+            prepared.context,
+            (text) => {
+              streamedText += text;
+              send("delta", { text });
+            },
+            signal
+          );
+          send("done", baseResponse(identity.role, startedAt, {
+            available: true,
+            provider: "deepseek",
+            model: CLOUD_CHAT_MODEL,
+            answer_source: "deepseek",
+            message: answer,
+            knowledge_used: prepared.knowledgeUsed,
+            ...quota
+          }));
+        } catch {
+          const response = fallbackResponse(identity.role, message, startedAt, quota, prepared.knowledgeUsed);
+          send("error", {
+            code: signal?.aborted ? "request_cancelled" : "provider_unavailable",
+            message: signal?.aborted ? "Yêu cầu đã được hủy." : "AI phản hồi chậm, đang dùng câu trả lời an toàn."
+          });
+          if (!streamedText) send("delta", { text: response.message });
+          send("done", response);
+        } finally {
+          finish();
+        }
+      })().catch(() => finish());
+    },
+    cancel() {
+      streamClosed = true;
+      if (heartbeat) clearInterval(heartbeat);
+    }
+  });
+  return new Response(body, {
+    headers: {
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Server-Timing": `quota;dur=${quotaDuration}, context;dur=${contextDuration}`,
+      "X-Accel-Buffering": "no"
+    }
+  });
 }
 
 function fallbackResponse(

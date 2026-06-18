@@ -12,9 +12,11 @@ const OSM_TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 
 type OperationsBinMapProps = {
   map: BinMapResponse | null;
+  pendingDemoBinKey?: string;
   busy: boolean;
   editable?: boolean;
   selectedStationId?: string;
+  selectedDemoBinKey?: string;
   refreshMeta?: {
     lastUpdatedAt: string;
     isRefreshing: boolean;
@@ -42,10 +44,12 @@ function OperationsBinMapInner({
   busy,
   editable = false,
   map,
+  pendingDemoBinKey = "",
   onInteraction,
   onMoveStation,
   refreshMeta,
   selectedStationId,
+  selectedDemoBinKey = "",
   demoTargetEnabled = false,
   onRefresh,
   onSelectDemoBin,
@@ -57,6 +61,9 @@ function OperationsBinMapInner({
   const popupRootsMapRef = useRef<Map<string, Root>>(new Map());
   const clusterLayerRef = useRef<LayerGroup | null>(null);
   const fittedStationsKeyRef = useRef("");
+  const demoUiKeysRef = useRef({ pending: "", selected: "" });
+  const handlersRef = useRef({ onInteraction, onMoveStation, onSelectDemoBin, onSelectStation });
+  handlersRef.current = { onInteraction, onMoveStation, onSelectDemoBin, onSelectStation };
   const [tileFailed, setTileFailed] = useState(false);
   const [mapReady, setMapReady] = useState(false);
   const [renderedMarkerCount, setRenderedMarkerCount] = useState(0);
@@ -275,8 +282,8 @@ function OperationsBinMapInner({
 
           marker.off("click");
           marker.on("click", () => {
-            onInteraction?.();
-            onSelectStation?.(station);
+            handlersRef.current.onInteraction?.();
+            handlersRef.current.onSelectStation?.(station);
             marker.openPopup();
           });
 
@@ -284,13 +291,19 @@ function OperationsBinMapInner({
             marker.off("dragend");
             marker.on("dragend", () => {
               const position = marker.getLatLng();
-              onMoveStation(station.station_id, position.lat, position.lng);
+              handlersRef.current.onMoveStation?.(station.station_id, position.lat, position.lng);
             });
           }
 
           if (popupRoot) {
             popupRoot.render(
-              <StationPopupCard demoTargetEnabled={demoTargetEnabled} onSelectDemoBin={onSelectDemoBin} station={station} />
+              <StationPopupCard
+                demoTargetEnabled={demoTargetEnabled}
+                onSelectDemoBin={(selectedStation, bin) => handlersRef.current.onSelectDemoBin?.(selectedStation, bin)}
+                pendingDemoBinKey={pendingDemoBinKey}
+                selectedDemoBinKey={selectedDemoBinKey}
+                station={station}
+              />
             );
           }
 
@@ -306,7 +319,13 @@ function OperationsBinMapInner({
           popupElement.className = "operations-map-popup-root";
           const newPopupRoot = createRoot(popupElement);
           newPopupRoot.render(
-            <StationPopupCard demoTargetEnabled={demoTargetEnabled} onSelectDemoBin={onSelectDemoBin} station={station} />
+            <StationPopupCard
+              demoTargetEnabled={demoTargetEnabled}
+              onSelectDemoBin={(selectedStation, bin) => handlersRef.current.onSelectDemoBin?.(selectedStation, bin)}
+              pendingDemoBinKey={pendingDemoBinKey}
+              selectedDemoBinKey={selectedDemoBinKey}
+              station={station}
+            />
           );
           popupRootsMapRef.current.set(station.station_id, newPopupRoot);
 
@@ -317,15 +336,15 @@ function OperationsBinMapInner({
             })
             .bindPopup(popupElement)
             .on("click", () => {
-              onInteraction?.();
-              onSelectStation?.(station);
+              handlersRef.current.onInteraction?.();
+              handlersRef.current.onSelectStation?.(station);
               newMarker.openPopup();
             });
 
           if (editable && onMoveStation) {
             newMarker.on("dragend", () => {
               const position = newMarker.getLatLng();
-              onMoveStation(station.station_id, position.lat, position.lng);
+              handlersRef.current.onMoveStation?.(station.station_id, position.lat, position.lng);
             });
           }
 
@@ -358,7 +377,33 @@ function OperationsBinMapInner({
     }
 
     void renderMarkers();
-  }, [demoTargetEnabled, editable, map, mapReady, onInteraction, onMoveStation, onSelectDemoBin, onSelectStation, selectedStationId, stations]);
+  }, [demoTargetEnabled, editable, map, mapReady, selectedStationId, stations]);
+
+  useEffect(() => {
+    const previous = demoUiKeysRef.current;
+    const changedStationIds = new Set(
+      [previous.pending, previous.selected, pendingDemoBinKey, selectedDemoBinKey]
+        .filter(Boolean)
+        .map((key) => key.split(":", 1)[0])
+    );
+    changedStationIds.forEach((stationId) => {
+      const station = stations.find((item) => item.station_id === stationId);
+      const popupRoot = popupRootsMapRef.current.get(stationId);
+      if (!station || !popupRoot) {
+        return;
+      }
+      popupRoot.render(
+        <StationPopupCard
+          demoTargetEnabled={demoTargetEnabled}
+          onSelectDemoBin={(selectedStation, bin) => handlersRef.current.onSelectDemoBin?.(selectedStation, bin)}
+          pendingDemoBinKey={pendingDemoBinKey}
+          selectedDemoBinKey={selectedDemoBinKey}
+          station={station}
+        />
+      );
+    });
+    demoUiKeysRef.current = { pending: pendingDemoBinKey, selected: selectedDemoBinKey };
+  }, [demoTargetEnabled, pendingDemoBinKey, selectedDemoBinKey, stations]);
 
   useEffect(() => {
     if (!mapReady || !mapRef.current || !map || !selectedStationId) {
@@ -615,10 +660,14 @@ function stationIcon(divIcon: (options?: DivIconOptions) => DivIcon, station: Bi
 function StationPopupCard({
   demoTargetEnabled,
   onSelectDemoBin,
+  pendingDemoBinKey,
+  selectedDemoBinKey,
   station
 }: {
   demoTargetEnabled?: boolean;
   onSelectDemoBin?: (station: BinStation, bin: OperationBin) => void;
+  pendingDemoBinKey: string;
+  selectedDemoBinKey: string;
   station: BinStation;
 }) {
   const fullBins = stationFullBins(station);
@@ -660,6 +709,8 @@ function StationPopupCard({
             bin={bin}
             demoTargetEnabled={demoTargetEnabled}
             key={`${station.station_id}-${bin.bin_id}`}
+            pending={pendingDemoBinKey === `${station.station_id}:${bin.bin_id}`}
+            selected={selectedDemoBinKey === `${station.station_id}:${bin.bin_id}`}
             onSelectDemoBin={() => onSelectDemoBin?.(station, bin)}
           />
         ))}
@@ -672,11 +723,15 @@ function StationPopupCard({
 function BinFillRow({
   bin,
   demoTargetEnabled,
-  onSelectDemoBin
+  onSelectDemoBin,
+  pending,
+  selected
 }: {
   bin: OperationBin;
   demoTargetEnabled?: boolean;
   onSelectDemoBin?: () => void;
+  pending: boolean;
+  selected: boolean;
 }) {
   const percent = Math.max(0, Math.min(100, Number(bin.fill_percent ?? 0)));
   const tone = fillTone(percent);
@@ -690,8 +745,14 @@ function BinFillRow({
       <strong>{Math.round(percent)}%</strong>
       <span className={`popup-bin-state ${tone}`}>{label}</span>
       {demoTargetEnabled && onSelectDemoBin ? (
-        <button className="secondary-button compact-button popup-demo-target-button" onClick={onSelectDemoBin} type="button">
-          Chọn
+        <button
+          aria-pressed={selected}
+          className={`secondary-button compact-button popup-demo-target-button ${selected ? "active" : ""}`}
+          disabled={pending}
+          onClick={onSelectDemoBin}
+          type="button"
+        >
+          {pending ? "Đang chọn..." : selected ? "Đã chọn" : "Chọn"}
         </button>
       ) : null}
     </div>

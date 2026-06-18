@@ -16,7 +16,7 @@ import type {
   WellnessInsight
 } from "@/lib/agent";
 import type { CloudAuthIdentity } from "@/lib/server/cloud-auth";
-import { cloudOperationsPool } from "@/lib/server/cloud-operations";
+import { cloudAlerts, cloudBinMap, cloudOperationsPool, cloudSchedules } from "@/lib/server/cloud-operations";
 
 const ALLOWED_RANGES = new Set([7, 30, 90, 180]);
 const CSV_FIELDS = ["id", "ts", "cls_name", "confidence", "category", "route_label", "bin_index", "ack_status", "device_id"];
@@ -47,6 +47,7 @@ type DeviceRow = QueryResultRow & {
 type BinRow = QueryResultRow & {
   bin_index: number | string;
   label: string;
+  station_name: string;
   fill_percent: number | string | null;
   updated_at: Date | string | null;
 };
@@ -68,20 +69,22 @@ export async function cloudUserHistory(
     values.push(options.rangeDays);
     dateFilter = `and ts >= current_date - ($${values.length}::int - 1) * interval '1 day'`;
   }
-  const totalResult = await cloudOperationsPool().query<{ count: string }>(
-    `select count(*)::text as count from public.history where owner_username = $1 ${dateFilter}`,
-    values
-  );
-  values.push(limit, offset);
-  const result = await cloudOperationsPool().query<HistoryRow>(
-    `select id, ts, cls_name, confidence, route_label, bin_index, uart_command,
-            ack_status, device_id, image_available
-       from public.history
-      where owner_username = $1 ${dateFilter}
-      order by ts desc, id desc
-      limit $${values.length - 1} offset $${values.length}`,
-    values
-  );
+  const listValues = [...values, limit, offset];
+  const [totalResult, result] = await Promise.all([
+    cloudOperationsPool().query<{ count: string }>(
+      `select count(*)::text as count from public.history where owner_username = $1 ${dateFilter}`,
+      values
+    ),
+    cloudOperationsPool().query<HistoryRow>(
+      `select id, ts, cls_name, confidence, route_label, bin_index, uart_command,
+              ack_status, device_id, image_available
+         from public.history
+        where owner_username = $1 ${dateFilter}
+        order by ts desc, id desc
+        limit $${listValues.length - 1} offset $${listValues.length}`,
+      listValues
+    )
+  ]);
   return { rows: result.rows.map(historyItem), total: Number(totalResult.rows[0]?.count ?? 0) };
 }
 
@@ -117,6 +120,10 @@ export async function cloudUserDevice(identity: CloudAuthIdentity): Promise<User
 
 export async function cloudUserReport(identity: CloudAuthIdentity, rangeDays: AnalyticsRangeDays): Promise<UserReport> {
   const analytics = await cloudUserAnalytics(identity, rangeDays);
+  return buildUserReport(analytics, rangeDays);
+}
+
+function buildUserReport(analytics: UserAnalytics, rangeDays: AnalyticsRangeDays): UserReport {
   const recycleRate = Math.round(analytics.eco_score.recyclable_rate);
   const delta = analytics.comparison.delta;
   return {
@@ -136,6 +143,10 @@ export async function cloudUserReport(identity: CloudAuthIdentity, rangeDays: An
 
 export async function cloudUserExperience(identity: CloudAuthIdentity, rangeDays: AnalyticsRangeDays): Promise<UserExperience> {
   const analytics = await cloudUserAnalytics(identity, rangeDays);
+  return buildUserExperience(analytics, rangeDays);
+}
+
+function buildUserExperience(analytics: UserAnalytics, rangeDays: AnalyticsRangeDays): UserExperience {
   const generatedAt = new Date().toISOString();
   const notifications: UserExperience["notifications"] = [];
   if (!analytics.total) notifications.push({ id: "empty-history", title: "Chưa có dữ liệu trong khoảng này", message: "Hãy bỏ rác qua máy để dashboard tạo biểu đồ và lời khuyên chính xác hơn.", severity: "info", created_at: generatedAt, route: "/user/dashboard", action_label: "Xem tổng quan" });
@@ -157,6 +168,34 @@ export async function cloudUserExperience(identity: CloudAuthIdentity, rangeDays
     ].sort((a, b) => b.score - a.score).map((item, index) => ({ ...item, rank: index + 1 })),
     community_cards: analytics.total ? [{ id: "eco-score", title: "Eco Score của tôi", message: `Bạn đang đạt ${analytics.eco_score.score}/100 điểm trong kỳ này.`, metric: `${analytics.eco_score.score}/100`, share_text: "Tôi đang theo dõi thói quen phân loại rác với Trash Sorter Pro.", tone: analytics.eco_score.score >= 70 ? "success" : "warning" }] : [{ id: "welcome", title: "Bắt đầu nhật ký xanh", message: "Khi có dữ liệu, Eco-Share sẽ tạo thẻ chia sẻ thành tích.", metric: "0 lượt", share_text: "", tone: "neutral" }],
     quick_actions: [{ label: "Xem báo cáo", route: "/user/reports" }, { label: "Hỏi EcoPet", route: "/user/ecopet" }, { label: "Kiểm tra thiết bị", route: "/user/device" }]
+  };
+}
+
+export async function cloudUserDashboardSummary(identity: CloudAuthIdentity, rangeDays: AnalyticsRangeDays) {
+  const [analytics, history, binMap, alerts, schedules] = await Promise.all([
+    cloudUserAnalytics(identity, rangeDays),
+    cloudUserHistory(identity, { limit: 24 }),
+    cloudBinMap(identity, false),
+    cloudAlerts(identity, false),
+    cloudSchedules(identity)
+  ]);
+  const deviceStatus = { ...analytics.device_status, bins: analytics.bins };
+  const device: UserDevice = {
+    generated_at: new Date().toISOString(),
+    device_status: deviceStatus,
+    bins: analytics.bins,
+    recent_activity: history.rows.slice(0, 8),
+    owner_username: identity.username
+  };
+  return {
+    analytics,
+    history,
+    device,
+    report: buildUserReport(analytics, rangeDays),
+    experience: buildUserExperience(analytics, rangeDays),
+    bin_map: binMap,
+    alerts,
+    schedules
   };
 }
 
@@ -239,8 +278,8 @@ async function scopedDeviceStatus(username: string): Promise<DeviceStatus> {
 }
 
 async function scopedBins(username: string): Promise<BinFullness[]> {
-  const result = await cloudOperationsPool().query<BinRow>(`select b.bin_index, b.label, b.fill_percent, b.updated_at from public.bins b join public.bin_stations s on s.station_id = b.station_id where s.assigned_owner_username = $1 and coalesce(b.active::text, '') not in ('0','false','f','no','') order by b.bin_index`, [username]);
-  return result.rows.map((row) => ({ bin_index: Number(row.bin_index), label: row.label, percent: Math.max(0, Math.min(100, Number(row.fill_percent ?? 0))), updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : null, stale: !row.updated_at || Date.now() - new Date(row.updated_at).getTime() > 120_000 }));
+  const result = await cloudOperationsPool().query<BinRow>(`select b.bin_index, b.label, s.name as station_name, b.fill_percent, b.updated_at from public.bins b join public.bin_stations s on s.station_id = b.station_id where s.assigned_owner_username = $1 and coalesce(b.active::text, '') not in ('0','false','f','no','') order by s.name, b.bin_index`, [username]);
+  return result.rows.map((row) => ({ bin_index: Number(row.bin_index), label: `${row.station_name} - ${row.label}`, percent: Math.max(0, Math.min(100, Number(row.fill_percent ?? 0))), updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : null, stale: !row.updated_at || Date.now() - new Date(row.updated_at).getTime() > 120_000 }));
 }
 
 function historyItem(row: HistoryRow): UserHistoryItem { return { id: Number(row.id), ts: new Date(row.ts).toISOString(), cls_name: row.cls_name, confidence: round3(Number(row.confidence ?? 0)), route_label: row.route_label, bin_index: row.bin_index === null ? null : Number(row.bin_index), category: category(row), ack_status: row.ack_status, device_id: row.device_id, image_available: false }; }

@@ -2,6 +2,7 @@ const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 export const CLOUD_CHAT_MODEL = "deepseek-v4-flash";
 
 type DeepSeekPayload = { choices?: Array<{ message?: { content?: unknown } }> };
+type DeepSeekStreamPayload = { choices?: Array<{ delta?: { content?: unknown } }> };
 
 export class CloudChatProviderError extends Error {
   constructor(readonly status = 0) {
@@ -20,20 +21,89 @@ export async function askCloudDeepSeek(role: "admin" | "user", message: string, 
     { role: "user", content: JSON.stringify({ question: message, context }) }
   ]);
   const polished = keepGreetingAnswerFocused(message, polishAnswer(answer, role));
-  if (!needsAccentRepair(polished)) return polished;
+  if (needsAccentRepair(polished)) throw new CloudChatProviderError();
+  return polished;
+}
 
-  const repaired = keepGreetingAnswerFocused(message, polishAnswer(
-    await complete([
+export async function streamCloudDeepSeek(
+  role: "admin" | "user",
+  message: string,
+  context: Record<string, unknown>,
+  onDelta: (text: string) => void,
+  externalSignal?: AbortSignal
+) {
+  const apiKey = process.env.DEEPSEEK_API_KEY?.trim() ?? "";
+  if (!apiKey) throw new CloudChatProviderError();
+  const controller = new AbortController();
+  const totalSeconds = boundedNumber(process.env.DEEPSEEK_TIMEOUT_SECONDS, 45, 10, 75);
+  const firstTokenSeconds = boundedNumber(process.env.DEEPSEEK_FIRST_TOKEN_TIMEOUT_SECONDS, 20, 5, 30);
+  const totalTimeout = setTimeout(() => controller.abort(), totalSeconds * 1000);
+  const firstTokenTimeout = setTimeout(() => controller.abort(), firstTokenSeconds * 1000);
+  const abortFromCaller = () => controller.abort();
+  externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
+  let raw = "";
+  try {
+    const response = await fetch(
+      `${(process.env.DEEPSEEK_BASE_URL?.trim() || DEFAULT_DEEPSEEK_BASE_URL).replace(/\/$/, "")}/chat/completions`,
       {
-        role: "system",
-        content: "Viết lại nguyên nghĩa nội dung sau bằng tiếng Việt có dấu đầy đủ. Không thêm dữ kiện, không dùng Markdown, tối đa 5 ý ngắn."
-      },
-      { role: "user", content: polished }
-    ]),
-    role
-  ));
-  if (needsAccentRepair(repaired)) throw new CloudChatProviderError();
-  return repaired;
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: CLOUD_CHAT_MODEL,
+          messages: [
+            { role: "system", content: systemPrompt(role) },
+            { role: "user", content: JSON.stringify({ question: message, context }) }
+          ],
+          thinking: { type: "disabled" },
+          stream: true,
+          temperature: 0.2,
+          max_tokens: 520
+        }),
+        signal: controller.signal
+      }
+    );
+    if (!response.ok || !response.body) throw new CloudChatProviderError(response.status);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let receivedFirstToken = false;
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (!data || data === "[DONE]") continue;
+        let payload: DeepSeekStreamPayload;
+        try {
+          payload = JSON.parse(data) as DeepSeekStreamPayload;
+        } catch {
+          continue;
+        }
+        const delta = payload.choices?.[0]?.delta?.content;
+        if (typeof delta !== "string" || !delta) continue;
+        if (!receivedFirstToken) {
+          receivedFirstToken = true;
+          clearTimeout(firstTokenTimeout);
+        }
+        raw += delta;
+        onDelta(delta);
+      }
+      if (done) break;
+    }
+    const polished = keepGreetingAnswerFocused(message, polishAnswer(raw, role));
+    if (!polished || needsAccentRepair(polished)) throw new CloudChatProviderError();
+    return polished;
+  } catch (error) {
+    if (error instanceof CloudChatProviderError) throw error;
+    throw new CloudChatProviderError();
+  } finally {
+    clearTimeout(firstTokenTimeout);
+    clearTimeout(totalTimeout);
+    externalSignal?.removeEventListener("abort", abortFromCaller);
+  }
 }
 
 async function complete(messages: Array<{ role: string; content: string }>) {

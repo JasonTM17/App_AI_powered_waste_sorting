@@ -5,7 +5,7 @@ import {
   CloudAuthConfigError,
   extractBearerToken
 } from "@/lib/server/cloud-auth";
-import { CloudChatInputError, generateCloudChatResponse } from "@/lib/server/cloud-chat";
+import { CloudChatInputError, createCloudChatStreamResponse } from "@/lib/server/cloud-chat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,6 +20,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const authStartedAt = Date.now();
     const identity = await authenticateSession(extractBearerToken(request.headers.get("authorization")));
     if (!identity) {
       return NextResponse.json({ detail: "Invalid or missing agent token" }, { status: 401 });
@@ -27,7 +28,12 @@ export async function POST(request: NextRequest) {
     if (identity.role !== "admin") {
       return NextResponse.json({ detail: "Admin role is required" }, { status: 403 });
     }
-    return NextResponse.json(await generateCloudChatResponse(identity, payload.message, startedAt));
+    const response = await createCloudChatStreamResponse(identity, payload.message, startedAt, request.signal);
+    response.headers.set(
+      "Server-Timing",
+      `auth;dur=${Date.now() - authStartedAt}, ${response.headers.get("Server-Timing") ?? ""}`
+    );
+    return response;
   } catch (error) {
     if (error instanceof CloudChatInputError) {
       return NextResponse.json({ detail: error.message }, { status: 400 });

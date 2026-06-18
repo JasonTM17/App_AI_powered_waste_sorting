@@ -17,7 +17,7 @@ test("user map falls back cleanly when OSM tiles fail", async ({ page }) => {
   expect(mapData.stations.length).toBeGreaterThan(0);
   expect(mapData.stations.length).toBeLessThan(10);
   await expect(page.locator(".operations-station-row")).toHaveCount(mapData.stations.length);
-  await expect(page.locator(".alert.compact-alert")).toContainText(/Tile bản đồ chưa tải được/i);
+  await expect(page.locator(".alert.compact-alert")).toContainText(/Ô bản đồ chưa tải được/i);
 
   await assertNoHorizontalOverflow(page);
 });

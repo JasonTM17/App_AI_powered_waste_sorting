@@ -65,7 +65,7 @@ describe("cloud chat context and quota", () => {
 
     expect(mocks.query.mock.calls[0][1]).toEqual(["alice"]);
     expect(mocks.query.mock.calls[1][1]).toEqual(["alice"]);
-    expect(mocks.map).toHaveBeenCalledWith(USER, false);
+    expect(mocks.map).not.toHaveBeenCalled();
     expect(result.context.scope).toBe("user_owned_cloud_data");
     expect(result.knowledgeUsed).toEqual(["Phân loại giấy"]);
   });

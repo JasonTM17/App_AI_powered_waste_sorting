@@ -98,7 +98,7 @@ test.describe("Bin map UI/UX", () => {
 
     await page.waitForSelector(".operations-map-frame", { state: "visible", timeout: 15000 });
 
-    await expect(page.locator(".alert.compact-alert")).toContainText(/Tile bản đồ chưa tải được/i);
+    await expect(page.locator(".alert.compact-alert")).toContainText(/Ô bản đồ chưa tải được/i);
 
     const mapData = await agentJson<BinMapResponse>("/api/admin/bin-map", session.token);
     await expect(page.locator(".operations-station-row")).toHaveCount(mapData.stations.length);
