@@ -649,20 +649,22 @@ export function DashboardClient() {
   async function refreshUserDashboard() {
     setBusy(true);
     try {
-      const localData = Promise.all([
-        fetchAgent<UserAnalytics>(`/api/user/analytics?range_days=${userRangeDays}`),
-        fetchAgent<UserHistoryResponse>("/api/user/history?limit=24"),
-        fetchAgent<UserDevice>("/api/user/device"),
-        fetchAgent<UserReport>(`/api/user/report?range_days=${userRangeDays}`),
-        fetchAgent<UserExperience>(`/api/user/experience?range_days=${userRangeDays}`)
-      ]);
+      const localData = USE_CLOUD_HARDWARE_BRIDGE
+        ? Promise.resolve(null)
+        : Promise.all([
+            fetchAgent<UserAnalytics>(`/api/user/analytics?range_days=${userRangeDays}`),
+            fetchAgent<UserHistoryResponse>("/api/user/history?limit=24"),
+            fetchAgent<UserDevice>("/api/user/device"),
+            fetchAgent<UserReport>(`/api/user/report?range_days=${userRangeDays}`),
+            fetchAgent<UserExperience>(`/api/user/experience?range_days=${userRangeDays}`)
+          ]);
       const cloudOperations = Promise.all([
         cloudFetch<BinMapResponse>("/api/user/bin-map", undefined, agentToken),
         cloudFetch<AlertsResponse>("/api/user/alerts?include_resolved=false", undefined, agentToken),
         cloudFetch<CollectionSchedulesResponse>("/api/user/collection-schedule", undefined, agentToken)
       ]);
       const [localResult, operationsResult] = await Promise.allSettled([localData, cloudOperations]);
-      if (localResult.status === "fulfilled") {
+      if (localResult.status === "fulfilled" && localResult.value) {
         const [analyticsData, historyData, deviceData, reportData, experienceData] = localResult.value;
         setUserAnalytics(analyticsData);
         setUserHistoryRows(historyData.rows);
@@ -1255,16 +1257,17 @@ export function DashboardClient() {
       const trainingLike = scope === "training";
       const statusPath = settingsLike || cameraLike ? "/api/status" : "/api/status?include_devices=false";
       if (operationsLike) {
-        const statusAttempt = await Promise.allSettled([scopedFetch<RuntimeStatus>(statusPath)]);
-        if (statusAttempt[0].status === "fulfilled") {
-          setStatus(statusAttempt[0].value);
+        let localStatusError = "";
+        if (!USE_CLOUD_HARDWARE_BRIDGE) {
+          const statusAttempt = await Promise.allSettled([scopedFetch<RuntimeStatus>(statusPath)]);
+          if (statusAttempt[0].status === "fulfilled") {
+            setStatus(statusAttempt[0].value);
+          } else {
+            localStatusError = "Local agent offline; du lieu van hanh dang doc tu Supabase cloud.";
+          }
         }
         await refreshAdminOperations();
-        setAgentError(
-          statusAttempt[0].status === "rejected"
-            ? "Local agent offline; du lieu van hanh dang doc tu Supabase cloud."
-            : ""
-        );
+        setAgentError(localStatusError);
         return;
       }
       const hardwareBridgeScope = USE_CLOUD_HARDWARE_BRIDGE && (cameraLike || trainingLike);
