@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { screen, cleanup, waitFor } from "@testing-library/react";
+import { screen, cleanup, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { UserDashboardPanel } from "@/components/user-dashboard-panel";
 import { renderWithProviders } from "../helpers/render-with-providers";
@@ -148,6 +148,21 @@ describe("UserDashboardPanel", () => {
     await waitFor(() => {
       expect(document.querySelector(".app-shell")).toHaveClass("sidebar-collapsed");
     });
+  });
+
+  it("opens mobile drawer and closes it after selecting a route", async () => {
+    const user = userEvent.setup();
+    const { props } = setup();
+
+    expect(screen.queryByRole("dialog", { name: /Tất cả chức năng/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Mở tất cả chức năng/i }));
+
+    const drawer = screen.getByRole("dialog", { name: /Tất cả chức năng/i });
+    expect(drawer).toBeInTheDocument();
+    await user.click(within(drawer).getByRole("link", { name: /Lịch sử/i }));
+
+    expect(props.onViewChange).toHaveBeenCalledWith("history");
+    expect(screen.queryByRole("dialog", { name: /Tất cả chức năng/i })).not.toBeInTheDocument();
   });
 
   it("renders EcoPet as an actionable user screen", async () => {

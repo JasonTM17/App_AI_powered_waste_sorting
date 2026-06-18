@@ -59,7 +59,12 @@ test("User navigation keeps URL, content, and browser history in sync", async ({
   const consoleErrors = collectConsoleErrors(page);
   await openAppAs(page, "user", "/user/dashboard");
 
-  await page.getByRole("link", { name: /Lịch sử/i }).click();
+  if ((page.viewportSize()?.width ?? 1440) <= 760) {
+    await page.getByRole("button", { name: /Mở tất cả chức năng/i }).click();
+    await page.getByRole("dialog", { name: /Tất cả chức năng/i }).getByRole("link", { name: /Lịch sử/i }).click();
+  } else {
+    await page.getByRole("link", { name: /Lịch sử/i }).click();
+  }
   await expect(page).toHaveURL(/\/user\/history$/);
   await expect(page.locator("body")).toContainText(/Lịch sử của bạn|Plastic bottle|Aluminum can/i);
 
@@ -73,6 +78,27 @@ test("User navigation keeps URL, content, and browser history in sync", async ({
   await assertUserShellHasNoAdminControls(page);
   await assertNoHorizontalOverflow(page);
 
+  expectNoConsoleErrors(consoleErrors);
+});
+
+test("Mobile User taskbar opens a drawer and closes after route selection", async ({ page }) => {
+  const viewport = page.viewportSize();
+  test.skip((viewport?.width ?? 1440) > 760, "Mobile drawer is only active on phone layouts");
+  const consoleErrors = collectConsoleErrors(page);
+  await openAppAs(page, "user", "/user/dashboard");
+
+  await expect(page.getByRole("navigation", { name: /User navigation/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Mở tất cả chức năng/i })).toBeVisible();
+  await page.getByRole("button", { name: /Mở tất cả chức năng/i }).click();
+
+  const drawer = page.getByRole("dialog", { name: /Tất cả chức năng/i });
+  await expect(drawer).toBeVisible();
+  await drawer.getByRole("link", { name: /Lịch sử/i }).click();
+
+  await expect(page).toHaveURL(/\/user\/history$/);
+  await expect(drawer).toHaveCount(0);
+  await assertUserShellHasNoAdminControls(page);
+  await assertNoHorizontalOverflow(page);
   expectNoConsoleErrors(consoleErrors);
 });
 

@@ -37,6 +37,7 @@ type FloatingPosition = {
 };
 
 const DRAG_THRESHOLD_PX = 6;
+const MOBILE_BOTTOM_NAV_RESERVE_PX = 96;
 const STORAGE_PREFIX = "trash-sorter-chatbot-pet-position";
 const ADMIN_PROMPT_CLOUDS = [
   "Camera USB đang ổn không?",
@@ -389,8 +390,9 @@ function promptCloudPositionNearTrigger(position: FloatingPosition, compact: boo
 
 function clampFloatingPosition(x: number, y: number, width = 58, height = 58): FloatingPosition {
   const margin = 12;
+  const bottomReserve = window.innerWidth <= 760 ? MOBILE_BOTTOM_NAV_RESERVE_PX : 0;
   const maxX = Math.max(margin, window.innerWidth - width - margin);
-  const maxY = Math.max(margin, window.innerHeight - height - margin);
+  const maxY = Math.max(margin, window.innerHeight - height - margin - bottomReserve);
   return {
     x: Math.min(Math.max(margin, x), maxX),
     y: Math.min(Math.max(margin, y), maxY)

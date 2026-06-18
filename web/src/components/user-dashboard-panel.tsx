@@ -14,14 +14,16 @@ import {
   History,
   Home,
   MapPin,
+  Menu,
   Server,
   Trophy,
   UserRound,
   Users,
+  X,
   type LucideIcon
 } from "lucide-react";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { AccountControl } from "@/components/account-control";
 import { TrashSorterLogo } from "@/components/brand/trash-sorter-logo";
@@ -31,7 +33,9 @@ import type { UserDashboardPanelProps, UserView } from "@/components/user-dashbo
 import { UserHeroSummary } from "@/components/user-dashboard/user-hero-summary";
 import { UserRouteContent } from "@/components/user-dashboard/user-route-content";
 
-const userNav: Array<{ id: UserView; href: string; label: string; icon: LucideIcon }> = [
+type UserNavItem = { id: UserView; href: string; label: string; icon: LucideIcon };
+
+const userNav: UserNavItem[] = [
   { id: "dashboard", href: "/user/dashboard", label: "Tổng quan", icon: Home },
   { id: "analytics", href: "/user/analytics", label: "Phân tích", icon: BarChart3 },
   { id: "map", href: "/user/map", label: "Bản đồ thùng", icon: MapPin },
@@ -51,29 +55,79 @@ const userNav: Array<{ id: UserView; href: string; label: string; icon: LucideIc
 ];
 
 const USER_SIDEBAR_COLLAPSED_KEY = "trash-sorter-user-sidebar-collapsed";
+const mobileTaskbarNavIds: UserView[] = ["dashboard", "analytics", "map", "alerts", "account"];
 
 export function UserDashboardPanel(props: UserDashboardPanelProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+  const mobileDrawerRef = useRef<HTMLDivElement | null>(null);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const { agentError, analytics, auth, busy, chatAnswer, chatBusy, chatQuestion, notice, rangeDays, view } = props;
   const primaryNav = userNav.slice(0, 5);
   const secondaryNav = userNav.slice(5);
+  const mobileTaskbarNav = mobileTaskbarNavIds
+    .map((id) => userNav.find((item) => item.id === id))
+    .filter((item): item is UserNavItem => Boolean(item));
+  const mobileDrawerNav = userNav.filter((item) => !mobileTaskbarNavIds.includes(item.id));
   const isMapView = view === "map";
 
   useEffect(() => {
     setIsSidebarCollapsed(window.localStorage.getItem(USER_SIDEBAR_COLLAPSED_KEY) === "1");
   }, []);
 
+  useEffect(() => {
+    if (!isMobileNavOpen) {
+      return;
+    }
+    const previousActive = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsMobileNavOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    window.setTimeout(() => {
+      mobileDrawerRef.current?.querySelector<HTMLAnchorElement | HTMLButtonElement>("a, button")?.focus();
+    }, 0);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      if (previousActive && document.contains(previousActive)) {
+        previousActive.focus();
+      } else {
+        mobileMenuButtonRef.current?.focus();
+      }
+    };
+  }, [isMobileNavOpen]);
+
+  useEffect(() => {
+    setIsMobileNavOpen(false);
+  }, [view]);
+
   function updateSidebarCollapsed(collapsed: boolean) {
     setIsSidebarCollapsed(collapsed);
     window.localStorage.setItem(USER_SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+  }
+
+  function handleUserViewChange(nextView: UserView) {
+    props.onViewChange(nextView);
+    setIsMobileNavOpen(false);
   }
 
   return (
     <div
       className={`app-shell user-shell polished-user-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""} ${
         isMapView ? "user-map-view" : ""
-      }`}
+      } ${isMobileNavOpen ? "mobile-nav-open" : ""}`}
     >
+      {isMobileNavOpen ? (
+        <button
+          aria-label="Đóng menu chức năng"
+          className="mobile-nav-scrim"
+          onClick={() => setIsMobileNavOpen(false)}
+          type="button"
+        />
+      ) : null}
+
       <aside className="sidebar user-sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -85,9 +139,9 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
           </div>
         </div>
         <nav className="nav-list user-nav-list" aria-label="User navigation">
-          <UserNavGroup items={primaryNav} view={view} onViewChange={props.onViewChange} />
+          <UserNavGroup items={primaryNav} view={view} onViewChange={handleUserViewChange} />
           <div className="user-nav-divider" />
-          <UserNavGroup items={secondaryNav} view={view} onViewChange={props.onViewChange} />
+          <UserNavGroup items={secondaryNav} view={view} onViewChange={handleUserViewChange} />
         </nav>
         <div className="agent-card user-agent-card">
           <span className="eyebrow">Hỗ trợ</span>
@@ -107,6 +161,48 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
           {isSidebarCollapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
         </button>
       </aside>
+
+      <nav className="mobile-bottom-taskbar" aria-label="User navigation">
+        {mobileTaskbarNav.map((item) => (
+          <MobileNavButton item={item} key={item.id} view={view} onViewChange={handleUserViewChange} />
+        ))}
+        <button
+          aria-controls="mobile-user-nav-drawer"
+          aria-expanded={isMobileNavOpen}
+          aria-label={isMobileNavOpen ? "Đóng tất cả chức năng" : "Mở tất cả chức năng"}
+          className={`mobile-taskbar-item ${isMobileNavOpen ? "active" : ""}`}
+          onClick={() => setIsMobileNavOpen((current) => !current)}
+          ref={mobileMenuButtonRef}
+          type="button"
+        >
+          <Menu aria-hidden="true" focusable="false" size={20} />
+          <span>Tất cả</span>
+        </button>
+      </nav>
+
+      {isMobileNavOpen ? (
+        <div
+          aria-label="Tất cả chức năng người dùng"
+          aria-modal="true"
+          className="mobile-nav-drawer"
+          id="mobile-user-nav-drawer"
+          ref={mobileDrawerRef}
+          role="dialog"
+        >
+          <div className="mobile-nav-drawer-header">
+            <div>
+              <strong>Chức năng</strong>
+              <span>Chọn mục cần mở</span>
+            </div>
+            <button aria-label="Đóng menu chức năng" className="icon-button" onClick={() => setIsMobileNavOpen(false)} type="button">
+              <X aria-hidden="true" focusable="false" size={18} />
+            </button>
+          </div>
+          <nav aria-label="Danh sách chức năng người dùng" className="mobile-nav-drawer-list">
+            <UserNavGroup items={mobileDrawerNav} view={view} onViewChange={handleUserViewChange} />
+          </nav>
+        </div>
+      ) : null}
 
       <main className="workspace user-workspace">
         <header className="topbar user-topbar">
@@ -156,12 +252,40 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
   );
 }
 
+function MobileNavButton({
+  item,
+  onViewChange,
+  view
+}: {
+  item: UserNavItem;
+  view: UserView;
+  onViewChange: (value: UserView) => void;
+}) {
+  const Icon = item.icon;
+  return (
+    <a
+      aria-current={view === item.id ? "page" : undefined}
+      aria-label={item.label}
+      className={view === item.id ? "mobile-taskbar-item active" : "mobile-taskbar-item"}
+      href={item.href}
+      onClick={(event) => {
+        event.preventDefault();
+        onViewChange(item.id);
+      }}
+      title={item.label}
+    >
+      <Icon aria-hidden="true" focusable="false" size={20} />
+      <span>{item.label}</span>
+    </a>
+  );
+}
+
 function UserNavGroup({
   items,
   onViewChange,
   view
 }: {
-  items: Array<{ id: UserView; href: string; label: string; icon: LucideIcon }>;
+  items: UserNavItem[];
   view: UserView;
   onViewChange: (value: UserView) => void;
 }) {
@@ -171,6 +295,7 @@ function UserNavGroup({
         const Icon = item.icon;
         return (
           <a
+            aria-current={view === item.id ? "page" : undefined}
             aria-label={item.label}
             className={view === item.id ? "nav-item active" : "nav-item"}
             href={item.href}

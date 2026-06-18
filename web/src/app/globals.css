@@ -7067,3 +7067,343 @@ body {
     width: 56px;
   }
 }
+
+/* Mobile User shell: bottom taskbar + drawer replaces the wide horizontal sidebar. */
+.mobile-bottom-taskbar,
+.mobile-nav-drawer,
+.mobile-nav-scrim {
+  display: none;
+}
+
+@media (min-width: 761px) {
+  .polished-user-shell > .user-sidebar {
+    display: grid;
+  }
+}
+
+@media (max-width: 760px) {
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .polished-user-shell {
+    --mobile-taskbar-height: 82px;
+    --mobile-safe-bottom: env(safe-area-inset-bottom);
+    display: block;
+    min-height: 100dvh;
+    overflow-x: clip;
+  }
+
+  .polished-user-shell > .user-sidebar {
+    display: none;
+  }
+
+  .polished-user-shell .user-workspace {
+    min-height: 100dvh;
+    overflow-x: clip;
+    padding: 0 14px calc(var(--mobile-taskbar-height) + var(--mobile-safe-bottom) + 22px);
+  }
+
+  .polished-user-shell .user-topbar {
+    margin: 0 -14px;
+    padding: 8px 14px;
+    position: sticky;
+    top: 0;
+    z-index: 35;
+  }
+
+  .polished-user-shell .user-dashboard-grid,
+  .polished-user-shell .content-grid,
+  .polished-user-shell .stitch-kpi-row,
+  .polished-user-shell .user-report-grid,
+  .polished-user-shell .user-card-grid,
+  .polished-user-shell .account-form-grid,
+  .polished-user-shell .ecopet-layout,
+  .polished-user-shell .community-summary-grid,
+  .polished-user-shell .social-feed,
+  .polished-user-shell .user-account-grid {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .polished-user-shell .user-panel,
+  .polished-user-shell .user-metric-card,
+  .polished-user-shell .metric-card,
+  .polished-user-shell .stitch-chart-card,
+  .polished-user-shell .stitch-recent-card,
+  .polished-user-shell .stitch-bin-card,
+  .polished-user-shell .operations-map-card,
+  .polished-user-shell .operations-list-card,
+  .polished-user-shell .operations-station-row,
+  .polished-user-shell .user-report-card,
+  .polished-user-shell .experience-card,
+  .polished-user-shell .challenge-row,
+  .polished-user-shell .leaderboard-row,
+  .polished-user-shell .community-card,
+  .polished-user-shell .user-account-header,
+  .polished-user-shell .account-card,
+  .polished-user-shell .device-owner-panel,
+  .polished-user-shell .report-export-panel,
+  .polished-user-shell .notification-center,
+  .polished-user-shell .challenge-panel,
+  .polished-user-shell .leaderboard-panel {
+    max-width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .mobile-bottom-taskbar {
+    align-items: center;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid rgba(180, 205, 174, 0.78);
+    border-radius: 22px 22px 0 0;
+    bottom: 0;
+    box-shadow: 0 -14px 34px rgba(37, 60, 45, 0.14);
+    display: grid;
+    gap: 2px;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    left: 0;
+    min-height: calc(var(--mobile-taskbar-height) + var(--mobile-safe-bottom));
+    padding: 9px 8px calc(9px + var(--mobile-safe-bottom));
+    position: fixed;
+    right: 0;
+    z-index: 88;
+  }
+
+  .mobile-taskbar-item {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 16px;
+    color: #435047;
+    cursor: pointer;
+    display: grid;
+    font: inherit;
+    gap: 4px;
+    justify-items: center;
+    min-height: 58px;
+    min-width: 0;
+    padding: 6px 4px;
+    text-decoration: none;
+    touch-action: manipulation;
+    transition:
+      background-color 0.18s ease,
+      color 0.18s ease,
+      transform 0.18s ease;
+  }
+
+  .mobile-taskbar-item svg {
+    flex: 0 0 auto;
+  }
+
+  .mobile-taskbar-item span {
+    display: block;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 12px;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-taskbar-item:hover,
+  .mobile-taskbar-item:focus-visible,
+  .mobile-taskbar-item.active {
+    background: #e7f4e1;
+    color: #1f6535;
+    outline: 0;
+  }
+
+  .mobile-taskbar-item:active {
+    transform: translateY(1px) scale(0.98);
+  }
+
+  .mobile-nav-scrim {
+    background: rgba(17, 26, 20, 0.48);
+    border: 0;
+    display: block;
+    inset: 0;
+    padding: 0;
+    position: fixed;
+    z-index: 86;
+  }
+
+  .mobile-nav-drawer {
+    background: #ffffff;
+    border: 1px solid var(--stitch-border, #d7e0d2);
+    border-radius: 24px 24px 0 0;
+    bottom: 0;
+    box-shadow: 0 -26px 62px rgba(24, 40, 30, 0.24);
+    display: grid;
+    gap: 12px;
+    left: 0;
+    max-height: min(78dvh, 640px);
+    opacity: 0;
+    overflow: hidden;
+    padding: 14px 14px calc(var(--mobile-taskbar-height) + var(--mobile-safe-bottom) + 12px);
+    pointer-events: none;
+    position: fixed;
+    right: 0;
+    transform: translateY(110%);
+    transition:
+      opacity 0.2s ease,
+      transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+    z-index: 87;
+  }
+
+  .polished-user-shell.mobile-nav-open .mobile-nav-drawer {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
+
+  .mobile-nav-drawer-header {
+    align-items: center;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+    min-width: 0;
+  }
+
+  .mobile-nav-drawer-header strong,
+  .mobile-nav-drawer-header span {
+    display: block;
+  }
+
+  .mobile-nav-drawer-header strong {
+    color: var(--stitch-text, #17211b);
+    font-size: 20px;
+    line-height: 26px;
+  }
+
+  .mobile-nav-drawer-header span {
+    color: var(--stitch-muted, #536158);
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .mobile-nav-drawer-header .icon-button {
+    flex: 0 0 44px;
+    height: 44px;
+    padding: 0;
+    width: 44px;
+  }
+
+  .mobile-nav-drawer-list {
+    display: grid;
+    gap: 8px;
+    max-height: calc(78dvh - var(--mobile-taskbar-height) - 92px);
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+  }
+
+  .mobile-nav-drawer-list .nav-item {
+    align-items: center;
+    background: #f8faf6;
+    border: 1px solid var(--stitch-border, #d7e0d2);
+    border-left: 1px solid var(--stitch-border, #d7e0d2);
+    border-radius: 14px;
+    color: var(--stitch-text, #17211b);
+    display: grid;
+    gap: 12px;
+    grid-template-columns: 42px minmax(0, 1fr);
+    min-height: 52px;
+    padding: 6px 12px 6px 6px;
+    text-decoration: none;
+    transform: none;
+  }
+
+  .mobile-nav-drawer-list .nav-item span {
+    display: block;
+    font-size: 14px;
+    font-weight: 800;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-nav-drawer-list .nav-item svg {
+    background: #edf7e8;
+    border-radius: 12px;
+    box-sizing: content-box;
+    color: var(--stitch-green, #256c3a);
+    padding: 10px;
+  }
+
+  .mobile-nav-drawer-list .nav-item:hover,
+  .mobile-nav-drawer-list .nav-item:focus-visible,
+  .mobile-nav-drawer-list .nav-item.active {
+    background: #e7f4e1;
+    border-color: #bdddb3;
+    color: #1f6535;
+    outline: 0;
+    transform: none;
+  }
+
+  .chatbot-pet-trigger {
+    bottom: calc(var(--mobile-taskbar-height) + var(--mobile-safe-bottom) + 12px);
+    right: 14px;
+    z-index: 74;
+  }
+
+  .chatbot-prompt-cloud {
+    bottom: calc(var(--mobile-taskbar-height) + var(--mobile-safe-bottom) + 70px);
+    right: 70px;
+    z-index: 73;
+  }
+
+  .chatbot-launcher.open {
+    z-index: 90;
+  }
+
+  .stitch-chat-panel.chat-panel-dock,
+  .chat-panel-dock {
+    bottom: calc(var(--mobile-taskbar-height) + var(--mobile-safe-bottom) + 10px);
+    left: 10px;
+    max-height: min(72dvh, 620px);
+    position: fixed;
+    right: 10px;
+    width: auto;
+    z-index: 89;
+  }
+
+  .operations-map-card.is-expanded {
+    bottom: calc(var(--mobile-taskbar-height) + var(--mobile-safe-bottom) + 8px);
+    left: 8px;
+    max-height: calc(100dvh - var(--mobile-taskbar-height) - var(--mobile-safe-bottom) - 16px);
+    right: 8px;
+    top: 8px;
+  }
+
+  .operations-map-card.is-expanded .operations-map-frame,
+  .user-map-view .operations-map-card.is-expanded .operations-map-frame,
+  .polished-user-shell .operations-map-card.is-expanded .operations-map-frame {
+    height: clamp(420px, 62dvh, 620px);
+  }
+}
+
+@media (max-width: 380px) {
+  .mobile-taskbar-item span {
+    font-size: 9px;
+  }
+
+  .mobile-bottom-taskbar {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+}
+
+@media (max-width: 760px) and (prefers-reduced-motion: reduce) {
+  .mobile-nav-drawer,
+  .mobile-taskbar-item {
+    transition: none;
+  }
+}
