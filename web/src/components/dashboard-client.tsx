@@ -196,7 +196,8 @@ type BinFullPopupState = {
 };
 
 const DATASET_LIMIT = 60;
-const USE_CLOUD_HARDWARE_BRIDGE = process.env.NODE_ENV === "production";
+const USE_CLOUD_HARDWARE_BRIDGE =
+  process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE !== "0";
 
 const BIN_LABELS: Record<string, string> = {
   O: "Hữu cơ",
@@ -231,6 +232,7 @@ export function DashboardClient() {
   const [active, setActive] = useState<TabId>("live");
   const [userView, setUserView] = useState<UserView>("dashboard");
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [agentToken, setAgentToken] = useState("");
   const [auth, setAuth] = useState<AuthMe | null>(null);
@@ -520,6 +522,9 @@ export function DashboardClient() {
   }
 
   async function fetchAgent<T>(path: string, init?: AgentFetchInit) {
+    if (USE_CLOUD_HARDWARE_BRIDGE) {
+      throw new AgentApiError("Chức năng local này không được gọi trực tiếp từ production.", 503);
+    }
     try {
       return await agentFetch<T>(path, init, agentToken);
     } catch (error) {
@@ -541,12 +546,15 @@ export function DashboardClient() {
     if (!nextToken) {
       setAuth(null);
       setAgentError("");
+      setIsRestoringSession(false);
       return;
     }
+    setIsRestoringSession(true);
     try {
       const me = await cloudFetch<AuthMe>("/api/me", undefined, nextToken);
       setAuth(me);
       setAgentError("");
+      setNotice(`Đã tiếp tục phiên ${me.display_name || me.username} (${me.role === "admin" ? "Admin" : "User"}).`);
     } catch (error) {
       if (error instanceof AgentApiError && error.status === 401) {
         clearSession("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
@@ -556,6 +564,8 @@ export function DashboardClient() {
       setUserAnalytics(null);
       setUserAdvisor(null);
       setAgentError(error instanceof Error ? error.message : "Không xác thực được agent");
+    } finally {
+      setIsRestoringSession(false);
     }
   }
 
@@ -586,6 +596,7 @@ export function DashboardClient() {
       window.localStorage.setItem(SESSION_TOKEN_KEY, data.token);
       setAgentToken(data.token);
       setAuth(nextAuth);
+      setIsRestoringSession(false);
       setLoginPassword("");
       setNotice("Đã đăng nhập");
       if (data.role === "user") {
@@ -649,23 +660,23 @@ export function DashboardClient() {
   async function refreshUserDashboard() {
     setBusy(true);
     try {
-      const localData = USE_CLOUD_HARDWARE_BRIDGE
-        ? Promise.resolve(null)
-        : Promise.all([
-            fetchAgent<UserAnalytics>(`/api/user/analytics?range_days=${userRangeDays}`),
-            fetchAgent<UserHistoryResponse>("/api/user/history?limit=24"),
-            fetchAgent<UserDevice>("/api/user/device"),
-            fetchAgent<UserReport>(`/api/user/report?range_days=${userRangeDays}`),
-            fetchAgent<UserExperience>(`/api/user/experience?range_days=${userRangeDays}`)
-          ]);
+      const dashboardFetch = <T,>(path: string) =>
+        USE_CLOUD_HARDWARE_BRIDGE ? cloudFetch<T>(path, undefined, agentToken) : fetchAgent<T>(path);
+      const dashboardData = Promise.all([
+        dashboardFetch<UserAnalytics>(`/api/user/analytics?range_days=${userRangeDays}`),
+        dashboardFetch<UserHistoryResponse>("/api/user/history?limit=24"),
+        dashboardFetch<UserDevice>("/api/user/device"),
+        dashboardFetch<UserReport>(`/api/user/report?range_days=${userRangeDays}`),
+        dashboardFetch<UserExperience>(`/api/user/experience?range_days=${userRangeDays}`)
+      ]);
       const cloudOperations = Promise.all([
         cloudFetch<BinMapResponse>("/api/user/bin-map", undefined, agentToken),
         cloudFetch<AlertsResponse>("/api/user/alerts?include_resolved=false", undefined, agentToken),
         cloudFetch<CollectionSchedulesResponse>("/api/user/collection-schedule", undefined, agentToken)
       ]);
-      const [localResult, operationsResult] = await Promise.allSettled([localData, cloudOperations]);
-      if (localResult.status === "fulfilled" && localResult.value) {
-        const [analyticsData, historyData, deviceData, reportData, experienceData] = localResult.value;
+      const [dashboardResult, operationsResult] = await Promise.allSettled([dashboardData, cloudOperations]);
+      if (dashboardResult.status === "fulfilled") {
+        const [analyticsData, historyData, deviceData, reportData, experienceData] = dashboardResult.value;
         setUserAnalytics(analyticsData);
         setUserHistoryRows(historyData.rows);
         setUserDevice(deviceData);
@@ -685,10 +696,8 @@ export function DashboardClient() {
           operationsResult.reason instanceof Error ? operationsResult.reason.message : "Khong tai duoc du lieu van hanh cloud";
         setUserOperationsRefreshError(message);
       }
-      if (localResult.status === "rejected" && operationsResult.status === "fulfilled") {
-        setAgentError("Local agent offline; du lieu ban do/canh bao dang doc tu Supabase cloud.");
-      } else if (localResult.status === "rejected") {
-        setAgentError(localResult.reason instanceof Error ? localResult.reason.message : "Khong tai duoc dashboard User");
+      if (dashboardResult.status === "rejected") {
+        setAgentError(dashboardResult.reason instanceof Error ? dashboardResult.reason.message : "Không tải được dữ liệu User từ cloud");
       } else {
         setAgentError("");
       }
@@ -702,7 +711,7 @@ export function DashboardClient() {
   async function requestUserAdvisor() {
     setBusy(true);
     try {
-      const data = await fetchAgent<UserAdvisorResponse>("/api/user/advisor", {
+      const advisorInit: AgentFetchInit = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -710,7 +719,10 @@ export function DashboardClient() {
           question: userAdvisorQuestion.trim()
         }),
         timeoutMs: 90_000
-      });
+      };
+      const data = USE_CLOUD_HARDWARE_BRIDGE
+        ? await cloudFetch<UserAdvisorResponse>("/api/user/advisor", advisorInit, agentToken)
+        : await fetchAgent<UserAdvisorResponse>("/api/user/advisor", advisorInit);
       setUserAdvisor(data);
       setAgentError("");
     } catch (error) {
@@ -942,6 +954,44 @@ export function DashboardClient() {
       await refreshUserOperations();
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : "Không đánh dấu thu gom được");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function selectDemoBinTarget(station: BinStation, bin: BinStation["bins"][number]) {
+    if (process.env.NEXT_PUBLIC_DEMO_HARDWARE_TARGET !== "1") {
+      setNotice("Demo cảm biến đầy chưa được bật.");
+      return;
+    }
+    const role = auth?.role;
+    if (role !== "admin" && role !== "user") {
+      setAgentError("Bạn cần đăng nhập để chọn thùng demo.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await cloudFetch<{ ok: boolean; message?: string }>(
+        role === "admin" ? "/api/admin/demo-bin-target" : "/api/user/demo-bin-target",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            station_id: station.station_id,
+            bin_id: bin.bin_id,
+            bin_index: bin.bin_index
+          })
+        },
+        agentToken
+      );
+      setNotice(`Đã chọn ${bin.label || `bin ${bin.bin_index}`} tại ${station.name} làm thùng demo cảm biến.`);
+      if (role === "admin") {
+        await refreshAdminOperations();
+      } else {
+        await refreshUserOperations();
+      }
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không chọn được thùng demo cảm biến");
     } finally {
       setBusy(false);
     }
@@ -1180,6 +1230,7 @@ export function DashboardClient() {
     setPasswordError("");
     setSessionMessage(message);
     setAgentError("");
+    setIsRestoringSession(false);
   }
 
   async function refreshAll() {
@@ -1509,6 +1560,7 @@ export function DashboardClient() {
     }
     if (!agentToken) {
       setAuth(null);
+      setIsRestoringSession(false);
       return;
     }
     void refreshIdentity(agentToken);
@@ -2303,6 +2355,18 @@ export function DashboardClient() {
     });
   }
 
+  if (isRestoringSession) {
+    return (
+      <main className="auth-screen">
+        <section className="auth-panel auth-restoring" role="status" aria-live="polite">
+          <div className="auth-spinner" aria-hidden="true" />
+          <h1>Đang khôi phục phiên đăng nhập</h1>
+          <p>Hệ thống đang xác minh tài khoản và quyền truy cập đã lưu.</p>
+        </section>
+      </main>
+    );
+  }
+
   if (!auth) {
     return (
       <AuthLoginPanel
@@ -2390,6 +2454,7 @@ export function DashboardClient() {
         onRefresh={() => void refreshUserDashboard()}
         onRefreshOperations={() => void refreshUserOperations()}
         onReportDeviceIssue={(payload) => void reportDeviceIssue(payload)}
+        onSelectDemoBin={(station, bin) => void selectDemoBinTarget(station, bin)}
         onUserMapInteraction={markUserMapInteraction}
         onViewChange={navigateUserView}
       />
@@ -2561,10 +2626,12 @@ export function DashboardClient() {
         {active === "bin-map" ? (
           <AdminBinMapPanel
             busy={busy}
+            demoTargetEnabled={process.env.NEXT_PUBLIC_DEMO_HARDWARE_TARGET === "1"}
             map={adminBinMap}
             schedules={adminSchedules}
             onCreateStation={(payload) => void createBinStation(payload)}
             onDeleteStation={(stationId) => void deleteBinStation(stationId)}
+            onSelectDemoBin={(station, bin) => void selectDemoBinTarget(station, bin)}
             onPatchStation={(stationId, payload) => void patchBinStation(stationId, payload)}
             onRefresh={() => void refreshAdminOperations()}
           />

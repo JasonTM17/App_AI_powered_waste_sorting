@@ -1386,7 +1386,7 @@ input[type="file"] {
   align-items: center;
   display: grid;
   gap: 8px;
-  grid-template-columns: 26px minmax(0, 1fr) 42px 72px;
+  grid-template-columns: 26px minmax(0, 1fr) 42px 72px auto;
 }
 
 .popup-bin-row > span,
@@ -1986,6 +1986,34 @@ td {
   max-width: 440px;
   padding: 30px;
   width: min(100%, 440px);
+}
+
+.auth-restoring {
+  justify-items: center;
+  text-align: center;
+}
+
+.auth-restoring h1,
+.auth-restoring p {
+  margin: 0;
+}
+
+.auth-restoring p {
+  color: #44474a;
+  line-height: 1.55;
+}
+
+.auth-spinner {
+  animation: auth-spin 0.8s linear infinite;
+  border: 3px solid #d9e7d6;
+  border-radius: 50%;
+  border-top-color: #2d6a31;
+  height: 34px;
+  width: 34px;
+}
+
+@keyframes auth-spin {
+  to { transform: rotate(360deg); }
 }
 
 .auth-brand {
@@ -6275,6 +6303,46 @@ select option {
     min-height: 56px;
     width: 56px;
   }
+}
+
+/* Final User sidebar geometry: one scroll region, stable rail, no clipped controls. */
+@media (min-width: 761px) {
+  .polished-user-shell { grid-template-columns: 280px minmax(0, 1fr); }
+  .polished-user-shell.sidebar-collapsed { grid-template-columns: 88px minmax(0, 1fr); }
+  .polished-user-shell > .user-sidebar {
+    display: grid;
+    grid-template-rows: 70px minmax(0, 1fr) auto 52px;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    padding: 18px 14px 12px;
+    width: auto;
+  }
+  .polished-user-shell > .user-sidebar .user-nav-list {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+  .polished-user-shell > .user-sidebar .sidebar-toggle {
+    inset: auto;
+    justify-self: center;
+    margin: 4px 0 0;
+    position: static;
+  }
+  .polished-user-shell.sidebar-collapsed > .user-sidebar { padding-inline: 10px; }
+  .polished-user-shell.sidebar-collapsed > .user-sidebar .brand { justify-content: center; min-width: 0; }
+  .polished-user-shell.sidebar-collapsed > .user-sidebar .brand-mark { flex: 0 0 52px; height: 52px; width: 52px; }
+  .polished-user-shell.sidebar-collapsed > .user-sidebar .user-nav-list { align-items: center; padding-inline: 0; }
+  .polished-user-shell.sidebar-collapsed > .user-sidebar .nav-item {
+    flex: 0 0 52px;
+    height: 52px;
+    justify-content: center;
+    min-width: 52px;
+    padding: 0;
+    width: 52px;
+  }
+  .polished-user-shell.sidebar-collapsed > .user-sidebar .user-agent-card { display: none; }
 }
 
 .polished-user-shell .user-range-control button {

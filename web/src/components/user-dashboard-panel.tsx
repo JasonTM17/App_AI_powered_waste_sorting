@@ -112,7 +112,7 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
         <header className="topbar user-topbar">
           <strong className="stitch-topbar-title">Trash Sorter Pro</strong>
           <div className="stitch-user-search" aria-label="Trạng thái dữ liệu người dùng">
-            <span>Dữ liệu từ thiết bị EcoSort local</span>
+            <span>Dữ liệu đồng bộ từ EcoSort Cloud</span>
           </div>
           <AccountControl auth={auth} busy={busy} onLogout={props.onLogout} />
         </header>
@@ -130,7 +130,7 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
         ) : null}
 
         {agentError ? <div className="alert">Dữ liệu chưa sẵn sàng: {agentError}</div> : null}
-        {notice && !agentError ? <div className="success">{notice}</div> : null}
+        {notice && !agentError && !isMapView ? <div className="success">{notice}</div> : null}
 
         <section className="content-grid user-dashboard-grid">
           <UserRouteContent {...props} />

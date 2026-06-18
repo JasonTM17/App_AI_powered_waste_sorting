@@ -38,10 +38,11 @@
     "@types/node": "^22.10.2",
     "@types/react": "^19.2.6",
     "@types/react-dom": "^19.2.3",
-    "@vitest/coverage-v8": "^2.1.9",
+    "@vitest/coverage-v8": "^3.2.6",
     "jsdom": "^29.1.1",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.9"
+    "vite": "^6.4.3",
+    "vitest": "^3.2.6"
   },
   "overrides": {
     "postcss": "^8.5.15"

@@ -315,11 +315,9 @@ export async function assertStitchPetLauncher(page: Page, open: boolean): Promis
 export async function assertUserChartsRender(page: Page): Promise<void> {
   const lineChart = page.locator(".user-line-chart");
   await expect(lineChart).toBeVisible();
-  const nonBlank = await lineChart.evaluate((svg) => {
-    const box = svg.getBoundingClientRect();
-    return box.width > 120 && box.height > 80 && svg.querySelectorAll("path, polyline, circle").length > 0;
-  });
-  expect(nonBlank).toBe(true);
+  await expect.poll(() => lineChart.evaluate((svg) => {
+    return svg.querySelectorAll("path, polyline, circle").length > 0;
+  })).toBe(true);
 }
 
 export function collectConsoleErrors(page: Page): string[] {

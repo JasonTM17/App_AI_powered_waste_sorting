@@ -132,6 +132,7 @@ describe("UserDashboardPanel", () => {
     expect(screen.getAllByText("Trash Sorter Pro").length).toBeGreaterThan(0);
     expect(screen.getByText("Xin chào, test-user")).toBeInTheDocument();
     expect(screen.getAllByText("Tổng quan").length).toBeGreaterThan(0);
+    expect(screen.getByText("Dữ liệu đồng bộ từ EcoSort Cloud")).toBeInTheDocument();
   });
 
   it("persists collapsed sidebar preference", async () => {

@@ -53,10 +53,12 @@ type AdminDevicesPanelProps = {
 
 type AdminBinMapPanelProps = {
   busy: boolean;
+  demoTargetEnabled?: boolean;
   map: BinMapResponse | null;
   schedules: CollectionSchedulesResponse | null;
   onCreateStation: (payload: BinStationCreatePayload) => void;
   onDeleteStation: (stationId: string) => void;
+  onSelectDemoBin?: (station: BinStation, bin: BinStation["bins"][number]) => void;
   onPatchStation: (stationId: string, payload: BinStationPatchPayload) => void;
   onRefresh: () => void;
 };
@@ -70,6 +72,7 @@ type AdminAlertsPanelProps = {
 
 type UserMapScreenProps = {
   busy: boolean;
+  demoTargetEnabled?: boolean;
   map: BinMapResponse | null;
   refreshMeta?: {
     lastUpdatedAt: string;
@@ -78,6 +81,7 @@ type UserMapScreenProps = {
   };
   onMapInteraction?: () => void;
   onRefresh: () => void;
+  onSelectDemoBin?: (station: BinStation, bin: BinStation["bins"][number]) => void;
 };
 
 type UserAlertsScreenProps = {
@@ -241,10 +245,12 @@ export function AdminDevicesPanel({ busy, devices, onSaveDevice }: AdminDevicesP
 
 export function AdminBinMapPanel({
   busy,
+  demoTargetEnabled,
   map,
   schedules,
   onCreateStation,
   onDeleteStation,
+  onSelectDemoBin,
   onPatchStation,
   onRefresh
 }: AdminBinMapPanelProps) {
@@ -263,12 +269,14 @@ export function AdminBinMapPanel({
       <OperationsBinMap
         editable
         busy={busy}
+        demoTargetEnabled={demoTargetEnabled}
         map={map}
         selectedStationId={selected?.station_id}
         onMoveStation={(stationId, latitude, longitude) =>
           onPatchStation(stationId, { coordinate_verified: true, latitude, longitude })
         }
         onRefresh={onRefresh}
+        onSelectDemoBin={onSelectDemoBin}
         onSelectStation={(station) => setSelectedId(station.station_id)}
       />
       <aside className="side-panel operations-side-panel">
@@ -344,18 +352,28 @@ export function AdminAlertsPanel({ alerts, busy, schedules, onPatchAlert }: Admi
   );
 }
 
-export function UserMapScreen({ busy, map, refreshMeta, onMapInteraction, onRefresh }: UserMapScreenProps) {
+export function UserMapScreen({
+  busy,
+  demoTargetEnabled,
+  map,
+  refreshMeta,
+  onMapInteraction,
+  onRefresh,
+  onSelectDemoBin
+}: UserMapScreenProps) {
   const [selectedId, setSelectedId] = useState("");
   const selected = map?.stations.find((station) => station.station_id === selectedId) ?? map?.stations[0] ?? null;
   return (
     <>
       <OperationsBinMap
         busy={busy}
+        demoTargetEnabled={demoTargetEnabled}
         map={map}
         refreshMeta={refreshMeta}
         selectedStationId={selected?.station_id}
         onInteraction={onMapInteraction}
         onRefresh={onRefresh}
+        onSelectDemoBin={onSelectDemoBin}
         onSelectStation={(station) => setSelectedId(station.station_id)}
       />
       <aside className="side-panel operations-side-panel">

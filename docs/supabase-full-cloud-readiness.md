@@ -4,6 +4,22 @@ Date: 2026-06-17
 
 Update: 2026-06-18
 
+## User Cloud Dashboard Update (2026-06-18)
+
+- Production User analytics, history, device, report, experience, advisor, and
+  CSV export now read scoped Supabase data through authenticated Next.js routes.
+- Every query derives `owner_username` from the verified session. Browser query
+  parameters cannot switch account scope.
+- The hardware bridge retries history uploads with `(device_id,
+  local_history_id)` and skips rows that do not have an owner instead of
+  publishing unassigned history.
+- A valid saved session is visibly restored; an expired token is removed before
+  returning to login. User routes continue to redirect away from Admin pages.
+- Production browser code blocks direct local-agent calls. Admin camera and
+  training remain available only through the allowlisted HTTPS hardware bridge.
+- A User without assigned hardware receives a completed empty dashboard and
+  the message `Chưa được gán thiết bị`, never another User's data.
+
 ## Architecture
 
 - Vercel hosts the Next.js web app.
@@ -67,6 +83,27 @@ It does not publish camera frames, local file paths, dataset images, passwords,
 session tokens, raw logs, or any endpoint for User-triggered camera/training
 actions.
 
+## Teacher Demo Data
+
+Preview the persistent seed without writing:
+
+```powershell
+python -m uv run python scripts/seed_supabase_demo_data.py
+```
+
+Apply it after setting `TRASH_SORTER_SUPABASE_DATABASE_URL` or `POSTGRES_URL`:
+
+```powershell
+python -m uv run python scripts/seed_supabase_demo_data.py --apply
+```
+
+Each active User receives three assigned stations, nine child bins, one online
+demo device, collection/alert records, and 60 idempotent history rows. Set
+`NEXT_PUBLIC_DEMO_HARDWARE_TARGET=1` on Vercel and
+`TRASH_SORTER_DEMO_HARDWARE_TARGET=1` on the hardware bridge. The latest bin
+selected on the map receives the next local fullness reading; `95%` or higher
+is stored as `full` and displayed as `Đã đầy`.
+
 ## Role Contract
 
 Admin:
@@ -93,6 +130,19 @@ The migration writes narrow events to `public.realtime_events`:
 
 Frontend code should subscribe to this table or mirror these rows into Supabase
 Broadcast. Payloads intentionally contain IDs/status values, not raw row dumps.
+
+## User Cloud API
+
+- `GET /api/user/analytics?range_days=7|30|90|180`
+- `GET /api/user/history?limit=&offset=&range_days=`
+- `GET /api/user/device`
+- `GET /api/user/report?range_days=`
+- `GET /api/user/experience?range_days=`
+- `POST /api/user/advisor`
+- `GET /api/user/history/export.csv?range_days=`
+
+These routes require an active User session. Missing sessions return `401`,
+non-User sessions return `403`, and all database reads use the session username.
 
 ## Deployment Gate
 

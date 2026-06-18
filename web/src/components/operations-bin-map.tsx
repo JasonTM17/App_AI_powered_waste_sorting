@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { AlertTriangle, CheckCircle2, LocateFixed, MapPin, Maximize2, Minimize2, RefreshCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -20,7 +20,9 @@ type OperationsBinMapProps = {
     isRefreshing: boolean;
     refreshError: string;
   };
+  demoTargetEnabled?: boolean;
   onInteraction?: () => void;
+  onSelectDemoBin?: (station: BinStation, bin: OperationBin) => void;
   onMoveStation?: (stationId: string, latitude: number, longitude: number) => void;
   onRefresh: () => void;
   onSelectStation?: (station: BinStation) => void;
@@ -44,7 +46,9 @@ function OperationsBinMapInner({
   onMoveStation,
   refreshMeta,
   selectedStationId,
+  demoTargetEnabled = false,
   onRefresh,
+  onSelectDemoBin,
   onSelectStation
 }: OperationsBinMapProps) {
   const mapElementRef = useRef<HTMLDivElement | null>(null);
@@ -285,7 +289,9 @@ function OperationsBinMapInner({
           }
 
           if (popupRoot) {
-            popupRoot.render(<StationPopupCard station={station} />);
+            popupRoot.render(
+              <StationPopupCard demoTargetEnabled={demoTargetEnabled} onSelectDemoBin={onSelectDemoBin} station={station} />
+            );
           }
 
           if (prevHadCluster !== needCluster) {
@@ -299,7 +305,9 @@ function OperationsBinMapInner({
           const popupElement = document.createElement("div");
           popupElement.className = "operations-map-popup-root";
           const newPopupRoot = createRoot(popupElement);
-          newPopupRoot.render(<StationPopupCard station={station} />);
+          newPopupRoot.render(
+            <StationPopupCard demoTargetEnabled={demoTargetEnabled} onSelectDemoBin={onSelectDemoBin} station={station} />
+          );
           popupRootsMapRef.current.set(station.station_id, newPopupRoot);
 
           const newMarker = leaflet
@@ -350,7 +358,7 @@ function OperationsBinMapInner({
     }
 
     void renderMarkers();
-  }, [editable, map, mapReady, onInteraction, onMoveStation, onSelectStation, selectedStationId, stations]);
+  }, [demoTargetEnabled, editable, map, mapReady, onInteraction, onMoveStation, onSelectDemoBin, onSelectStation, selectedStationId, stations]);
 
   useEffect(() => {
     if (!mapReady || !mapRef.current || !map || !selectedStationId) {
@@ -412,7 +420,7 @@ function OperationsBinMapInner({
       <div className="operations-map-card empty-state">
         <MapPin size={28} />
         <strong>Chưa có dữ liệu bản đồ</strong>
-        <span>Agent local chưa trả về danh sách thùng rác.</span>
+        <span>Chưa nhận được danh sách điểm rác từ hệ thống.</span>
       </div>
     );
   }
@@ -481,15 +489,15 @@ function OperationsBinMapInner({
       {tileFailed ? (
         <div className="alert compact-alert">
           <AlertTriangle size={16} />
-          <span>Tile bản đồ chưa tải được. Danh sách fallback bên dưới vẫn dùng được.</span>
+          <span>Ô bản đồ chưa tải được. Danh sách dự phòng bên dưới vẫn dùng được.</span>
         </div>
       ) : null}
-      {editable ? <p className="helper-text">Kéo marker để cập nhật vị trí, hệ thống sẽ lưu ngay vào DB.</p> : null}
+      {editable ? <p className="helper-text">Kéo marker để cập nhật vị trí, hệ thống sẽ lưu ngay vào cơ sở dữ liệu.</p> : null}
       {missingCoordinateCount ? (
         <div className="alert compact-alert">
           <LocateFixed size={16} />
           <span>
-            {missingCoordinateCount} trạm chưa có tọa độ hợp lệ. Danh sách fallback vẫn dùng được, marker chỉ hiển thị cho trạm có tọa độ.
+            {missingCoordinateCount} trạm chưa có tọa độ hợp lệ. Danh sách dự phòng vẫn dùng được, marker chỉ hiển thị cho trạm có tọa độ.
           </span>
         </div>
       ) : null}
@@ -604,7 +612,15 @@ function stationIcon(divIcon: (options?: DivIconOptions) => DivIcon, station: Bi
   });
 }
 
-function StationPopupCard({ station }: { station: BinStation }) {
+function StationPopupCard({
+  demoTargetEnabled,
+  onSelectDemoBin,
+  station
+}: {
+  demoTargetEnabled?: boolean;
+  onSelectDemoBin?: (station: BinStation, bin: OperationBin) => void;
+  station: BinStation;
+}) {
   const fullBins = stationFullBins(station);
   const warningBins = stationWarningBins(station);
   return (
@@ -640,7 +656,12 @@ function StationPopupCard({ station }: { station: BinStation }) {
       </dl>
       <div className="popup-bin-list">
         {station.bins.map((bin) => (
-          <BinFillRow bin={bin} key={`${station.station_id}-${bin.bin_id}`} />
+          <BinFillRow
+            bin={bin}
+            demoTargetEnabled={demoTargetEnabled}
+            key={`${station.station_id}-${bin.bin_id}`}
+            onSelectDemoBin={() => onSelectDemoBin?.(station, bin)}
+          />
         ))}
       </div>
       <p>{stationMaxFullness(station) >= 95 ? "Cần xử lý ngay." : "Đang theo dõi cảm biến."}</p>
@@ -648,7 +669,15 @@ function StationPopupCard({ station }: { station: BinStation }) {
   );
 }
 
-function BinFillRow({ bin }: { bin: OperationBin }) {
+function BinFillRow({
+  bin,
+  demoTargetEnabled,
+  onSelectDemoBin
+}: {
+  bin: OperationBin;
+  demoTargetEnabled?: boolean;
+  onSelectDemoBin?: () => void;
+}) {
   const percent = Math.max(0, Math.min(100, Number(bin.fill_percent ?? 0)));
   const tone = fillTone(percent);
   const label = binFullnessLabel(bin, percent);
@@ -660,6 +689,11 @@ function BinFillRow({ bin }: { bin: OperationBin }) {
       </div>
       <strong>{Math.round(percent)}%</strong>
       <span className={`popup-bin-state ${tone}`}>{label}</span>
+      {demoTargetEnabled && onSelectDemoBin ? (
+        <button className="secondary-button compact-button popup-demo-target-button" onClick={onSelectDemoBin} type="button">
+          Chọn
+        </button>
+      ) : null}
     </div>
   );
 }

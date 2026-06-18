@@ -21,6 +21,11 @@ if (-not $dbLine) {
 }
 
 $env:TRASH_SORTER_SUPABASE_DATABASE_URL = ($dbLine -replace "^[^=]+=", "").Trim().Trim('"').Trim("'")
+$env:TRASH_SORTER_DEMO_HARDWARE_TARGET = if ($env:TRASH_SORTER_DEMO_HARDWARE_TARGET) {
+  $env:TRASH_SORTER_DEMO_HARDWARE_TARGET
+} else {
+  "1"
+}
 $env:PYTHONPATH = $root
 
 python -m uv run python scripts\supabase_hardware_bridge.py --interval $Interval --history-limit $HistoryLimit

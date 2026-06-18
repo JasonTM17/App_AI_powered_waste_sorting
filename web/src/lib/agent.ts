@@ -1142,7 +1142,8 @@ export async function agentFetchBlob(
   const controller = new AbortController();
   const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs ?? AGENT_FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(`${AGENT_URL}${path}`, {
+    const baseUrl = process.env.NODE_ENV === "production" && path.startsWith("/api/user/") ? CLOUD_API_URL : AGENT_URL;
+    const res = await fetch(`${baseUrl}${path}`, {
       ...requestInit,
       headers,
       cache: "no-store",

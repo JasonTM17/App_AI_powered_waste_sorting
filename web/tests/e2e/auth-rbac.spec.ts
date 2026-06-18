@@ -87,6 +87,7 @@ test("user session sees only User dashboard and is forbidden from Admin APIs", a
   const session = await openAppAs(page, "user", "/user/dashboard");
 
   await expect(page.locator("body")).toContainText(/Xin chào|Lượng rác hằng ngày|Phân loại gần đây/i);
+  await expect(page.locator("body")).toContainText(/Đã tiếp tục phiên/i);
   await assertStitchPetLauncher(page, false);
   await assertUserShellHasNoAdminControls(page);
   await assertReadableFormControls(page);
@@ -106,13 +107,22 @@ test("user session sees only User dashboard and is forbidden from Admin APIs", a
   expectNoConsoleErrors(consoleErrors);
 });
 
+test("invalid saved session is cleared and returns to login", async ({ page }) => {
+  await page.addInitScript(([key]) => window.localStorage.setItem(key, "expired-session"), ["trash-sorter-session-token"]);
+  await page.goto("/user/dashboard", { waitUntil: "domcontentloaded" });
+
+  await expect(page.getByRole("heading", { name: /Đăng nhập hệ thống/i })).toBeVisible();
+  await expect(page.locator("body")).toContainText(/hết hạn|đăng nhập lại/i);
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem("trash-sorter-session-token"))).toBeNull();
+});
+
 test("user direct navigation to Admin training is redirected to User dashboard", async ({ page }) => {
   const consoleErrors = collectConsoleErrors(page);
   await openAppAs(page, "user", "/admin?tab=training");
 
   await expect(page).toHaveURL(/\/user\/dashboard$/);
   await assertUserShellHasNoAdminControls(page);
-  await expect(page.locator("body")).not.toContainText(/Huáº¥n luyá»‡n/i);
+  await expect(page.locator("body")).not.toContainText(/Hu\u1ea5n luy\u1ec7n/i);
   await expect(page.locator(".camera-frame, .stream-card, .dataset-grid, .camera-management-grid, .camera-config-panel")).toHaveCount(0);
   await assertNoHorizontalOverflow(page);
   expectNoConsoleErrors(consoleErrors);

@@ -43,8 +43,8 @@ def test_operations_store_seeds_real_map_and_is_idempotent(tmp_path):
         assert all(len(station["bins"]) == 3 for station in bin_map["stations"])
 
         user_map = store.list_bin_map(owner_username="user")
-        assert user_map["total"] == 2
-        assert {station["station_id"] for station in user_map["stations"]} == {"td-bin-001", "td-bin-002"}
+        assert user_map["total"] == 3
+        assert {station["station_id"] for station in user_map["stations"]} == {"td-bin-001", "td-bin-002", "td-bin-003"}
         assert store.list_bin_map(owner_username="other")["total"] == 0
 
         roles = store.list_role_catalog()
@@ -77,7 +77,7 @@ def test_operations_store_reinitializes_recreated_sqlite_file(tmp_path):
     store = OperationsStore(db_path)
     try:
         assert store.health()["station_total"] == 10
-        assert store.list_bin_map(owner_username="user")["total"] == 2
+        assert store.list_bin_map(owner_username="user")["total"] == 3
     finally:
         store.close()
 

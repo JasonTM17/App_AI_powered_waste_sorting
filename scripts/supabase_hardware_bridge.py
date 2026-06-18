@@ -7,6 +7,7 @@ frames, UART commands, or training controls to browser users.
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import time
 from datetime import datetime
@@ -22,9 +23,12 @@ from app.core.history import HistoryService
 from app.utils.paths import db_path, operations_db_path, project_root
 
 SUPABASE_DB_ENV = "TRASH_SORTER_SUPABASE_DATABASE_URL"
+DEMO_TARGET_ENV = "TRASH_SORTER_DEMO_HARDWARE_TARGET"
+LOGGER = logging.getLogger("supabase-hardware-bridge")
 
 
 def main() -> int:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Sync local hardware state to Supabase.")
     parser.add_argument("--once", action="store_true", help="Run one sync cycle and exit.")
     parser.add_argument("--interval", type=float, default=10.0, help="Seconds between sync cycles.")
@@ -47,13 +51,15 @@ def main() -> int:
 
 
 def sync_once(conn: psycopg.Connection[Any], operations_db: Path, history_db: Path, history_limit: int) -> None:
-    sync_operations(conn, operations_db)
+    bin_readings = sync_operations(conn, operations_db)
+    sync_demo_hardware_targets(conn, bin_readings)
     sync_history(conn, history_db, history_limit)
     sync_training_status(conn)
 
 
-def sync_operations(conn: psycopg.Connection[Any], operations_db: Path) -> None:
+def sync_operations(conn: psycopg.Connection[Any], operations_db: Path) -> dict[int, dict[str, Any]]:
     store = OperationsStore(operations_db)
+    bin_readings: dict[int, dict[str, Any]] = {}
     try:
         for device in store.list_devices():
             device_active = _db_bool(conn, "devices", "active", bool(device["active"]))
@@ -129,6 +135,11 @@ def sync_operations(conn: psycopg.Connection[Any], operations_db: Path) -> None:
                 ),
             )
             for child in station["bins"]:
+                bin_readings[int(child["bin_index"])] = {
+                    "fill_percent": float(child["fill_percent"] or 0),
+                    "status": str(child["status"] or fullness_status(float(child["fill_percent"] or 0))),
+                    "updated_at": child.get("updated_at"),
+                }
                 child_active = _db_bool(conn, "bins", "active", bool(child["active"]))
                 conn.execute(
                     """
@@ -186,6 +197,75 @@ def sync_operations(conn: psycopg.Connection[Any], operations_db: Path) -> None:
             )
     finally:
         store.close()
+    return bin_readings
+
+
+def sync_demo_hardware_targets(conn: psycopg.Connection[Any], bin_readings: dict[int, dict[str, Any]]) -> None:
+    if os.getenv(DEMO_TARGET_ENV, "").strip() != "1" or not bin_readings:
+        return
+    _ensure_demo_target_table(conn)
+    targets = conn.execute(
+        """
+        select owner_username, station_id, bin_id, bin_index
+        from public.demo_hardware_targets
+        where active = true
+        order by selected_at desc
+        limit 1
+        """
+    ).fetchall()
+    applied = 0
+    for owner_username, station_id, bin_id, bin_index in targets:
+        reading = bin_readings.get(int(bin_index))
+        if not reading:
+            continue
+        percent = max(0.0, min(100.0, float(reading["fill_percent"])))
+        status = fullness_status(percent)
+        conn.execute(
+            """
+            update public.bins
+               set fill_percent = %s,
+                   status = %s,
+                   updated_at = now()
+             where station_id = %s
+               and bin_index = %s
+               and (%s::text = '' or bin_id = %s)
+            """,
+            (percent, status, station_id, int(bin_index), str(bin_id or ""), str(bin_id or "")),
+        )
+        conn.execute(
+            """
+            update public.demo_hardware_targets
+               set last_applied_at = now(),
+                   last_percent = %s
+             where owner_username = %s
+            """,
+            (percent, owner_username),
+        )
+        if percent >= 95:
+            conn.execute(
+                """
+                insert into public.alerts
+                  (alert_id, station_id, bin_id, device_id, severity, title, message, status, source,
+                   actor_username, derived, created_at, updated_at)
+                values (%s, %s, %s, '', 'danger', 'Thùng rác đã đầy', %s, 'open', 'demo_hardware_target',
+                        %s, true, now(), now())
+                on conflict (alert_id) do update set
+                  severity = excluded.severity,
+                  message = excluded.message,
+                  status = 'open',
+                  updated_at = now()
+                """,
+                (
+                    f"demo-fullness-{station_id}-{int(bin_index)}",
+                    station_id,
+                    str(bin_id or ""),
+                    f"Cảm biến demo báo thùng {int(bin_index)} đã đầy {round(percent)}%.",
+                    str(owner_username or ""),
+                ),
+            )
+        applied += 1
+    if applied:
+        LOGGER.info("Applied %d demo hardware target fullness update(s).", applied)
 
 
 def sync_history(conn: psycopg.Connection[Any], history_db: Path, limit: int) -> None:
@@ -194,7 +274,16 @@ def sync_history(conn: psycopg.Connection[Any], history_db: Path, limit: int) ->
     if not history_db.exists():
         return
     service = HistoryService(history_db)
-    for row in service.query(limit=max(1, limit)):
+    skipped_without_owner = 0
+    try:
+        rows = service.query(limit=max(1, limit))
+    finally:
+        service.close()
+    for row in rows:
+        owner_username = str(getattr(row, "owner_username", "") or "").strip()
+        if not owner_username:
+            skipped_without_owner += 1
+            continue
         row_id = int(row.id)
         conn.execute(
             """
@@ -210,7 +299,7 @@ def sync_history(conn: psycopg.Connection[Any], history_db: Path, limit: int) ->
             (
                 row_id,
                 str(getattr(row, "device_id", "") or "local-trash-sorter"),
-                str(getattr(row, "owner_username", "") or ""),
+                owner_username,
                 _parse_ts(str(row.ts)),
                 int(row.cls_id),
                 str(row.cls_name),
@@ -223,6 +312,8 @@ def sync_history(conn: psycopg.Connection[Any], history_db: Path, limit: int) ->
                 bool(getattr(row, "image_path", None) or getattr(row, "annotated_path", None)),
             ),
         )
+    if skipped_without_owner:
+        LOGGER.warning("Skipped %d history row(s) without an owner username.", skipped_without_owner)
 
 
 def sync_training_status(conn: psycopg.Connection[Any]) -> None:
@@ -269,6 +360,39 @@ def _parse_ts(value: str) -> datetime:
 
 _COLUMN_TYPE_CACHE: dict[tuple[str, str], str] = {}
 _TABLE_EXISTS_CACHE: dict[str, bool] = {}
+
+
+def fullness_status(percent: float) -> str:
+    if percent >= 95:
+        return "full"
+    if percent >= 80:
+        return "warning"
+    return "normal"
+
+
+def _ensure_demo_target_table(conn: psycopg.Connection[Any]) -> None:
+    if _TABLE_EXISTS_CACHE.get("demo_hardware_targets"):
+        return
+    conn.execute(
+        """
+        create table if not exists public.demo_hardware_targets (
+          owner_username text primary key,
+          station_id text not null references public.bin_stations(station_id) on delete cascade,
+          bin_id text not null default '',
+          bin_index integer not null check (bin_index between 1 and 3),
+          selected_by text not null default '',
+          selected_at timestamptz not null default now(),
+          last_applied_at timestamptz,
+          last_percent numeric(5,2),
+          active boolean not null default true
+        )
+        """
+    )
+    conn.execute(
+        "create index if not exists idx_demo_hardware_targets_selected_at "
+        "on public.demo_hardware_targets(selected_at desc) where active"
+    )
+    _TABLE_EXISTS_CACHE["demo_hardware_targets"] = True
 
 
 def _db_bool(conn: psycopg.Connection[Any], table: str, column: str, value: bool) -> bool | int:

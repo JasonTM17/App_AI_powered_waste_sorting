@@ -94,6 +94,7 @@ export function authDatabaseUrl() {
   return (
     process.env.TRASH_SORTER_AUTH_DATABASE_URL?.trim() ||
     process.env.DATABASE_URL?.trim() ||
+    process.env.POSTGRES_URL?.trim() ||
     ""
   );
 }

@@ -1,9 +1,26 @@
 import { describe, expect, it } from "vitest";
 
 import { agentResponseErrorDetail } from "@/lib/agent";
-import { capabilitiesForRole, connectionStringForPg } from "@/lib/server/cloud-auth";
+import { authDatabaseUrl, capabilitiesForRole, connectionStringForPg } from "@/lib/server/cloud-auth";
 
 describe("cloud auth", () => {
+  it("falls back to the Vercel Supabase integration Postgres URL", () => {
+    const previousAuthUrl = process.env.TRASH_SORTER_AUTH_DATABASE_URL;
+    const previousDatabaseUrl = process.env.DATABASE_URL;
+    const previousPostgresUrl = process.env.POSTGRES_URL;
+    process.env.TRASH_SORTER_AUTH_DATABASE_URL = "";
+    process.env.DATABASE_URL = "";
+    process.env.POSTGRES_URL = "postgresql://integration.example/postgres";
+
+    try {
+      expect(authDatabaseUrl()).toBe("postgresql://integration.example/postgres");
+    } finally {
+      process.env.TRASH_SORTER_AUTH_DATABASE_URL = previousAuthUrl;
+      process.env.DATABASE_URL = previousDatabaseUrl;
+      process.env.POSTGRES_URL = previousPostgresUrl;
+    }
+  });
+
   it("strips pg SSL URL parameters so explicit SSL config is preserved", () => {
     const value = connectionStringForPg(
       "postgresql://user:pass@example.supabase.co:6543/postgres?sslmode=require&connect_timeout=10&sslrootcert=x"

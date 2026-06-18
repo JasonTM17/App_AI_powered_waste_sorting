@@ -9,9 +9,38 @@ import {
 
 const DEFAULT_CENTER = { latitude: 10.843195, longitude: 106.7778, zoom: 12 };
 const SEED_SOURCE = "supabase_bridge";
+const USER_MAP_STATION_TARGET = 3;
 const ACTIVE_SQL = "coalesce(active::text, '') not in ('0', 'false', 'f', 'no', '')";
 const ADMIN_ROLE_CAPABILITIES = capabilitiesForRole("admin").map(capabilityForId);
 const USER_ROLE_CAPABILITIES = capabilitiesForRole("user").map(capabilityForId);
+const USER_STATION_TEMPLATES = [
+  {
+    name: "Điểm rác khu dân cư",
+    area: "Khu dân cư",
+    address: "Điểm thu gom EcoSort 1",
+    latitude: 10.8020001,
+    longitude: 106.7406138
+  },
+  {
+    name: "Điểm rác gần trường học",
+    area: "Trường học",
+    address: "Điểm thu gom EcoSort 2",
+    latitude: 10.8276722,
+    longitude: 106.721539
+  },
+  {
+    name: "Điểm rác tuyến chính",
+    area: "Tuyến chính",
+    address: "Điểm thu gom EcoSort 3",
+    latitude: 10.8502385,
+    longitude: 106.7541974
+  }
+];
+const DEFAULT_CHILD_BINS = [
+  { suffix: "O", command: "O", bin_index: 1, label: "Hữu cơ" },
+  { suffix: "R", command: "R", bin_index: 2, label: "Vô cơ" },
+  { suffix: "I", command: "I", bin_index: 3, label: "Tái chế" }
+] as const;
 
 declare global {
   // eslint-disable-next-line no-var
@@ -98,6 +127,23 @@ type ScheduleRow = QueryResultRow & {
   updated_at: Date | string | null;
 };
 
+type DemoHardwareTargetRow = QueryResultRow & {
+  owner_username: string;
+  station_id: string;
+  bin_id: string;
+  bin_index: number | string;
+  selected_by: string;
+  selected_at: Date | string;
+  active: boolean | number;
+};
+
+type DemoHardwareTargetPayload = {
+  station_id?: unknown;
+  bin_id?: unknown;
+  bin_index?: unknown;
+  owner_username?: unknown;
+};
+
 export function cloudRoleCatalog() {
   return {
     roles: [
@@ -130,6 +176,9 @@ export async function cloudDevices() {
 
 export async function cloudBinMap(identity: CloudAuthIdentity, includeInactive = false) {
   const owner = identity.role === "admin" ? "" : identity.username;
+  if (owner) {
+    await ensureUserMapStations(owner);
+  }
   const stationRows = await stationRowsForScope(owner, includeInactive);
   const stationIds = stationRows.map((row) => row.station_id);
   const childBinsByStation = await binsByStation(stationIds);
@@ -291,6 +340,91 @@ export async function cloudCreateDeviceIssue(identity: CloudAuthIdentity, payloa
   return { issue: result.rows[0], message: "Device issue reported" };
 }
 
+export function demoHardwareTargetEnabled() {
+  return (
+    process.env.NEXT_PUBLIC_DEMO_HARDWARE_TARGET === "1" ||
+    process.env.TRASH_SORTER_DEMO_HARDWARE_TARGET === "1"
+  );
+}
+
+export async function cloudSetDemoHardwareTarget(
+  identity: CloudAuthIdentity,
+  payload: DemoHardwareTargetPayload
+) {
+  if (!demoHardwareTargetEnabled()) {
+    return { ok: false, disabled: true, detail: "Demo hardware target mode is disabled." };
+  }
+  const stationId = text(payload.station_id);
+  const requestedBinId = text(payload.bin_id);
+  const binIndex = Math.trunc(Number(payload.bin_index ?? 0));
+  if (!stationId || ![1, 2, 3].includes(binIndex)) {
+    return null;
+  }
+
+  await ensureDemoHardwareTargetTable();
+
+  const ownerFilter = identity.role === "admin" ? text(payload.owner_username) : identity.username;
+  const stationResult = await pool().query<{ station_id: string; assigned_owner_username: string }>(
+    `select station_id, assigned_owner_username
+       from public.bin_stations
+      where station_id = $1
+        and coalesce(active::text, '') not in ('0', 'false', 'f', 'no', '')
+        and ($2::text = '' or assigned_owner_username = $2)
+      limit 1`,
+    [stationId, ownerFilter]
+  );
+  const station = stationResult.rows[0];
+  if (!station?.assigned_owner_username) {
+    return null;
+  }
+
+  const binResult = await pool().query<{ bin_id: string; bin_index: number | string }>(
+    `select bin_id, bin_index
+       from public.bins
+      where station_id = $1
+        and bin_index = $2
+        and ($3::text = '' or bin_id = $3)
+        and coalesce(active::text, '') not in ('0', 'false', 'f', 'no', '')
+      order by bin_id
+      limit 1`,
+    [stationId, binIndex, requestedBinId]
+  );
+  const bin = binResult.rows[0];
+  if (!bin) {
+    return null;
+  }
+
+  const result = await pool().query<DemoHardwareTargetRow>(
+    `insert into public.demo_hardware_targets
+       (owner_username, station_id, bin_id, bin_index, selected_by, selected_at, active)
+     values ($1, $2, $3, $4, $5, now(), true)
+     on conflict (owner_username) do update set
+       station_id = excluded.station_id,
+       bin_id = excluded.bin_id,
+       bin_index = excluded.bin_index,
+       selected_by = excluded.selected_by,
+       selected_at = excluded.selected_at,
+       active = true
+     returning owner_username, station_id, bin_id, bin_index, selected_by, selected_at, active`,
+    [station.assigned_owner_username, stationId, bin.bin_id, binIndex, identity.username]
+  );
+
+  const target = result.rows[0];
+  return {
+    ok: true,
+    target: {
+      owner_username: target.owner_username,
+      station_id: target.station_id,
+      bin_id: target.bin_id,
+      bin_index: Number(target.bin_index),
+      selected_by: target.selected_by,
+      selected_at: iso(target.selected_at),
+      active: boolean(target.active)
+    },
+    message: "Selected demo bin target"
+  };
+}
+
 async function recordCollectionEvent(scheduleId: string, stationId: string, actor: string, note: string) {
   try {
     await pool().query(
@@ -304,6 +438,91 @@ async function recordCollectionEvent(scheduleId: string, stationId: string, acto
        values ($1, $2, $3, $4)`,
       [scheduleId, stationId, actor, note]
     ).catch(() => undefined);
+  }
+}
+
+async function ensureDemoHardwareTargetTable() {
+  await pool().query(`
+    create table if not exists public.demo_hardware_targets (
+      owner_username text primary key,
+      station_id text not null references public.bin_stations(station_id) on delete cascade,
+      bin_id text not null default '',
+      bin_index int not null check (bin_index between 1 and 3),
+      selected_by text not null default '',
+      selected_at timestamptz not null default now(),
+      last_applied_at timestamptz,
+      last_percent numeric(5,2),
+      active boolean not null default true
+    )
+  `);
+  await pool().query(`
+    create index if not exists idx_demo_hardware_targets_station
+      on public.demo_hardware_targets(station_id, bin_index)
+      where active
+  `);
+}
+
+async function ensureUserMapStations(ownerUsername: string) {
+  const owner = ownerUsername.trim();
+  if (!owner) {
+    return;
+  }
+  const existing = await pool().query<{ station_id: string }>(
+    `select station_id
+       from public.bin_stations
+      where assigned_owner_username = $1
+        and ${ACTIVE_SQL}`,
+    [owner]
+  );
+  let existingCount = existing.rows.length;
+  if (existingCount >= USER_MAP_STATION_TARGET) {
+    return;
+  }
+
+  const slug = slugifyUsername(owner);
+  const offset = coordinateOffset(owner);
+  const existingStationIds = new Set(existing.rows.map((row) => row.station_id));
+  for (let index = 0; index < USER_MAP_STATION_TARGET && existingCount < USER_MAP_STATION_TARGET; index += 1) {
+    const template = USER_STATION_TEMPLATES[index];
+    const stationId = `user-${slug}-${index + 1}`;
+    if (existingStationIds.has(stationId)) {
+      continue;
+    }
+    await pool().query(
+      `insert into public.bin_stations
+         (station_id, name, area, address, latitude, longitude, status, coordinate_verified,
+          assigned_owner_username, device_id, note, seed_source, active, created_at, updated_at)
+       values ($1, $2, $3, $4, $5, $6, 'active', true, $7, $8, $9, 'user_cloud_seed', true, now(), now())
+       on conflict (station_id) do update set
+         assigned_owner_username = case
+           when public.bin_stations.assigned_owner_username = '' then excluded.assigned_owner_username
+           else public.bin_stations.assigned_owner_username
+         end,
+         active = true,
+         updated_at = now()`,
+      [
+        stationId,
+        `${template.name} ${index + 1}`,
+        template.area,
+        template.address,
+        template.latitude + offset.latitude,
+        template.longitude + offset.longitude,
+        owner,
+        `cloud-user-${slug}`,
+        "Điểm bản đồ tự tạo cho tài khoản User."
+      ]
+    );
+    existingCount += 1;
+
+    for (const child of DEFAULT_CHILD_BINS) {
+      await pool().query(
+        `insert into public.bins
+           (bin_id, station_id, command, bin_index, label, fill_percent, status, active, created_at, updated_at)
+         values ($1, $2, $3, $4, $5, 0, 'normal', true, now(), now())
+         on conflict (bin_id) do nothing`,
+        [`${stationId}-${child.suffix}`, stationId, child.command, child.bin_index, child.label]
+      );
+    }
   }
 }
 
@@ -406,8 +625,8 @@ async function derivedFullnessAlerts(ownerUsername: string, stationIds: string[]
       bin_id: row.bin_id,
       device_id: "",
       severity: danger ? "danger" : "warning",
-      title: danger ? "Thùng rác đã đầy" : "Thùng rác gần đầy",
-      message: `Thùng ${label} ${danger ? "đã đầy" : "gần đầy"} ${Math.round(fill)}%.`,
+      title: danger ? "\u0054\u0068\u00f9\u006e\u0067\u0020\u0072\u00e1\u0063\u0020\u0111\u00e3\u0020\u0111\u1ea7\u0079" : "\u0054\u0068\u00f9\u006e\u0067\u0020\u0072\u00e1\u0063\u0020\u0067\u1ea7\u006e\u0020\u0111\u1ea7\u0079",
+      message: `\u0054\u0068\u00f9\u006e\u0067 ${label} ${danger ? "\u0111\u00e3\u0020\u0111\u1ea7\u0079" : "\u0067\u1ea7\u006e\u0020\u0111\u1ea7\u0079"} ${Math.round(fill)}%.`,
       status: "open",
       source: "derived_fullness",
       created_at: iso(row.updated_at) || now,
@@ -432,6 +651,10 @@ function pool() {
     });
   }
   return globalThis.trashSorterCloudOperationsPool;
+}
+
+export function cloudOperationsPool() {
+  return pool();
 }
 
 async function columnExpression(tableName: string, candidates: string[], fallback: string) {
@@ -582,20 +805,20 @@ function capabilityForId(id: string) {
 
 function issueTitle(issueType: string) {
   const labels: Record<string, string> = {
-    full_bin: "Thùng đầy",
-    sensor_problem: "Lỗi cảm biến",
-    camera_problem: "Lỗi camera",
-    servo_problem: "Lỗi servo",
-    audio_problem: "Lỗi audio",
-    dirty_bin: "Thùng bẩn"
+    full_bin: "\u0054\u0068\u00f9\u006e\u0067\u0020\u0111\u1ea7\u0079",
+    sensor_problem: "\u004c\u1ed7\u0069\u0020\u0063\u1ea3\u006d\u0020\u0062\u0069\u1ebf\u006e",
+    camera_problem: "\u004c\u1ed7\u0069\u0020\u0063\u0061\u006d\u0065\u0072\u0061",
+    servo_problem: "\u004c\u1ed7\u0069\u0020\u0073\u0065\u0072\u0076\u006f",
+    audio_problem: "\u004c\u1ed7\u0069\u0020\u0061\u0075\u0064\u0069\u006f",
+    dirty_bin: "\u0054\u0068\u00f9\u006e\u0067\u0020\u0062\u1ea9\u006e"
   };
-  return labels[issueType] ?? "Báo lỗi thiết bị";
+  return labels[issueType] ?? "\u0042\u00e1\u006f\u0020\u006c\u1ed7\u0069\u0020\u0074\u0068\u0069\u1ebf\u0074\u0020\u0062\u1ecb";
 }
 
 function displayBinLabel(index: number, fallback: string) {
-  if (index === 1) return "Hữu cơ";
-  if (index === 2) return "Vô cơ";
-  if (index === 3) return "Tái chế";
+  if (index === 1) return "\u0048\u1eef\u0075\u0020\u0063\u01a1";
+  if (index === 2) return "\u0056\u00f4\u0020\u0063\u01a1";
+  if (index === 3) return "\u0054\u00e1\u0069\u0020\u0063\u0068\u1ebf";
   return fallback;
 }
 
@@ -626,6 +849,35 @@ function boolean(value: boolean | number) {
 
 function text(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function slugifyUsername(username: string) {
+  const slug = username
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\u0111/g, "d")
+    .replace(/\u0110/g, "D")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return slug || `user-${Math.abs(hashText(username))}`;
+}
+
+function coordinateOffset(username: string) {
+  const hash = Math.abs(hashText(username));
+  return {
+    latitude: ((hash % 9) - 4) * 0.00025,
+    longitude: (((Math.floor(hash / 9) % 9) - 4) * 0.00025)
+  };
+}
+
+function hashText(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) - hash + value.charCodeAt(index)) | 0;
+  }
+  return hash;
 }
 
 function cryptoRandom() {

@@ -4,6 +4,7 @@ import type {
   AuthMe,
   AlertsResponse,
   BinMapResponse,
+  BinStation,
   CollectionSchedulesResponse,
   DeviceIssueCreatePayload,
   UserAdvisorResponse,
@@ -78,6 +79,7 @@ export type UserDashboardPanelProps = {
   onRefresh: () => void;
   onRefreshOperations: () => void;
   onReportDeviceIssue: (payload: DeviceIssueCreatePayload) => void;
+  onSelectDemoBin?: (station: BinStation, bin: BinStation["bins"][number]) => void;
   onUserMapInteraction: () => void;
   onViewChange: (value: UserView) => void;
 };

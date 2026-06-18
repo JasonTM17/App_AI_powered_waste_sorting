@@ -40,6 +40,8 @@ export function UserRouteContent(props: UserDashboardPanelProps) {
         refreshMeta={props.operationRefresh}
         onMapInteraction={props.onUserMapInteraction}
         onRefresh={props.onRefreshOperations}
+        demoTargetEnabled={process.env.NEXT_PUBLIC_DEMO_HARDWARE_TARGET === "1"}
+        onSelectDemoBin={props.onSelectDemoBin}
       />
     );
   }

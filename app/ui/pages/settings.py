@@ -630,7 +630,7 @@ class SettingsPage(QWidget):
             else:
                 self.cam_source.setCurrentIndex(0)
         else:
-            self.cam_source.addItem("ChÆ°a cÃ³ camera USB", "")
+            self.cam_source.addItem("Chưa có camera USB", "")
             self.cam_source.setCurrentIndex(0)
         self.btn_test_cam.setEnabled(bool(rows))
         self.cam_source.blockSignals(False)
@@ -638,7 +638,7 @@ class SettingsPage(QWidget):
         usb_devices = [d for d in devices if d.get("is_external")]
         if usb_rows:
             self.cam_hint.setText(
-                "Da tim thay camera USB doc duoc frame. Chon dong USB roi bam Test camera."
+                "Đã tìm thấy camera USB đọc được frame. Chọn dòng USB rồi bấm Test camera."
             )
         elif usb_devices:
             names = ", ".join(d.get("name", "USB Camera") for d in usb_devices)
