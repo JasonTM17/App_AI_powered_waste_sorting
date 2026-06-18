@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { KeyRound, RotateCcw, UserPlus } from "lucide-react";
 
 import { AdminAiTrainingPanel } from "@/components/admin-ai-training-panel";
@@ -84,6 +85,11 @@ export function AdminAccountsPanel({
   onToggleActive,
   onUpsertKnowledge
 }: AdminAccountsPanelProps) {
+  const [showDisabledAccounts, setShowDisabledAccounts] = useState(false);
+  const visibleAccounts = showDisabledAccounts ? accounts : accounts.filter((account) => account.is_active);
+  const activeUserAccounts = accounts.filter((account) => account.role === "user" && account.is_active);
+  const disabledAccountCount = accounts.filter((account) => !account.is_active).length;
+
   return (
     <section className="content-grid accounts-grid">
       <div className="panel">
@@ -92,21 +98,31 @@ export function AdminAccountsPanel({
             <span className="eyebrow">Tài khoản</span>
             <h2>Quản lý tài khoản local</h2>
           </div>
-          <button
-            aria-label="Làm mới danh sách tài khoản"
-            className="icon-button"
-            disabled={busy}
-            onClick={onRefresh}
-            title="Làm mới"
-            type="button"
-          >
-            <RotateCcw size={17} />
-            <span>Làm mới</span>
-          </button>
+          <div className="button-row">
+            <button
+              className="secondary-button compact-button"
+              disabled={disabledAccountCount === 0}
+              onClick={() => setShowDisabledAccounts((current) => !current)}
+              type="button"
+            >
+              <span>{showDisabledAccounts ? "Ẩn vô hiệu" : `Hiện vô hiệu (${disabledAccountCount})`}</span>
+            </button>
+            <button
+              aria-label="Làm mới danh sách tài khoản"
+              className="icon-button"
+              disabled={busy}
+              onClick={onRefresh}
+              title="Làm mới"
+              type="button"
+            >
+              <RotateCcw size={17} />
+              <span>Làm mới</span>
+            </button>
+          </div>
         </div>
 
         <div className="account-table">
-          {accounts.map((account) => {
+          {visibleAccounts.map((account) => {
             const displayName = accountDisplayName(account);
             const tone = accountToneKey(account.username || displayName);
             return (
@@ -145,6 +161,12 @@ export function AdminAccountsPanel({
               </article>
             );
           })}
+          {!visibleAccounts.length ? (
+            <div className="empty-state compact-empty-state">
+              <strong>Không có tài khoản đang hiển thị</strong>
+              <span>Bật danh sách vô hiệu nếu cần kiểm tra tài khoản cũ.</span>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -205,13 +227,11 @@ export function AdminAccountsPanel({
           Gán chủ sở hữu cho lịch sử cũ
           <select onChange={(event) => onSelectedOwnerChange(event.target.value)} value={selectedOwner}>
             <option value="">Chọn chủ sở hữu</option>
-            {accounts
-              .filter((account) => account.role === "user")
-              .map((account) => (
-                <option key={account.id} value={account.username}>
-                  {accountDisplayName(account)} ({account.username})
-                </option>
-              ))}
+            {activeUserAccounts.map((account) => (
+              <option key={account.id} value={account.username}>
+                {accountDisplayName(account)} ({account.username})
+              </option>
+            ))}
           </select>
         </label>
         <button className="secondary-button" disabled={busy || !selectedOwner} onClick={onBackfillOwner} type="button">

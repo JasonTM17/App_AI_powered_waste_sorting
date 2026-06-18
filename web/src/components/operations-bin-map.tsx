@@ -592,28 +592,38 @@ function stationFitKey(map: BinMapResponse, stations: BinStation[]) {
 }
 
 function stationIcon(divIcon: (options?: DivIconOptions) => DivIcon, station: BinStation, selected: boolean) {
-  const tone = station.open_alert_total > 0 ? "danger" : station.coordinate_verified ? "verified" : "candidate";
-  const label = station.open_alert_total > 0 ? "!" : String(Math.round(stationMaxFullness(station)));
+  const hasFullBin = stationHasFullBin(station);
+  const tone = hasFullBin || station.open_alert_total > 0 ? "danger" : station.coordinate_verified ? "verified" : "candidate";
+  const label = hasFullBin ? "!" : String(Math.round(stationMaxFullness(station)));
+  const title = hasFullBin ? `${station.name} - có thùng đã đầy` : station.name;
   return divIcon({
     className: "",
-    html: `<span class="operations-map-marker ${tone} ${selected ? "selected" : ""}" title="${escapeHtml(station.name)}">${label}</span>`,
+    html: `<span class="operations-map-marker ${tone} ${selected ? "selected" : ""}" role="img" aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}">${label}</span>`,
     iconAnchor: [15, 15],
     iconSize: [30, 30]
   });
 }
 
 function StationPopupCard({ station }: { station: BinStation }) {
+  const fullBins = stationFullBins(station);
+  const warningBins = stationWarningBins(station);
   return (
     <article className="operations-map-popup-card">
       <header>
         <span
-          className={`popup-status-dot ${station.open_alert_total > 0 ? "danger" : station.coordinate_verified ? "ok" : "pending"}`}
+          className={`popup-status-dot ${fullBins.length > 0 ? "danger" : station.open_alert_total > 0 || warningBins.length > 0 ? "warning" : station.coordinate_verified ? "ok" : "pending"}`}
         />
         <div>
           <strong>{station.name}</strong>
           <small>{station.address || station.area}</small>
         </div>
       </header>
+      {fullBins.length > 0 ? (
+        <div className="popup-full-banner" role="alert">
+          <strong>Đã đầy</strong>
+          <span>{fullBins.map((bin) => bin.label || bin.command).join(", ")} cần xử lý ngay.</span>
+        </div>
+      ) : null}
       <dl className="popup-meta-grid">
         <div>
           <dt>Phụ trách</dt>
@@ -641,19 +651,47 @@ function StationPopupCard({ station }: { station: BinStation }) {
 function BinFillRow({ bin }: { bin: OperationBin }) {
   const percent = Math.max(0, Math.min(100, Number(bin.fill_percent ?? 0)));
   const tone = fillTone(percent);
+  const label = binFullnessLabel(bin, percent);
   return (
-    <div className="popup-bin-row">
-      <span>{bin.command}</span>
+    <div className={`popup-bin-row ${tone}`}>
+      <span title={bin.label || bin.command}>{bin.command}</span>
       <div className="popup-fill-track" aria-label={`${bin.label || bin.command} đầy ${Math.round(percent)}%`}>
         <span className={`popup-fill-bar ${tone}`} style={{ width: `${percent}%` }} />
       </div>
       <strong>{Math.round(percent)}%</strong>
+      <span className={`popup-bin-state ${tone}`}>{label}</span>
     </div>
   );
 }
 
 function stationMaxFullness(station: BinStation) {
   return Math.max(0, ...station.bins.map((bin) => Number(bin.fill_percent ?? 0)));
+}
+
+function stationHasFullBin(station: BinStation) {
+  return station.bins.some((bin) => binIsFull(bin));
+}
+
+function stationFullBins(station: BinStation) {
+  return station.bins.filter((bin) => binIsFull(bin));
+}
+
+function stationWarningBins(station: BinStation) {
+  return station.bins.filter((bin) => !binIsFull(bin) && (bin.status === "warning" || Number(bin.fill_percent ?? 0) >= 80));
+}
+
+function binIsFull(bin: OperationBin) {
+  return bin.status === "full" || Number(bin.fill_percent ?? 0) >= 95;
+}
+
+function binFullnessLabel(bin: OperationBin, percent: number) {
+  if (binIsFull(bin) || percent >= 95) {
+    return "Đã đầy";
+  }
+  if (bin.status === "warning" || percent >= 80) {
+    return "Gần đầy";
+  }
+  return "Bình thường";
 }
 
 function fillTone(percent: number) {

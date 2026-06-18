@@ -464,10 +464,56 @@ def test_auth_user_rbac_and_scoped_user_api_contract(tmp_path):
             "/api/dataset/summary",
             "/api/settings",
             "/api/model/classes",
+            "/api/training/status",
+            "/api/learn-now/status?cls_name=Paper",
+            "/api/dataset/capture-session",
+            "/api/logs",
             "/api/camera/stream",
         ):
             response = client.get(path, headers=user_headers, params={"token": str(user["token"])})
             assert response.status_code == 403, f"{path}: {response.status_code} {response.text}"
+
+        forbidden_mutations = [
+            ("POST", "/api/camera/start", {}),
+            ("POST", "/api/camera/stop", {}),
+            ("POST", "/api/camera/stream-token", {}),
+            (
+                "PUT",
+                "/api/settings",
+                {"camera": {}, "model": {}, "uart": {}, "mappings": []},
+            ),
+            ("POST", "/api/dataset/sync", {}),
+            (
+                "POST",
+                "/api/dataset/camera-sample",
+                {"cls_name": "Paper", "cls_id": 1, "use_latest_detection_box": False},
+            ),
+            (
+                "POST",
+                "/api/dataset/capture-session/start",
+                {"cls_name": "Paper", "cls_id": 1, "target_count": 8, "holdout_count": 2},
+            ),
+            (
+                "POST",
+                "/api/dataset/capture-session/capture",
+                {"pose_index": 1, "use_latest_detection_box": False},
+            ),
+            ("POST", "/api/dataset/capture-session/stop", {}),
+            (
+                "POST",
+                "/api/learn-now/micro-train/start",
+                {"cls_name": "Paper", "profile": "micro"},
+            ),
+            ("POST", "/api/learn-now/refresh-references?cls_name=Paper", {}),
+            (
+                "POST",
+                "/api/learn-now/unknown/capture",
+                {"manual_hint": "giấy", "approved_cls_name": "Paper", "cls_id": 1},
+            ),
+        ]
+        for method, path, payload in forbidden_mutations:
+            response = client.request(method, path, headers=user_headers, json=payload)
+            assert response.status_code == 403, f"{method} {path}: {response.status_code} {response.text}"
 
         logout = client.post("/api/auth/logout", headers=user_headers)
         assert logout.status_code == 200

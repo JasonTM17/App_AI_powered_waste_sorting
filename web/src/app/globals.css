@@ -1328,6 +1328,32 @@ input[type="file"] {
   background: var(--red);
 }
 
+.popup-status-dot.warning {
+  background: var(--orange);
+}
+
+.popup-full-banner {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: 8px;
+  color: #991b1b;
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+}
+
+.popup-full-banner strong {
+  color: #991b1b;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.popup-full-banner span {
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 17px;
+}
+
 .popup-meta-grid {
   display: grid;
   gap: 8px;
@@ -1360,7 +1386,7 @@ input[type="file"] {
   align-items: center;
   display: grid;
   gap: 8px;
-  grid-template-columns: 26px minmax(0, 1fr) 42px;
+  grid-template-columns: 26px minmax(0, 1fr) 42px 72px;
 }
 
 .popup-bin-row > span,
@@ -1371,6 +1397,31 @@ input[type="file"] {
 
 .popup-bin-row > strong {
   text-align: right;
+}
+
+.popup-bin-state {
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 16px;
+  padding: 2px 6px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.popup-bin-state.ok {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+}
+
+.popup-bin-state.warning {
+  background: rgba(245, 158, 11, 0.14);
+  color: #92400e;
+}
+
+.popup-bin-state.danger {
+  background: rgba(239, 68, 68, 0.13);
+  color: #991b1b;
 }
 
 .popup-fill-track {

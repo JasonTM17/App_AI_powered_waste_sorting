@@ -118,3 +118,5 @@ models/*.pt
 !models/best.pt
 !models/new-class-specialist.pt
 .agents/
+
+.vercel

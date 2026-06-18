@@ -106,6 +106,18 @@ test("user session sees only User dashboard and is forbidden from Admin APIs", a
   expectNoConsoleErrors(consoleErrors);
 });
 
+test("user direct navigation to Admin training is redirected to User dashboard", async ({ page }) => {
+  const consoleErrors = collectConsoleErrors(page);
+  await openAppAs(page, "user", "/admin?tab=training");
+
+  await expect(page).toHaveURL(/\/user\/dashboard$/);
+  await assertUserShellHasNoAdminControls(page);
+  await expect(page.locator("body")).not.toContainText(/Huáº¥n luyá»‡n/i);
+  await expect(page.locator(".camera-frame, .stream-card, .dataset-grid, .camera-management-grid, .camera-config-panel")).toHaveCount(0);
+  await assertNoHorizontalOverflow(page);
+  expectNoConsoleErrors(consoleErrors);
+});
+
 test("admin tabs keep the existing operational surfaces reachable", async ({ page }) => {
   const consoleErrors = collectConsoleErrors(page);
   await openAppAs(page, "admin", "/admin?tab=live");

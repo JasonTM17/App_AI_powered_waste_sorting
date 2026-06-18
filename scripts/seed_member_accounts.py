@@ -21,7 +21,17 @@ MEMBERS: tuple[tuple[str, str], ...] = (
     ("minh-huy", "Minh Huy"),
     ("hong-thuy", "Hồng Thủy"),
 )
-LEGACY_MEMBER_USERNAMES = tuple(display_name for _username, display_name in MEMBERS)
+LEGACY_MEMBER_USERNAMES = (
+    "Nguyễn Sơn",
+    "Nguy?n S?n",
+    "Ngọc Quyên",
+    "Ng?c Quy?n",
+    "Gia Kiệt",
+    "Gia Ki?t",
+    "Minh Huy",
+    "Hồng Thủy",
+    "H?ng Th?y",
+)
 
 
 def main() -> int:

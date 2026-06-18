@@ -1,0 +1,8 @@
+.next
+node_modules
+playwright-report
+test-results
+.playwright-tmp
+tsconfig.tsbuildinfo
+.env.local
+*.log

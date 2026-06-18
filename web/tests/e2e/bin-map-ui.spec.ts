@@ -21,7 +21,7 @@ type BinMapStation = {
   owner_username?: string;
   area: string;
   address?: string;
-  bins: Array<{ bin_id: string; command: string; label?: string; fill_percent?: number }>;
+  bins: Array<{ bin_id: string; command: string; label?: string; fill_percent?: number; status?: string }>;
 };
 
 type BinMapResponse = {
@@ -374,6 +374,70 @@ test.describe("Bin map UI/UX", () => {
     await expect(popup).toContainText(/Phụ trách/i);
     await expect(popup).toContainText(/Tọa độ/i);
     await expect(popup).toContainText(/Cảnh báo mở/i);
+  });
+
+  test("popup card explicitly shows full state when hardware fullness reaches 95 percent", async ({ page }) => {
+    await page.route("**/api/user/bin-map", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          generated_at: "2026-06-17T00:00:00Z",
+          center: { latitude: 10.855, longitude: 106.765, zoom: 13 },
+          stations: [
+            {
+              id: 1,
+              station_id: "full-popup-station",
+              name: "Trạm cảm biến đầy",
+              area: "Thu Duc",
+              address: "Realtime fullness test",
+              latitude: 10.855,
+              longitude: 106.765,
+              coordinate_verified: true,
+              status: "active",
+              active: true,
+              owner_username: "user",
+              device_id: "device-1",
+              note: "",
+              seed_source: "test",
+              alert_total: 1,
+              open_alert_total: 1,
+              created_at: "2026-06-17T00:00:00Z",
+              updated_at: "2026-06-17T00:00:00Z",
+              bins: [
+                {
+                  id: 1,
+                  bin_id: "full-popup-R",
+                  station_id: "full-popup-station",
+                  command: "R",
+                  bin_index: 2,
+                  label: "Tái chế",
+                  fill_percent: 96,
+                  status: "full",
+                  active: true,
+                  updated_at: "2026-06-17T00:00:00Z"
+                }
+              ]
+            }
+          ],
+          total: 1
+        })
+      })
+    );
+
+    await openAppAs(page, "user", "/user/map");
+    await page.waitForSelector(".operations-map-frame", { state: "visible", timeout: 15000 });
+
+    const marker = page.locator(".operations-map-marker.danger").first();
+    await expect(marker).toHaveAttribute("title", /có thùng đã đầy/i);
+    await marker.click();
+
+    const popup = page.locator(".operations-map-popup-card");
+    await expect(popup).toBeVisible();
+    await expect(popup.locator(".popup-full-banner")).toContainText(/Đã đầy/i);
+    await expect(popup.locator(".popup-bin-state.danger")).toContainText(/Đã đầy/i);
+    await expect(popup).toContainText(/96%/);
+    await assertNoHorizontalOverflow(page);
   });
 
   test("map frame has correct height on desktop", async ({ page }) => {
