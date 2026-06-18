@@ -1005,6 +1005,7 @@ export type KnowledgeEvaluateResponse = {
 export type CameraStreamTokenResponse = {
   token: string;
   expires_at: string;
+  stream_url?: string;
 };
 
 export type AudioVoicePackStatusResponse = {
@@ -1050,6 +1051,11 @@ export function streamUrl(streamToken = "") {
     url.searchParams.set("stream_token", streamToken);
   }
   return url.toString();
+}
+
+export function hardwareBridgePath(agentPath: string) {
+  const cleanPath = agentPath.startsWith("/api/") ? agentPath.slice(4) : agentPath;
+  return `/api/admin/hardware${cleanPath.startsWith("/") ? cleanPath : `/${cleanPath}`}`;
 }
 
 export function websocketUrl(token = DEFAULT_AGENT_TOKEN) {

@@ -14,6 +14,7 @@ from app.agent.auth_service import AuthService, account_auth_is_configured
 TOKEN_ENV = "TRASH_SORTER_AGENT_TOKEN"
 ADMIN_TOKEN_ENV = "TRASH_SORTER_ADMIN_TOKEN"
 USER_TOKEN_ENV = "TRASH_SORTER_USER_TOKEN"
+HARDWARE_BRIDGE_SECRET_ENV = "TRASH_SORTER_HARDWARE_BRIDGE_SECRET"
 
 AgentRole = Literal["admin", "user"]
 
@@ -79,6 +80,10 @@ def configured_admin_token() -> str:
 
 def configured_user_token() -> str:
     return os.environ.get(USER_TOKEN_ENV, "").strip()
+
+
+def configured_hardware_bridge_secret() -> str:
+    return os.environ.get(HARDWARE_BRIDGE_SECRET_ENV, "").strip()
 
 
 def auth_is_configured() -> bool:
@@ -177,6 +182,18 @@ def require_agent_token(
     return require_admin_token(authorization=authorization, query_token=query_token)
 
 
+def require_hardware_bridge_secret(
+    x_hardware_bridge_secret: Annotated[str | None, Header()] = None,
+) -> None:
+    secret = configured_hardware_bridge_secret()
+    if not secret:
+        return
+    provided = (x_hardware_bridge_secret or "").strip()
+    if provided and secrets.compare_digest(provided, secret):
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Hardware bridge secret required")
+
+
 def _extract_token(authorization: str | None, query_token: str | None) -> str:
     if authorization:
         value = authorization.strip()
@@ -204,6 +221,7 @@ def _match_configured_token(token: str) -> AuthContext | None:
 
 __all__ = [
     "ADMIN_TOKEN_ENV",
+    "HARDWARE_BRIDGE_SECRET_ENV",
     "TOKEN_ENV",
     "USER_TOKEN_ENV",
     "AgentRole",
@@ -212,6 +230,7 @@ __all__ = [
     "authenticate_agent",
     "authenticate_token_values",
     "configured_admin_token",
+    "configured_hardware_bridge_secret",
     "configured_token",
     "configured_user_token",
     "extract_token",
@@ -219,5 +238,6 @@ __all__ = [
     "require_active_user_token",
     "require_admin_token",
     "require_agent_token",
+    "require_hardware_bridge_secret",
     "require_user_token",
 ]

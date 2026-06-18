@@ -154,6 +154,8 @@ Auth configuration:
 - `TRASH_SORTER_AUTH_DB`: optional auth DB path; defaults to `%APPDATA%/TrashSorter/auth.db`.
 - `TRASH_SORTER_SESSION_HOURS`: session lifetime, default `12`.
 - `TRASH_SORTER_ALLOWED_ORIGINS`: comma-separated FastAPI CORS origins for production deploys.
+- `TRASH_SORTER_HARDWARE_BRIDGE_SECRET`: server-only secret required by local agent admin APIs when exposing the agent through a public tunnel.
+- `TRASH_SORTER_HARDWARE_BRIDGE_URL`: Vercel-only HTTPS tunnel URL for Admin camera/training proxy.
 - `TRASH_SORTER_ADMIN_TOKEN`, `TRASH_SORTER_USER_TOKEN`, and `TRASH_SORTER_AGENT_TOKEN` remain supported as legacy local/script compatibility tokens.
 
 The desktop launcher preserves production auth settings. It will not inject dev
@@ -194,6 +196,20 @@ Local operations map:
   device issue reporting, own history, and own account.
 - Supabase Realtime push notifications are still a later enhancement; the current
   web UI refreshes/polls the local agent APIs.
+
+Public Admin hardware bridge:
+
+- Use this only for Admin camera/live/training from another device. User role remains blocked from camera, dataset capture, training, settings, model, logs, and hardware test APIs.
+- Install Cloudflare Tunnel (`cloudflared`) on the hardware machine, then run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/start_public_hardware_bridge.ps1
+```
+
+- The script ensures `TRASH_SORTER_HARDWARE_BRIDGE_SECRET` exists in `.env.local`, starts the local agent if needed, and starts a tunnel to `http://127.0.0.1:8765`.
+- Copy the generated `https://*.trycloudflare.com` URL from `logs/public-hardware-bridge.err.log` into Vercel production as `TRASH_SORTER_HARDWARE_BRIDGE_URL`, and set the same secret in Vercel as `TRASH_SORTER_HARDWARE_BRIDGE_SECRET`.
+- When the bridge secret is enabled, use the Vercel Admin UI for public camera/live/training. Direct browser calls from a local dev UI to protected agent admin APIs will be rejected unless you remove the secret and restart the agent.
+- Vercel proxies only an allowlist: status, camera start/stop/stream-token, model class catalog, camera sample capture, capture-session, learn-now status/refresh/unknown capture, and micro-train start. Settings writes, logs, model/audio config, servo/UART tests, and generic proxying are intentionally not exposed through this public bridge.
 
 Full Stitch User screens:
 

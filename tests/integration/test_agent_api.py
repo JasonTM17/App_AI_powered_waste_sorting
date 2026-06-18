@@ -35,6 +35,7 @@ def _clear_agent_auth_env(monkeypatch, tmp_path):
     monkeypatch.delenv("TRASH_SORTER_BOOTSTRAP_ADMIN_PASSWORD", raising=False)
     monkeypatch.delenv("TRASH_SORTER_SESSION_HOURS", raising=False)
     monkeypatch.delenv("TRASH_SORTER_ALLOWED_ORIGINS", raising=False)
+    monkeypatch.delenv("TRASH_SORTER_HARDWARE_BRIDGE_SECRET", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_USER_ADVISOR_MODEL", raising=False)
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
@@ -159,6 +160,30 @@ def test_cors_allowed_origins_env_overrides_defaults(monkeypatch):
     )
 
     assert _allowed_origins() == ["https://dashboard.example.com", "http://trash.local:3000"]
+
+
+def test_admin_router_requires_hardware_bridge_secret_when_configured(monkeypatch, tmp_path):
+    monkeypatch.setenv("TRASH_SORTER_ADMIN_TOKEN", "admin-token")
+    monkeypatch.setenv("TRASH_SORTER_HARDWARE_BRIDGE_SECRET", "bridge-secret")
+    client, runtime = _client(tmp_path)
+    try:
+        auth_headers = {"Authorization": "Bearer admin-token"}
+
+        missing = client.get("/api/status", headers=auth_headers)
+        wrong = client.get(
+            "/api/status",
+            headers={**auth_headers, "X-Hardware-Bridge-Secret": "wrong-secret"},
+        )
+        ok = client.get(
+            "/api/status",
+            headers={**auth_headers, "X-Hardware-Bridge-Secret": "bridge-secret"},
+        )
+
+        assert missing.status_code == 403
+        assert wrong.status_code == 403
+        assert ok.status_code == 200
+    finally:
+        runtime.close()
 
 
 def _make_auto_queue_item(queue_dir: Path, *, reviewed: bool) -> None:

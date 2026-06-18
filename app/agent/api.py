@@ -49,6 +49,7 @@ from app.agent.auth import (
     extract_token,
     require_active_admin_token,
     require_active_user_token,
+    require_hardware_bridge_secret,
     require_user_token,
 )
 from app.agent.auth_password_policy import PasswordPolicyError
@@ -592,7 +593,10 @@ def create_app(
         finally:
             store.close()
 
-    router = APIRouter(prefix="/api", dependencies=[Depends(require_active_admin_token)])
+    router = APIRouter(
+        prefix="/api",
+        dependencies=[Depends(require_hardware_bridge_secret), Depends(require_active_admin_token)],
+    )
 
     @router.get("/admin/accounts", response_model=AccountsResponse)
     def admin_accounts() -> AccountsResponse:

@@ -32,7 +32,7 @@ describe("cloud auth", () => {
     expect(response.role).toBe("user");
     expect(response.message).toContain("Cloud");
     expect(response.message).toContain("User");
-    expect(response.message).toContain("không có quyền camera");
+    expect(response.message).toContain("khong co quyen camera");
   });
 
   it("summarizes HTML errors instead of leaking raw 404 pages", async () => {

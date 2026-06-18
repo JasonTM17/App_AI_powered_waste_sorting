@@ -1,0 +1,96 @@
+import { NextRequest } from "next/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const authMock = vi.hoisted(() => ({
+  authenticateSession: vi.fn()
+}));
+
+vi.mock("@/lib/server/cloud-auth", () => ({
+  authenticateSession: authMock.authenticateSession,
+  extractBearerToken: (value: string | null) => (value ?? "").replace(/^Bearer\s+/i, ""),
+  CloudAuthConfigError: class CloudAuthConfigError extends Error {}
+}));
+
+import { hardwareBridgePath } from "@/lib/agent";
+import { proxyHardwareBridge } from "@/lib/server/hardware-bridge";
+
+describe("hardware bridge proxy", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    authMock.authenticateSession.mockReset();
+    process.env.TRASH_SORTER_HARDWARE_BRIDGE_URL = "https://hardware.example.com";
+    process.env.TRASH_SORTER_HARDWARE_BRIDGE_SECRET = "bridge-secret";
+  });
+
+  it("maps agent paths under the admin hardware gateway", () => {
+    expect(hardwareBridgePath("/api/camera/start")).toBe("/api/admin/hardware/camera/start");
+    expect(hardwareBridgePath("/api/learn-now/status?cls_name=Pen")).toBe(
+      "/api/admin/hardware/learn-now/status?cls_name=Pen"
+    );
+  });
+
+  it("denies user sessions before forwarding to hardware", async () => {
+    authMock.authenticateSession.mockResolvedValue({
+      role: "user",
+      username: "user",
+      password_default: false
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const response = await proxyHardwareBridge(adminRequest("/api/admin/hardware/camera/start", "POST"), [
+      "camera",
+      "start"
+    ]);
+
+    expect(response.status).toBe(403);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not forward unknown hardware paths", async () => {
+    authMock.authenticateSession.mockResolvedValue({
+      role: "admin",
+      username: "admin",
+      password_default: false
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    const response = await proxyHardwareBridge(adminRequest("/api/admin/hardware/logs", "GET"), ["logs"]);
+
+    expect(response.status).toBe(404);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("forwards stream token requests with the server-only bridge secret", async () => {
+    authMock.authenticateSession.mockResolvedValue({
+      role: "admin",
+      username: "admin",
+      password_default: false
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ token: "stream-ticket", expires_at: "2026-06-18T00:00:00Z" }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    const response = await proxyHardwareBridge(adminRequest("/api/admin/hardware/camera/stream-token", "POST"), [
+      "camera",
+      "stream-token"
+    ]);
+    const payload = await response.json();
+    const forwarded = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+    const headers = forwarded.headers as Headers;
+
+    expect(response.status).toBe(200);
+    expect(headers.get("X-Hardware-Bridge-Secret")).toBe("bridge-secret");
+    expect(payload.stream_url).toBe("https://hardware.example.com/api/camera/stream?stream_token=stream-ticket");
+    expect(payload.stream_url).not.toContain("bridge-secret");
+  });
+});
+
+function adminRequest(path: string, method: string) {
+  return new NextRequest(`https://trash-sorter.test${path}`, {
+    method,
+    headers: { Authorization: "Bearer admin-session" }
+  });
+}

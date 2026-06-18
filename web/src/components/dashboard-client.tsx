@@ -99,6 +99,7 @@ import {
   agentFetch,
   cloudFetch,
   datasetImageUrl,
+  hardwareBridgePath,
   streamUrl,
   websocketUrl
 } from "@/lib/agent";
@@ -195,6 +196,7 @@ type BinFullPopupState = {
 };
 
 const DATASET_LIMIT = 60;
+const USE_CLOUD_HARDWARE_BRIDGE = process.env.NODE_ENV === "production";
 
 const BIN_LABELS: Record<string, string> = {
   O: "Hữu cơ",
@@ -291,6 +293,7 @@ export function DashboardClient() {
   const [detections, setDetections] = useState<Detection[]>([]);
   const [training, setTraining] = useState<TrainingStatus | null>(null);
   const [cameraStreamTicket, setCameraStreamTicket] = useState("");
+  const [cameraStreamRemoteUrl, setCameraStreamRemoteUrl] = useState("");
   const [learnNow, setLearnNow] = useState<LearnNowStatus | null>(null);
   const [hardwareProfile, setHardwareProfile] = useState<HardwareProfile | null>(null);
   const [voicePackStatus, setVoicePackStatus] = useState<AudioVoicePackStatusResponse | null>(null);
@@ -328,34 +331,41 @@ export function DashboardClient() {
   const shownBinFullAlertRanksRef = useRef<Map<string, number>>(new Map());
 
   const cameraStream = useMemo(() => {
+    if (cameraStreamRemoteUrl) {
+      const url = new URL(cameraStreamRemoteUrl);
+      url.searchParams.set("v", String(Date.now()));
+      return url.toString();
+    }
     if (!cameraStreamTicket) {
       return "";
     }
     const url = new URL(streamUrl(cameraStreamTicket));
     url.searchParams.set("v", String(Date.now()));
     return url.toString();
-  }, [cameraStreamTicket, status?.camera.running]);
+  }, [cameraStreamRemoteUrl, cameraStreamTicket, status?.camera.running]);
   const liveSocketRouteActive = active === "live" || active === "camera";
 
   useEffect(() => {
     if (auth?.role !== "admin" || auth.password_default || !status?.camera.running || !agentToken) {
       setCameraStreamTicket("");
+      setCameraStreamRemoteUrl("");
       return;
     }
     let cancelled = false;
     async function refreshStreamTicket() {
       try {
-        const ticket = await agentFetch<CameraStreamTokenResponse>(
+        const ticket = await fetchHardware<CameraStreamTokenResponse>(
           "/api/camera/stream-token",
-          { method: "POST", timeoutMs: 8000 },
-          agentToken
+          { method: "POST", timeoutMs: 8000 }
         );
         if (!cancelled) {
           setCameraStreamTicket(ticket.token);
+          setCameraStreamRemoteUrl(ticket.stream_url ?? "");
         }
       } catch {
         if (!cancelled) {
           setCameraStreamTicket("");
+          setCameraStreamRemoteUrl("");
         }
       }
     }
@@ -518,6 +528,13 @@ export function DashboardClient() {
       }
       throw error;
     }
+  }
+
+  async function fetchHardware<T>(path: string, init?: AgentFetchInit) {
+    if (USE_CLOUD_HARDWARE_BRIDGE) {
+      return cloudFetch<T>(hardwareBridgePath(path), init, agentToken);
+    }
+    return fetchAgent<T>(path, init);
   }
 
   async function refreshIdentity(nextToken = agentToken) {
@@ -1228,8 +1245,10 @@ export function DashboardClient() {
   async function refreshActive(scope: TabId = active, signal?: AbortSignal) {
     const scopedFetch = <T,>(path: string, init: AgentFetchInit = {}) =>
       fetchAgent<T>(path, { ...init, signal });
+    const scopedHardwareFetch = <T,>(path: string, init: AgentFetchInit = {}) =>
+      fetchHardware<T>(path, { ...init, signal });
     try {
-      const cameraLike = scope === "camera";
+      const cameraLike = scope === "camera" || scope === "live";
       const settingsLike = scope === "settings" || scope === "model" || scope === "audio";
       const operationsLike = scope === "roles" || scope === "devices" || scope === "bin-map" || scope === "alerts";
       const dataLike = scope === "data";
@@ -1248,7 +1267,9 @@ export function DashboardClient() {
         );
         return;
       }
-      const statusRes = await scopedFetch<RuntimeStatus>(statusPath);
+      const hardwareBridgeScope = USE_CLOUD_HARDWARE_BRIDGE && (cameraLike || trainingLike);
+      const runtimeFetch = hardwareBridgeScope ? scopedHardwareFetch : scopedFetch;
+      const statusRes = await runtimeFetch<RuntimeStatus>(statusPath);
       setStatus(statusRes);
 
       if (dataLike) {
@@ -1272,12 +1293,13 @@ export function DashboardClient() {
       }
 
       if (trainingLike) {
+        const trainingFetch = USE_CLOUD_HARDWARE_BRIDGE ? scopedHardwareFetch : scopedFetch;
         const [trainingRes, classesRes, commonWasteRes, captureSessionRes, learnNowRes] = await Promise.all([
-          scopedFetch<TrainingStatus>("/api/training/status"),
-          scopedFetch<ModelClassesResponse>("/api/model/classes"),
-          scopedFetch<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
-          scopedFetch<CaptureSession>("/api/dataset/capture-session"),
-          scopedFetch<LearnNowStatus>(learnNowPath("/api/learn-now/status", trainingManualClass), {
+          trainingFetch<TrainingStatus>("/api/training/status"),
+          trainingFetch<ModelClassesResponse>("/api/model/classes"),
+          trainingFetch<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
+          trainingFetch<CaptureSession>("/api/dataset/capture-session"),
+          trainingFetch<LearnNowStatus>(learnNowPath("/api/learn-now/status", trainingManualClass), {
             timeoutMs: 30_000
           })
         ]);
@@ -1310,13 +1332,14 @@ export function DashboardClient() {
       }
 
       if (cameraLike) {
-        const settingsRes = await scopedFetch<SettingsResponse>("/api/settings", { timeoutMs: 8000 });
+        const cameraFetch = USE_CLOUD_HARDWARE_BRIDGE ? scopedHardwareFetch : scopedFetch;
+        const settingsRes = await cameraFetch<SettingsResponse>("/api/settings", { timeoutMs: 8000 });
         setConfig(settingsRes.config);
         void Promise.allSettled([
-          scopedFetch<ModelClassesResponse>("/api/model/classes"),
-          scopedFetch<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
-          scopedFetch<HardwareProfile>("/api/hardware/profile"),
-          scopedFetch<HardwareDiagnostics>("/api/hardware/diagnostics"),
+          cameraFetch<ModelClassesResponse>("/api/model/classes"),
+          cameraFetch<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
+          cameraFetch<HardwareProfile>("/api/hardware/profile"),
+          cameraFetch<HardwareDiagnostics>("/api/hardware/diagnostics"),
           scopedFetch<ActuationTestMode>("/api/actuation/test-mode")
         ]).then(([classesRes, commonWasteRes, hardwareRes, hardwareDiagnosticsRes, actuationRes]) => {
           if (signal?.aborted) {
@@ -1543,6 +1566,9 @@ export function DashboardClient() {
     if (auth?.role !== "admin" || auth.password_default || !agentToken || !liveSocketRouteActive) {
       return;
     }
+    if (USE_CLOUD_HARDWARE_BRIDGE) {
+      return;
+    }
     let socket: WebSocket | null = null;
     try {
       // WebSocket auth uses the durable admin session token; one-time stream
@@ -1566,7 +1592,9 @@ export function DashboardClient() {
   async function runAction(path: string) {
     setBusy(true);
     try {
-      const result = await fetchAgent<{ ok: boolean; message: string }>(path, { method: "POST" });
+      const actionFetch =
+        USE_CLOUD_HARDWARE_BRIDGE && path.startsWith("/api/camera/") ? fetchHardware : fetchAgent;
+      const result = await actionFetch<{ ok: boolean; message: string }>(path, { method: "POST" });
       setNotice(result.message);
       await refreshActive(active);
     } finally {
@@ -1577,7 +1605,7 @@ export function DashboardClient() {
   async function refreshDevices() {
     setBusy(true);
     try {
-      const nextStatus = await fetchAgent<RuntimeStatus>("/api/devices/refresh", { method: "POST" });
+      const nextStatus = await fetchHardware<RuntimeStatus>("/api/devices/refresh", { method: "POST" });
       setStatus(nextStatus);
       setNotice("Đã quét lại thiết bị USB");
       await refreshActive(active);
@@ -1668,7 +1696,7 @@ export function DashboardClient() {
     }
     setBusy(true);
     try {
-      const result = await fetchAgent<{ count: number; message: string }>("/api/dataset/camera-sample", {
+      const result = await fetchHardware<{ count: number; message: string }>("/api/dataset/camera-sample", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1696,7 +1724,7 @@ export function DashboardClient() {
   async function learnThisObject() {
     setBusy(true);
     try {
-      const result = await fetchAgent<UnknownLearnResponse>("/api/learn-now/unknown/capture", {
+      const result = await fetchHardware<UnknownLearnResponse>("/api/learn-now/unknown/capture", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1732,7 +1760,7 @@ export function DashboardClient() {
     }
     setBusy(true);
     try {
-      const result = await fetchAgent<CaptureSession>("/api/dataset/capture-session/start", {
+      const result = await fetchHardware<CaptureSession>("/api/dataset/capture-session/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1755,7 +1783,7 @@ export function DashboardClient() {
   async function captureSessionFrame() {
     setBusy(true);
     try {
-      const result = await fetchAgent<CaptureSession>("/api/dataset/capture-session/capture", {
+      const result = await fetchHardware<CaptureSession>("/api/dataset/capture-session/capture", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1778,7 +1806,7 @@ export function DashboardClient() {
   async function stopCaptureSession() {
     setBusy(true);
     try {
-      const result = await fetchAgent<CaptureSession>("/api/dataset/capture-session/stop", {
+      const result = await fetchHardware<CaptureSession>("/api/dataset/capture-session/stop", {
         method: "POST"
       });
       setCaptureSession(result);
@@ -2018,7 +2046,7 @@ export function DashboardClient() {
   async function refreshLearnNowReferences() {
     setBusy(true);
     try {
-      const result = await fetchAgent<LearnNowStatus>(
+      const result = await fetchHardware<LearnNowStatus>(
         learnNowPath("/api/learn-now/refresh-references", trainingManualClass),
         { method: "POST" }
       );
@@ -2040,7 +2068,7 @@ export function DashboardClient() {
     }
     setBusy(true);
     try {
-      const result = await fetchAgent<{ ok: boolean; message: string }>("/api/learn-now/micro-train/start", {
+      const result = await fetchHardware<{ ok: boolean; message: string }>("/api/learn-now/micro-train/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cls_name: resolved.className, profile })
@@ -2079,6 +2107,10 @@ export function DashboardClient() {
   }
 
   async function saveSettings(nextConfig: AppConfig) {
+    if (USE_CLOUD_HARDWARE_BRIDGE) {
+      setNotice("Public hardware bridge chi ho tro xem camera va training; luu settings can thao tac tren may local.");
+      return;
+    }
     setBusy(true);
     try {
       const result = await fetchAgent<SettingsResponse>("/api/settings", {
