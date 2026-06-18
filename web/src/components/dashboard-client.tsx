@@ -1340,7 +1340,9 @@ export function DashboardClient() {
           cameraFetch<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
           cameraFetch<HardwareProfile>("/api/hardware/profile"),
           cameraFetch<HardwareDiagnostics>("/api/hardware/diagnostics"),
-          scopedFetch<ActuationTestMode>("/api/actuation/test-mode")
+          USE_CLOUD_HARDWARE_BRIDGE
+            ? Promise.resolve<ActuationTestMode | null>(null)
+            : scopedFetch<ActuationTestMode>("/api/actuation/test-mode")
         ]).then(([classesRes, commonWasteRes, hardwareRes, hardwareDiagnosticsRes, actuationRes]) => {
           if (signal?.aborted) {
             return;
@@ -1358,7 +1360,7 @@ export function DashboardClient() {
           if (hardwareDiagnosticsRes.status === "fulfilled") {
             setHardwareDiagnostics(hardwareDiagnosticsRes.value);
           }
-          if (actuationRes.status === "fulfilled") {
+          if (actuationRes.status === "fulfilled" && actuationRes.value) {
             setActuationMode(actuationRes.value);
           }
         });
