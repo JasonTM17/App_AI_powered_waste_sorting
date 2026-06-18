@@ -28,6 +28,8 @@ Update: 2026-06-18
 5. On Vercel, set server-side auth database variables:
    - `TRASH_SORTER_AUTH_DATABASE_URL`
    - `DATABASE_URL` as a fallback with the same pooled/direct Postgres URL
+   - `DEEPSEEK_API_KEY` for production `/api/user/chat` and `/api/admin/chat`
+   - Optional `DEEPSEEK_BASE_URL` and `DEEPSEEK_TIMEOUT_SECONDS`
 6. On Vercel, set browser-safe variables only when cloud UI reads Supabase
    directly:
    - `NEXT_PUBLIC_SUPABASE_URL`
@@ -36,6 +38,11 @@ Update: 2026-06-18
 7. On the local hardware machine, set only server-side bridge secrets:
    - `TRASH_SORTER_SUPABASE_DATABASE_URL`
    - Optional existing local-agent vars such as `TRASH_SORTER_AUTH_DATABASE_URL`, `DATABASE_URL`, and `DEEPSEEK_API_KEY`.
+
+The Vercel chat routes call DeepSeek server-side and read only role-scoped aggregate
+history, map, alert, schedule, and enabled knowledge data. They never send session
+tokens, database credentials, raw logs, image paths, or hardware secrets. User chat
+shares the existing `chat_usage` table and enforces 36 requests per calendar month.
 
 ## Hardware Bridge
 
@@ -104,3 +111,7 @@ Also manually verify:
 - User token receives 403 from camera/training/dataset/settings/model/log APIs.
 - Map marker popup shows `Đã đầy` when a bin reaches `95%` or status `full`.
 - Supabase RLS tests confirm User can read only assigned rows.
+- Ask EcoPet `Hôm nay bạn thế nào?` and confirm the reply is relevant Vietnamese
+  with diacritics, not the hardware bridge fallback.
+- Temporarily test an invalid AI key in Preview and confirm the response is the
+  accented safe fallback without exposing the key or provider response body.

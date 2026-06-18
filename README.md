@@ -232,9 +232,8 @@ Full Stitch User screens:
 
 DeepSeek AI chatbot/advisor:
 
-- Gắn API key ở backend local agent, không gắn trong frontend và không dùng biến
-  `NEXT_PUBLIC_*`. Biến cần đặt là `DEEPSEEK_API_KEY` trong môi trường chạy FastAPI
-  agent (`scripts/run_agent.py`, `scripts/start_local.ps1`, hoặc desktop `Mở Web`).
+- Gắn API key ở backend, không gắn trong frontend và không dùng biến `NEXT_PUBLIC_*`.
+  Local FastAPI và Next.js server trên Vercel đều đọc biến server-side `DEEPSEEK_API_KEY`.
 - File env để điền key local: copy `D:\PHAN LOAI RAC\trash-sorter-v2\.env.example`
   thành `D:\PHAN LOAI RAC\trash-sorter-v2\.env.local`, rồi điền:
   `DEEPSEEK_API_KEY=sk-...`. File `.env.local` bị git ignore và được `scripts/start_local.ps1`
@@ -243,6 +242,9 @@ DeepSeek AI chatbot/advisor:
   `$env:DEEPSEEK_API_KEY="sk-..."; powershell -ExecutionPolicy Bypass -File scripts/start_local.ps1`
 - Nếu mở bằng desktop app, đặt Windows user env trước rồi mở lại app:
   `setx DEEPSEEK_API_KEY "sk-..."`
+- Với production, thêm `DEEPSEEK_API_KEY` vào Vercel Production Environment rồi
+  redeploy. Route `/api/user/chat` và `/api/admin/chat` gọi DeepSeek trực tiếp từ
+  Vercel; chatbot không phụ thuộc máy camera hoặc hardware tunnel.
 - Optional: set `DEEPSEEK_BASE_URL`; default is `https://api.deepseek.com`.
 - Model is fixed to `deepseek-v4-flash` in this phase. Do not use
   `DEEPSEEK_MODEL` to switch runtime models; keeping one model avoids V4
@@ -261,6 +263,9 @@ DeepSeek AI chatbot/advisor:
   images, file paths, raw logs, passwords, hashes, salts, or session tokens.
 - Map questions use a sanitized `operations_map` context. Admin sees all active
   stations/bins/alerts; User sees only stations assigned to that account.
+- Cloud User chat dùng quota nguyên tử 36 lượt mỗi tháng. Khi DeepSeek lỗi hoặc trả
+  nội dung không đạt quality gate tiếng Việt có dấu, UI nhận fallback có dấu và
+  không suy đoán trạng thái thiết bị.
 - Advice is general wellness/lifestyle guidance, not medical diagnosis.
 
 ## Quy Tắc Camera Và UART

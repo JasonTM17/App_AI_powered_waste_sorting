@@ -5,7 +5,7 @@ import {
   CloudAuthConfigError,
   extractBearerToken
 } from "@/lib/server/cloud-auth";
-import { buildCloudChatResponse } from "@/lib/server/cloud-chat";
+import { CloudChatInputError, generateCloudChatResponse } from "@/lib/server/cloud-chat";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,8 +27,11 @@ export async function POST(request: NextRequest) {
     if (identity.role !== "admin") {
       return NextResponse.json({ detail: "Admin role is required" }, { status: 403 });
     }
-    return NextResponse.json(buildCloudChatResponse("admin", String(payload.message ?? ""), startedAt));
+    return NextResponse.json(await generateCloudChatResponse(identity, payload.message, startedAt));
   } catch (error) {
+    if (error instanceof CloudChatInputError) {
+      return NextResponse.json({ detail: error.message }, { status: 400 });
+    }
     if (error instanceof CloudAuthConfigError) {
       return NextResponse.json({ detail: "Account login is not configured" }, { status: 503 });
     }

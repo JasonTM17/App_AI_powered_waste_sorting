@@ -221,6 +221,10 @@ function getPool() {
   return globalThis.trashSorterCloudAuthPool;
 }
 
+export function cloudAuthPool() {
+  return getPool();
+}
+
 async function findAccount(username: string) {
   const result = await getPool().query<AccountRow>("select * from accounts where username = $1 limit 1", [username]);
   return result.rows[0] ?? null;
