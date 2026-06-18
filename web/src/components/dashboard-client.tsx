@@ -632,37 +632,47 @@ export function DashboardClient() {
   async function refreshUserDashboard() {
     setBusy(true);
     try {
-      const [
-        analyticsData,
-        historyData,
-        deviceData,
-        reportData,
-        experienceData,
-        binMapData,
-        alertsData,
-        schedulesData
-      ] = await Promise.all([
+      const localData = Promise.all([
         fetchAgent<UserAnalytics>(`/api/user/analytics?range_days=${userRangeDays}`),
         fetchAgent<UserHistoryResponse>("/api/user/history?limit=24"),
         fetchAgent<UserDevice>("/api/user/device"),
         fetchAgent<UserReport>(`/api/user/report?range_days=${userRangeDays}`),
-        fetchAgent<UserExperience>(`/api/user/experience?range_days=${userRangeDays}`),
-        fetchAgent<BinMapResponse>("/api/user/bin-map"),
-        fetchAgent<AlertsResponse>("/api/user/alerts?include_resolved=false"),
-        fetchAgent<CollectionSchedulesResponse>("/api/user/collection-schedule")
+        fetchAgent<UserExperience>(`/api/user/experience?range_days=${userRangeDays}`)
       ]);
-      setUserAnalytics(analyticsData);
-      setUserHistoryRows(historyData.rows);
-      setUserDevice(deviceData);
-      setUserReport(reportData);
-      setUserExperience(experienceData);
-      setUserBinMap(binMapData);
-      setUserAlerts(alertsData);
-      showNewBinFullnessPopup(alertsData, "user");
-      setUserSchedules(schedulesData);
-      setUserOperationsLastUpdatedAt(new Date().toISOString());
-      setUserOperationsRefreshError("");
-      setAgentError("");
+      const cloudOperations = Promise.all([
+        cloudFetch<BinMapResponse>("/api/user/bin-map", undefined, agentToken),
+        cloudFetch<AlertsResponse>("/api/user/alerts?include_resolved=false", undefined, agentToken),
+        cloudFetch<CollectionSchedulesResponse>("/api/user/collection-schedule", undefined, agentToken)
+      ]);
+      const [localResult, operationsResult] = await Promise.allSettled([localData, cloudOperations]);
+      if (localResult.status === "fulfilled") {
+        const [analyticsData, historyData, deviceData, reportData, experienceData] = localResult.value;
+        setUserAnalytics(analyticsData);
+        setUserHistoryRows(historyData.rows);
+        setUserDevice(deviceData);
+        setUserReport(reportData);
+        setUserExperience(experienceData);
+      }
+      if (operationsResult.status === "fulfilled") {
+        const [binMapData, alertsData, schedulesData] = operationsResult.value;
+        setUserBinMap(binMapData);
+        setUserAlerts(alertsData);
+        showNewBinFullnessPopup(alertsData, "user");
+        setUserSchedules(schedulesData);
+        setUserOperationsLastUpdatedAt(new Date().toISOString());
+        setUserOperationsRefreshError("");
+      } else {
+        const message =
+          operationsResult.reason instanceof Error ? operationsResult.reason.message : "Khong tai duoc du lieu van hanh cloud";
+        setUserOperationsRefreshError(message);
+      }
+      if (localResult.status === "rejected" && operationsResult.status === "fulfilled") {
+        setAgentError("Local agent offline; du lieu ban do/canh bao dang doc tu Supabase cloud.");
+      } else if (localResult.status === "rejected") {
+        setAgentError(localResult.reason instanceof Error ? localResult.reason.message : "Khong tai duoc dashboard User");
+      } else {
+        setAgentError("");
+      }
     } catch (error) {
       setAgentError(error instanceof Error ? error.message : "Không tải được dashboard User");
     } finally {
@@ -758,12 +768,12 @@ export function DashboardClient() {
 
   async function refreshAdminOperations() {
     const [rolesData, devicesData, binMapData, alertsData, schedulesData, healthData] = await Promise.all([
-      fetchAgent<RoleCatalogResponse>("/api/admin/roles"),
-      fetchAgent<OperationDevicesResponse>("/api/admin/devices"),
-      fetchAgent<BinMapResponse>("/api/admin/bin-map", { timeoutMs: 45_000 }),
-      fetchAgent<AlertsResponse>("/api/admin/alerts?include_resolved=false", { timeoutMs: 45_000 }),
-      fetchAgent<CollectionSchedulesResponse>("/api/admin/collection-schedules", { timeoutMs: 45_000 }),
-      fetchAgent<OperationsHealthResponse>("/api/admin/operations/health", { timeoutMs: 45_000 })
+      cloudFetch<RoleCatalogResponse>("/api/admin/roles", undefined, agentToken),
+      cloudFetch<OperationDevicesResponse>("/api/admin/devices", undefined, agentToken),
+      cloudFetch<BinMapResponse>("/api/admin/bin-map", { timeoutMs: 45_000 }, agentToken),
+      cloudFetch<AlertsResponse>("/api/admin/alerts?include_resolved=false", { timeoutMs: 45_000 }, agentToken),
+      cloudFetch<CollectionSchedulesResponse>("/api/admin/collection-schedules", { timeoutMs: 45_000 }, agentToken),
+      cloudFetch<OperationsHealthResponse>("/api/admin/operations/health", { timeoutMs: 45_000 }, agentToken)
     ]);
     setRoleCatalog(rolesData);
     setOperationDevices(devicesData);
@@ -786,9 +796,9 @@ export function DashboardClient() {
     }
     try {
       const [binMapData, alertsData, schedulesData] = await Promise.all([
-        fetchAgent<BinMapResponse>("/api/user/bin-map", { timeoutMs: 45_000 }),
-        fetchAgent<AlertsResponse>("/api/user/alerts?include_resolved=false", { timeoutMs: 45_000 }),
-        fetchAgent<CollectionSchedulesResponse>("/api/user/collection-schedule", { timeoutMs: 45_000 })
+        cloudFetch<BinMapResponse>("/api/user/bin-map", { timeoutMs: 45_000 }, agentToken),
+        cloudFetch<AlertsResponse>("/api/user/alerts?include_resolved=false", { timeoutMs: 45_000 }, agentToken),
+        cloudFetch<CollectionSchedulesResponse>("/api/user/collection-schedule", { timeoutMs: 45_000 }, agentToken)
       ]);
       setUserBinMap(binMapData);
       setUserAlerts(alertsData);
@@ -883,11 +893,11 @@ export function DashboardClient() {
   async function patchOperationAlert(alertId: string, statusValue: "open" | "acknowledged" | "resolved") {
     setBusy(true);
     try {
-      await fetchAgent<AlertsResponse>(`/api/admin/alerts/${encodeURIComponent(alertId)}`, {
+      await cloudFetch<AlertsResponse>(`/api/admin/alerts/${encodeURIComponent(alertId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: statusValue })
-      });
+      }, agentToken);
       setNotice(statusValue === "resolved" ? "Đã xử lý cảnh báo." : "Đã cập nhật cảnh báo.");
       await refreshAdminOperations();
     } catch (error) {
@@ -900,13 +910,14 @@ export function DashboardClient() {
   async function completeCollection(scheduleId: string, note: string) {
     setBusy(true);
     try {
-      const result = await fetchAgent<CollectionCompleteResponse>(
+      const result = await cloudFetch<CollectionCompleteResponse>(
         `/api/user/collections/${encodeURIComponent(scheduleId)}/complete`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ note })
-        }
+        },
+        agentToken
       );
       setNotice(result.already_completed ? "Lịch này đã được đánh dấu trước đó." : "Đã đánh dấu đã thu gom.");
       await refreshUserOperations();
@@ -920,11 +931,11 @@ export function DashboardClient() {
   async function reportDeviceIssue(payload: DeviceIssueCreatePayload) {
     setBusy(true);
     try {
-      await fetchAgent<DeviceIssueResponse>("/api/user/device-issues", {
+      await cloudFetch<DeviceIssueResponse>("/api/user/device-issues", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
-      });
+      }, agentToken);
       setNotice("Đã gửi báo lỗi thiết bị và tạo cảnh báo.");
       await refreshUserOperations();
     } catch (error) {
@@ -1224,6 +1235,19 @@ export function DashboardClient() {
       const dataLike = scope === "data";
       const trainingLike = scope === "training";
       const statusPath = settingsLike || cameraLike ? "/api/status" : "/api/status?include_devices=false";
+      if (operationsLike) {
+        const statusAttempt = await Promise.allSettled([scopedFetch<RuntimeStatus>(statusPath)]);
+        if (statusAttempt[0].status === "fulfilled") {
+          setStatus(statusAttempt[0].value);
+        }
+        await refreshAdminOperations();
+        setAgentError(
+          statusAttempt[0].status === "rejected"
+            ? "Local agent offline; du lieu van hanh dang doc tu Supabase cloud."
+            : ""
+        );
+        return;
+      }
       const statusRes = await scopedFetch<RuntimeStatus>(statusPath);
       setStatus(statusRes);
 

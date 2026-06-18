@@ -38,7 +38,7 @@ def main() -> int:
         raise SystemExit(f"Set {SUPABASE_DB_ENV} to the Supabase pooled/direct Postgres URL.")
 
     while True:
-        with psycopg.connect(database_url, autocommit=False) as conn:
+        with psycopg.connect(database_url, autocommit=False, prepare_threshold=None) as conn:
             sync_once(conn, args.operations_db, args.history_db, args.history_limit)
             conn.commit()
         if args.once:
@@ -56,11 +56,15 @@ def sync_operations(conn: psycopg.Connection[Any], operations_db: Path) -> None:
     store = OperationsStore(operations_db)
     try:
         for device in store.list_devices():
+            device_active = _db_bool(conn, "devices", "active", bool(device["active"]))
+            device_status = str(device["status"] or "").strip()
+            bridge_status = device_status if device_status in {"warning", "maintenance"} else "online"
+            bridge_message = str(device["message"] or "").strip() or "Hardware bridge synced to Supabase."
             conn.execute(
                 """
                 insert into public.devices
-                  (device_id, device_name, location, owner_username, status, message, active, last_seen_at, updated_at)
-                values (%s, %s, %s, %s, %s, %s, %s, now(), now())
+                  (device_id, device_name, location, owner_username, status, message, active, created_at, last_seen_at, updated_at)
+                values (%s, %s, %s, %s, %s, %s, %s, now(), now(), now())
                 on conflict (device_id) do update set
                   device_name = excluded.device_name,
                   location = excluded.location,
@@ -76,19 +80,21 @@ def sync_operations(conn: psycopg.Connection[Any], operations_db: Path) -> None:
                     device["device_name"],
                     device["location"],
                     device["owner_username"],
-                    device["status"],
-                    device["message"],
-                    bool(device["active"]),
+                    bridge_status,
+                    bridge_message,
+                    device_active,
                 ),
             )
 
         for station in store.list_bin_map(include_inactive=True)["stations"]:
+            station_verified = _db_bool(conn, "bin_stations", "coordinate_verified", bool(station["coordinate_verified"]))
+            station_active = _db_bool(conn, "bin_stations", "active", bool(station["active"]))
             conn.execute(
                 """
                 insert into public.bin_stations
                   (station_id, name, area, address, latitude, longitude, status, coordinate_verified,
-                   assigned_owner_username, device_id, note, seed_source, active, updated_at)
-                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                   source, assigned_owner_username, device_id, note, seed_source, active, created_at, updated_at)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), now())
                 on conflict (station_id) do update set
                   name = excluded.name,
                   area = excluded.area,
@@ -97,6 +103,7 @@ def sync_operations(conn: psycopg.Connection[Any], operations_db: Path) -> None:
                   longitude = excluded.longitude,
                   status = excluded.status,
                   coordinate_verified = excluded.coordinate_verified,
+                  source = excluded.source,
                   assigned_owner_username = excluded.assigned_owner_username,
                   device_id = excluded.device_id,
                   note = excluded.note,
@@ -112,20 +119,22 @@ def sync_operations(conn: psycopg.Connection[Any], operations_db: Path) -> None:
                     station.get("latitude"),
                     station.get("longitude"),
                     station["status"],
-                    bool(station["coordinate_verified"]),
+                    station_verified,
+                    station["seed_source"],
                     station["owner_username"],
                     station["device_id"],
                     station["note"],
                     station["seed_source"],
-                    bool(station["active"]),
+                    station_active,
                 ),
             )
             for child in station["bins"]:
+                child_active = _db_bool(conn, "bins", "active", bool(child["active"]))
                 conn.execute(
                     """
                     insert into public.bins
-                      (bin_id, station_id, command, bin_index, label, fill_percent, status, active, updated_at)
-                    values (%s, %s, %s, %s, %s, %s, %s, %s, now())
+                      (bin_id, station_id, command, bin_index, label, fill_percent, status, active, created_at, updated_at)
+                    values (%s, %s, %s, %s, %s, %s, %s, %s, now(), now())
                     on conflict (bin_id) do update set
                       fill_percent = excluded.fill_percent,
                       status = excluded.status,
@@ -140,7 +149,7 @@ def sync_operations(conn: psycopg.Connection[Any], operations_db: Path) -> None:
                         child["label"],
                         child["fill_percent"],
                         child["status"],
-                        bool(child["active"]),
+                        child_active,
                     ),
                 )
 
@@ -180,6 +189,8 @@ def sync_operations(conn: psycopg.Connection[Any], operations_db: Path) -> None:
 
 
 def sync_history(conn: psycopg.Connection[Any], history_db: Path, limit: int) -> None:
+    if not _table_exists(conn, "history"):
+        return
     if not history_db.exists():
         return
     service = HistoryService(history_db)
@@ -215,6 +226,8 @@ def sync_history(conn: psycopg.Connection[Any], history_db: Path, limit: int) ->
 
 
 def sync_training_status(conn: psycopg.Connection[Any]) -> None:
+    if not _table_exists(conn, "training_jobs"):
+        return
     status = _training_status(project_root())
     payload = status.model_dump(mode="json")
     metrics = {
@@ -252,6 +265,51 @@ def sync_training_status(conn: psycopg.Connection[Any]) -> None:
 
 def _parse_ts(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+_COLUMN_TYPE_CACHE: dict[tuple[str, str], str] = {}
+_TABLE_EXISTS_CACHE: dict[str, bool] = {}
+
+
+def _db_bool(conn: psycopg.Connection[Any], table: str, column: str, value: bool) -> bool | int:
+    key = (table, column)
+    data_type = _COLUMN_TYPE_CACHE.get(key)
+    if data_type is None:
+        row = conn.execute(
+            """
+            select data_type
+            from information_schema.columns
+            where table_schema = 'public'
+              and table_name = %s
+              and column_name = %s
+            """,
+            (table, column),
+        ).fetchone()
+        data_type = str(row[0]) if row else "boolean"
+        _COLUMN_TYPE_CACHE[key] = data_type
+    if data_type in {"integer", "bigint", "smallint", "numeric"}:
+        return 1 if value else 0
+    return value
+
+
+def _table_exists(conn: psycopg.Connection[Any], table: str) -> bool:
+    cached = _TABLE_EXISTS_CACHE.get(table)
+    if cached is not None:
+        return cached
+    row = conn.execute(
+        """
+        select exists (
+          select 1
+          from information_schema.tables
+          where table_schema = 'public'
+            and table_name = %s
+        )
+        """,
+        (table,),
+    ).fetchone()
+    exists = bool(row[0]) if row else False
+    _TABLE_EXISTS_CACHE[table] = exists
+    return exists
 
 
 if __name__ == "__main__":
