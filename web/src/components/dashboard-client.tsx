@@ -97,6 +97,7 @@ import {
   UserReport,
   WebSourceDiscoveryResponse,
   agentFetch,
+  cloudFetch,
   datasetImageUrl,
   streamUrl,
   websocketUrl
@@ -526,7 +527,7 @@ export function DashboardClient() {
       return;
     }
     try {
-      const me = await agentFetch<AuthMe>("/api/me", undefined, nextToken);
+      const me = await cloudFetch<AuthMe>("/api/me", undefined, nextToken);
       setAuth(me);
       setAgentError("");
     } catch (error) {
@@ -546,20 +547,14 @@ export function DashboardClient() {
     setAgentError("");
     setSessionMessage("");
     try {
-      const res = await fetch(`${AGENT_URL}/api/auth/login`, {
+      const data = await cloudFetch<AuthLoginResponse>("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           username: loginUsername.trim(),
           password: loginPassword
-        }),
-        cache: "no-store"
-      });
-      if (!res.ok) {
-        const detail = await res.text();
-        throw new AgentApiError(detail || `${res.status} ${res.statusText}`, res.status);
-      }
-      const data = (await res.json()) as AuthLoginResponse;
+        })
+      }, "");
       const nextAuth: AuthMe = {
         role: data.role,
         capabilities: data.capabilities,
@@ -700,12 +695,12 @@ export function DashboardClient() {
     const message = (value ?? userChatQuestion).trim() || "Hôm nay bạn thấy thói quen bỏ rác của mình thế nào?";
     setChatBusy(true);
     try {
-      const data = await fetchAgent<AiChatResponse>("/api/user/chat", {
+      const data = await cloudFetch<AiChatResponse>("/api/user/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
         timeoutMs: 90_000
-      });
+      }, agentToken);
       setUserChat(data);
       setUserChatQuestion("");
       setAgentError("");
@@ -730,14 +725,14 @@ export function DashboardClient() {
     }
     setBusy(true);
     try {
-      const nextAuth = await fetchAgent<AuthMe>("/api/auth/change-password", {
+      const nextAuth = await cloudFetch<AuthMe>("/api/auth/change-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           current_password: passwordCurrent,
           new_password: passwordNew
         })
-      });
+      }, agentToken);
       setAuth(nextAuth);
       setPasswordCurrent("");
       setPasswordNew("");
@@ -1092,12 +1087,12 @@ export function DashboardClient() {
     const message = (value ?? adminChatQuestion).trim() || "Tóm tắt hệ thống hôm nay.";
     setChatBusy(true);
     try {
-      const data = await fetchAgent<AiChatResponse>("/api/admin/chat", {
+      const data = await cloudFetch<AiChatResponse>("/api/admin/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
         timeoutMs: 90_000
-      });
+      }, agentToken);
       setAdminChat(data);
       setAdminChatQuestion("");
       setAgentError("");
@@ -1115,7 +1110,7 @@ export function DashboardClient() {
     clearSession("");
     if (token) {
       try {
-        await agentFetch("/api/auth/logout", { method: "POST" }, token);
+        await cloudFetch("/api/auth/logout", { method: "POST" }, token);
       } catch {
         // Logout is best-effort because the local session is already cleared.
       }
@@ -2865,6 +2860,9 @@ function localChatFailure(role: AuthRole, error: unknown): AiChatResponse {
 }
 
 function sanitizeLocalChatError(message: string) {
+  if (/^\s*<!doctype html/i.test(message) || /^\s*<html/i.test(message)) {
+    return "Backend tra HTML/404 thay vi JSON. Kiem tra Cloud API hoac NEXT_PUBLIC_AGENT_URL.";
+  }
   return message
     .replace(/DEEPSEEK_[A-Z0-9_]+/gi, "[ẩn]")
     .replace(/sk-[A-Za-z0-9_-]+/g, "[ẩn]")

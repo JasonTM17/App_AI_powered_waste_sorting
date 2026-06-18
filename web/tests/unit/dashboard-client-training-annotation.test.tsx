@@ -3,12 +3,14 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const agentFetchMock = vi.hoisted(() => vi.fn());
+const cloudFetchMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/agent", async () => {
   const actual = await vi.importActual<typeof import("@/lib/agent")>("@/lib/agent");
   return {
     ...actual,
-    agentFetch: agentFetchMock
+    agentFetch: agentFetchMock,
+    cloudFetch: cloudFetchMock
   };
 });
 
@@ -187,12 +189,14 @@ describe("DashboardClient training annotation", () => {
     cleanup();
     window.localStorage.clear();
     agentFetchMock.mockReset();
+    cloudFetchMock.mockReset();
   });
 
   it("normalizes an authenticated admin at the root route to the admin tab route", async () => {
     window.history.replaceState(null, "", "/");
     window.localStorage.setItem("trash-sorter-session-token", "qa-token");
     agentFetchMock.mockImplementation(async (path: string) => responseFor(path));
+    cloudFetchMock.mockImplementation(async (path: string) => responseFor(path));
 
     render(<DashboardClient />);
 
@@ -206,6 +210,7 @@ describe("DashboardClient training annotation", () => {
     window.history.replaceState(null, "", "/admin?tab=training");
     window.localStorage.setItem("trash-sorter-session-token", "qa-token");
     agentFetchMock.mockImplementation(async (path: string) => responseFor(path));
+    cloudFetchMock.mockImplementation(async (path: string) => responseFor(path));
 
     const { container } = render(<DashboardClient />);
 
@@ -230,6 +235,7 @@ describe("DashboardClient training annotation", () => {
   it("can add phone images and start fast candidate training", async () => {
     window.history.replaceState(null, "", "/admin?tab=training");
     window.localStorage.setItem("trash-sorter-session-token", "qa-token");
+    cloudFetchMock.mockImplementation(async (path: string) => responseFor(path));
     agentFetchMock.mockImplementation(async (path: string) => {
       if (path.startsWith("/api/learn-now/status")) {
         return LEARN_NOW_READY;
@@ -269,6 +275,7 @@ describe("DashboardClient training annotation", () => {
   it("shows camera capture failures as a notice instead of an unhandled error", async () => {
     window.history.replaceState(null, "", "/admin?tab=training");
     window.localStorage.setItem("trash-sorter-session-token", "qa-token");
+    cloudFetchMock.mockImplementation(async (path: string) => responseFor(path));
     agentFetchMock.mockImplementation(async (path: string) => {
       if (path === "/api/dataset/camera-sample") {
         throw new Error("Camera is not running or has no frame yet");

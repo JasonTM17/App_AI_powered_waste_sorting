@@ -6918,3 +6918,84 @@ body {
     height: clamp(440px, 68dvh, 640px);
   }
 }
+
+/* Admin sidebar rail hardening: keep the collapsed taskbar aligned and non-overlapping. */
+@media (min-width: 761px) {
+  .app-shell:not(.polished-user-shell).sidebar-collapsed {
+    grid-template-columns: 96px minmax(0, 1fr);
+  }
+
+  .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar {
+    align-items: stretch;
+    display: grid;
+    gap: 16px;
+    grid-template-rows: 64px minmax(0, 1fr) 64px;
+    justify-items: center;
+    padding: 20px 12px;
+    width: 96px;
+  }
+
+  .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar .brand {
+    align-items: center;
+    height: 64px;
+    justify-content: center;
+    min-height: 64px;
+    width: 100%;
+  }
+
+  .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar .brand-mark {
+    flex: 0 0 52px;
+    height: 52px;
+    width: 52px;
+  }
+
+  .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar .nav-list {
+    align-content: start;
+    display: grid;
+    gap: 10px;
+    justify-items: center;
+    max-width: none;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 2px 0;
+    width: 100%;
+  }
+
+  .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar .nav-item {
+    border-left: 0;
+    border-radius: 14px;
+    display: grid;
+    height: 56px;
+    max-width: 56px;
+    min-width: 56px;
+    padding: 0;
+    place-items: center;
+    transform: none;
+    width: 56px;
+  }
+
+  .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar .nav-item svg {
+    flex: 0 0 auto;
+  }
+
+  .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar .nav-item:hover,
+  .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar .nav-item.active {
+    transform: none;
+  }
+
+  .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar .agent-card {
+    display: none;
+  }
+
+  .app-shell:not(.polished-user-shell).sidebar-collapsed > .sidebar .sidebar-toggle {
+    align-self: end;
+    border-radius: 14px;
+    height: 56px;
+    justify-self: center;
+    margin: 0;
+    min-height: 56px;
+    padding: 0;
+    width: 56px;
+  }
+}

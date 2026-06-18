@@ -1020,12 +1020,12 @@ export type AudioVoicePackStatusResponse = {
 };
 
 const configuredAgentUrl = process.env.NEXT_PUBLIC_AGENT_URL?.trim().replace(/\/$/, "");
+const configuredCloudApiUrl = process.env.NEXT_PUBLIC_CLOUD_API_URL?.trim().replace(/\/$/, "");
 
-export const AGENT_URL =
-  configuredAgentUrl ||
-  (process.env.NODE_ENV === "production" && typeof window !== "undefined"
-    ? window.location.origin
-    : "http://localhost:8765");
+export const AGENT_URL = configuredAgentUrl || "http://localhost:8765";
+export const CLOUD_API_URL =
+  configuredCloudApiUrl ||
+  (process.env.NODE_ENV === "production" && typeof window !== "undefined" ? window.location.origin : AGENT_URL);
 
 export const DEFAULT_AGENT_TOKEN = process.env.NEXT_PUBLIC_AGENT_TOKEN || "";
 const AGENT_FETCH_TIMEOUT_MS = 20000;
@@ -1218,16 +1218,63 @@ export async function agentFetch<T>(
     globalThis.clearTimeout(timeoutId);
   }
   if (!res.ok) {
-    const detail = await agentErrorDetail(res);
+    const detail = await agentResponseErrorDetail(res);
     throw new AgentApiError(detail || `${res.status} ${res.statusText}`, res.status);
   }
   return (await res.json()) as T;
 }
 
-async function agentErrorDetail(res: Response) {
+export async function cloudFetch<T>(
+  path: string,
+  init?: AgentFetchInit,
+  token = DEFAULT_AGENT_TOKEN
+): Promise<T> {
+  const { timeoutMs, signal, ...requestInit } = init ?? {};
+  const headers = new Headers(init?.headers);
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs ?? AGENT_FETCH_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${CLOUD_API_URL}${path}`, {
+      ...requestInit,
+      headers,
+      cache: "no-store",
+      signal: signal ?? controller.signal
+    });
+  } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
+    const aborted = error instanceof DOMException && error.name === "AbortError";
+    throw new AgentApiError(
+      aborted
+        ? "Cloud API phan hoi qua lau. Thu lai sau vai giay."
+        : "Khong ket noi duoc Cloud API tren Vercel. Kiem tra mang hoac deployment.",
+      0
+    );
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
+  if (!res.ok) {
+    const detail = await agentResponseErrorDetail(res);
+    throw new AgentApiError(detail || `${res.status} ${res.statusText}`, res.status);
+  }
+  return (await res.json()) as T;
+}
+
+export async function agentResponseErrorDetail(res: Response) {
   const text = await res.text();
   if (!text) {
     return "";
+  }
+  const contentType = res.headers.get("content-type") ?? "";
+  if (contentType.includes("text/html") || /^\s*<!doctype html/i.test(text) || /^\s*<html/i.test(text)) {
+    return res.status === 404
+      ? "Endpoint local agent/cloud chua san sang (404). Kiem tra NEXT_PUBLIC_AGENT_URL hoac bridge phan cung."
+      : `Backend tra HTML thay vi JSON (${res.status}). Kiem tra cau hinh API/bridge.`;
   }
   try {
     const parsed = JSON.parse(text) as { detail?: unknown; message?: unknown };
@@ -1249,5 +1296,5 @@ async function agentErrorDetail(res: Response) {
   } catch {
     // Fall through to raw text for non-JSON errors.
   }
-  return text;
+  return text.slice(0, 300).trim();
 }
