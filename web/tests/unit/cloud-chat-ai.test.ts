@@ -19,8 +19,8 @@ describe("cloud DeepSeek client", () => {
     }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const answer = await askCloudDeepSeek("user", "Xem Eco Score", { scope: "user_owned_cloud_data" });
-    expect(answer).toBe("Mình ổn nhé.\n• Hôm nay bạn muốn xem Eco Score không?");
+    const answer = await askCloudDeepSeek("user", "Hôm nay bạn thế nào?", { scope: "user_owned_cloud_data" });
+    expect(answer).toBe("Mình ổn nhé.");
     const request = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(request.messages[0].content).toContain("tiếng Việt có dấu");
     expect(request.messages[1].content).toContain("user_owned_cloud_data");
@@ -57,5 +57,13 @@ describe("cloud DeepSeek client", () => {
       "Chào bạn, mình vẫn ổn và sẵn sàng hỗ trợ bạn.\n1. Eco Score: chưa có dữ liệu.\n2. Lịch sử: chưa có dữ liệu."
     );
     expect(answer).toBe("Chào bạn, mình vẫn ổn và sẵn sàng hỗ trợ bạn.");
+  });
+
+  it("cuts greeting-style overreach even when the question matcher misses", () => {
+    const answer = keepGreetingAnswerFocused(
+      "encoded question?",
+      "Chào bạn Nguyễn Sơn, mình là EcoPet đây! Hôm nay mình vẫn ổn và sẵn sàng hỗ trợ bạn.\nDựa trên dữ liệu hiện tại:\n1. Eco Score: chưa có dữ liệu."
+    );
+    expect(answer).toBe("Chào bạn Nguyễn Sơn, mình là EcoPet đây! Hôm nay mình vẫn ổn và sẵn sàng hỗ trợ bạn.");
   });
 });

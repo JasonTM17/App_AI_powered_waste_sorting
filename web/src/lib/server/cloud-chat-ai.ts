@@ -98,7 +98,7 @@ export function polishAnswer(raw: string, role: "admin" | "user") {
 }
 
 export function keepGreetingAnswerFocused(question: string, answer: string) {
-  if (!isGreetingQuestion(question)) return answer;
+  if (!isGreetingQuestion(question) && !looksLikeGreetingAnswer(answer)) return answer;
   const listStart = answer.search(/(?:^|\n|\s)(?:[0-9]+[.)]\s+|[•*-]\s+)/u);
   const focused = listStart >= 0 ? answer.slice(0, listStart) : answer;
   const compact = focused.replace(/\s*\n+\s*/g, " ").replace(/\s+/g, " ").trim();
@@ -111,12 +111,7 @@ export function needsAccentRepair(text: string) {
 }
 
 function isGreetingQuestion(message: string) {
-  const normalized = message
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "D")
-    .toLowerCase();
+  const normalized = normalizeVietnameseForMatch(message);
   return [
     "xin chao",
     "chao",
@@ -126,6 +121,26 @@ function isGreetingQuestion(message: string) {
     "ban thay the nao",
     "how are you"
   ].some((phrase) => normalized.includes(phrase));
+}
+
+function looksLikeGreetingAnswer(answer: string) {
+  const normalized = normalizeVietnameseForMatch(answer.slice(0, 220));
+  return normalized.includes("chao") && (
+    normalized.includes("san sang ho tro") ||
+    normalized.includes("hoat dong tot") ||
+    normalized.includes("cam on ban da hoi") ||
+    normalized.includes("minh van on") ||
+    normalized.includes("toi van on")
+  );
+}
+
+function normalizeVietnameseForMatch(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\u0111/g, "d")
+    .replace(/\u0110/g, "D")
+    .toLowerCase();
 }
 
 function boundedNumber(raw: string | undefined, fallback: number, min: number, max: number) {
