@@ -2,10 +2,16 @@
 
 Date: 2026-06-17
 
+Update: 2026-06-18
+
 ## Architecture
 
 - Vercel hosts the Next.js web app.
-- Supabase owns cloud Auth, Postgres, RLS, Storage later, and Realtime subscriptions.
+- Supabase owns cloud Postgres/RLS, Storage later, and Realtime subscriptions.
+- Vercel serves a small cloud auth API for `/api/auth/login`, `/api/me`,
+  `/api/auth/logout`, and `/api/auth/change-password` against the shared
+  `accounts`/`sessions` tables. This lets the deployed web login without a
+  running local agent.
 - The Windows machine attached to USB camera/UART remains the hardware bridge.
 - Browser users never receive service-role secrets, camera stream tokens, UART controls, or training controls unless they are Admin through the local/admin API surface.
 
@@ -16,11 +22,18 @@ Date: 2026-06-17
 3. Create one `profiles` row per Supabase Auth user:
    - `role='admin'` for operators.
    - `role='user'` for field/user accounts.
-4. On Vercel, set only browser-safe variables:
+4. Apply/create the local-agent auth tables in Supabase Postgres (`accounts`,
+   `sessions`, `chat_usage`) by running the local agent or auth management
+   scripts with `TRASH_SORTER_AUTH_DATABASE_URL` pointed at Supabase.
+5. On Vercel, set server-side auth database variables:
+   - `TRASH_SORTER_AUTH_DATABASE_URL`
+   - `DATABASE_URL` as a fallback with the same pooled/direct Postgres URL
+6. On Vercel, set browser-safe variables only when cloud UI reads Supabase
+   directly:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `NEXT_PUBLIC_AGENT_URL` only when the deployed web must still call a reachable agent.
-5. On the local hardware machine, set only server-side bridge secrets:
+   - `NEXT_PUBLIC_AGENT_URL` only when the deployed web must still call a reachable agent. If omitted in production, the web uses the Vercel origin for cloud auth routes.
+7. On the local hardware machine, set only server-side bridge secrets:
    - `TRASH_SORTER_SUPABASE_DATABASE_URL`
    - Optional existing local-agent vars such as `TRASH_SORTER_AUTH_DATABASE_URL`, `DATABASE_URL`, and `DEEPSEEK_API_KEY`.
 

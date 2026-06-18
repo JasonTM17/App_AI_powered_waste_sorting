@@ -1019,8 +1019,13 @@ export type AudioVoicePackStatusResponse = {
   }>;
 };
 
+const configuredAgentUrl = process.env.NEXT_PUBLIC_AGENT_URL?.trim().replace(/\/$/, "");
+
 export const AGENT_URL =
-  process.env.NEXT_PUBLIC_AGENT_URL?.replace(/\/$/, "") || "http://localhost:8765";
+  configuredAgentUrl ||
+  (process.env.NODE_ENV === "production" && typeof window !== "undefined"
+    ? window.location.origin
+    : "http://localhost:8765");
 
 export const DEFAULT_AGENT_TOKEN = process.env.NEXT_PUBLIC_AGENT_TOKEN || "";
 const AGENT_FETCH_TIMEOUT_MS = 20000;

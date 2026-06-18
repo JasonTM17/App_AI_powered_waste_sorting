@@ -566,6 +566,7 @@ export function DashboardClient() {
         auth_required: true,
         account_id: data.account_id,
         username: data.username,
+        display_name: data.display_name,
         token_source: "session",
         session_expires_at: data.expires_at,
         password_default: data.password_default
