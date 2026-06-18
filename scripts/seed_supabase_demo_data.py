@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
+import random
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -23,6 +25,13 @@ CLASSES = (
     (14, "Organic", "Hữu cơ", 1, "O"),
     (21, "Ceramic", "Vô cơ", 2, "R"),
     (31, "Aluminum can", "Tái chế", 3, "I"),
+    (5, "Cardboard", "Tái chế", 3, "I"),
+    (10, "Glass bottle", "Tái chế", 3, "I"),
+    (17, "Paper bag", "Tái chế", 3, "I"),
+    (23, "Disposable tableware", "Vô cơ", 2, "R"),
+    (28, "Textile", "Vô cơ", 2, "R"),
+    (36, "Wood", "Hữu cơ", 1, "O"),
+    (39, "Liquid", "Hữu cơ", 1, "O"),
 )
 BIN_LABELS = ((1, "O", "Hữu cơ"), (2, "R", "Vô cơ"), (3, "I", "Tái chế"))
 
@@ -30,7 +39,7 @@ BIN_LABELS = ((1, "O", "Hữu cơ"), (2, "R", "Vô cơ"), (3, "I", "Tái chế")
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="Write demo data. Default is dry-run.")
-    parser.add_argument("--history-count", type=int, default=60)
+    parser.add_argument("--history-count", type=int, default=240)
     args = parser.parse_args()
     database_url = next((os.getenv(name, "").strip() for name in DATABASE_ENV_NAMES if os.getenv(name, "").strip()), "")
     if not database_url:
@@ -40,15 +49,18 @@ def main() -> int:
         users = active_usernames(conn)
         print(f"Mode: {'APPLY' if args.apply else 'DRY RUN'}")
         print(f"Users: {len(users)}")
+        history_count = max(180, args.history_count)
         print(f"Planned: {len(users) * 3} stations, {len(users) * 9} bins, "
-              f"{len(users) * max(1, args.history_count)} history rows")
+              f"{len(users) * history_count} history rows, "
+              f"{len(users) * 3} schedules, {len(users) * 2} alerts")
         if not args.apply:
             conn.rollback()
             return 0
-        ensure_demo_target_table(conn)
+        require_demo_schema(conn)
         for username in users:
-            seed_user(conn, username, max(1, args.history_count))
+            seed_user(conn, username, history_count)
         conn.commit()
+        verify_seed(conn, users, history_count)
         print(f"Applied persistent demo data with seed_source={DEMO_SOURCE}.")
     return 0
 
@@ -80,8 +92,6 @@ def seed_user(conn: psycopg.Connection[Any], username: str, history_count: int) 
     digest = hashlib.md5(username.encode("utf-8")).hexdigest()
     device_id = f"demo-device-{digest[:12]}"
     device_active = db_bool(conn, "devices", "active", True)
-    if function_exists(conn, "ensure_user_map_stations_if_available"):
-        conn.execute("select public.ensure_user_map_stations_if_available(%s)", (username,))
     station_ids = ensure_three_stations(conn, username, digest, device_id)
     conn.execute(
         """
@@ -107,22 +117,12 @@ def seed_user(conn: psycopg.Connection[Any], username: str, history_count: int) 
 def ensure_three_stations(
     conn: psycopg.Connection[Any], username: str, digest: str, device_id: str
 ) -> list[str]:
-    rows = conn.execute(
-        """
-        select station_id from public.bin_stations
-         where assigned_owner_username = %s
-           and coalesce(active::text, 'true') not in ('0', 'false', 'f', 'no')
-         order by created_at, station_id limit 3
-        """,
-        (username,),
-    ).fetchall()
-    station_ids = [str(row[0]) for row in rows]
+    station_ids = [f"user-{digest[:12]}-{index}" for index in range(1, 4)]
     coordinates = ((10.8020001, 106.7406138), (10.8276722, 106.7215390), (10.8502385, 106.7541974))
     station_active = db_bool(conn, "bin_stations", "active", True)
+    station_inactive = db_bool(conn, "bin_stations", "active", False)
     station_verified = db_bool(conn, "bin_stations", "coordinate_verified", True)
-    while len(station_ids) < 3:
-        index = len(station_ids) + 1
-        station_id = f"user-{digest[:12]}-{index}"
+    for index, station_id in enumerate(station_ids, start=1):
         latitude, longitude = coordinates[index - 1]
         offset = (int(digest[index:index + 2], 16) % 9 - 4) * 0.00025
         conn.execute(
@@ -133,6 +133,10 @@ def ensure_three_stations(
             values (%s, %s, %s, %s, %s, %s, 'active', %s, %s, %s, %s, %s, %s, %s, now(), now())
             on conflict (station_id) do update set
               assigned_owner_username = excluded.assigned_owner_username, device_id = excluded.device_id,
+              name = excluded.name, area = excluded.area, address = excluded.address,
+              latitude = excluded.latitude, longitude = excluded.longitude,
+              coordinate_verified = excluded.coordinate_verified, source = excluded.source,
+              note = excluded.note, seed_source = excluded.seed_source,
               active = excluded.active, updated_at = now()
             """,
             (
@@ -143,7 +147,15 @@ def ensure_three_stations(
                 DEMO_SOURCE, station_active,
             ),
         )
-        station_ids.append(station_id)
+    conn.execute(
+        """
+        update public.bin_stations
+           set active = %s, updated_at = now()
+         where assigned_owner_username = %s and seed_source = %s
+           and not (station_id = any(%s))
+        """,
+        (station_inactive, username, DEMO_SOURCE, station_ids),
+    )
     conn.execute(
         """
         update public.bin_stations
@@ -156,10 +168,10 @@ def ensure_three_stations(
 
 
 def seed_bins(conn: psycopg.Connection[Any], station_id: str, station_number: int) -> None:
-    fill_values = ((24, 57, 83), (42, 71, 18), (65, 36, 88))[station_number - 1]
+    fill_values = ((24, 57, 83), (42, 71, 18), (65, 36, 97))[station_number - 1]
     bin_active = db_bool(conn, "bins", "active", True)
     for (bin_index, command, label), fill_percent in zip(BIN_LABELS, fill_values, strict=True):
-        status = "warning" if fill_percent >= 80 else "normal"
+        status = "full" if fill_percent >= 95 else "warning" if fill_percent >= 80 else "normal"
         conn.execute(
             """
             insert into public.bins
@@ -179,71 +191,130 @@ def seed_bins(conn: psycopg.Connection[Any], station_id: str, station_number: in
 def seed_history(
     conn: psycopg.Connection[Any], username: str, device_id: str, digest: str, count: int
 ) -> None:
+    rows = demo_history_rows(username, device_id, digest, count)
+    conn.execute(
+        """
+        insert into public.history
+          (local_history_id, device_id, owner_username, ts, cls_id, cls_name, confidence,
+           route_label, bin_index, uart_command, ack_status, rtt_ms, image_available, seed_source)
+        select local_history_id, device_id, owner_username, ts, cls_id, cls_name, confidence,
+               route_label, bin_index, uart_command, 'ok', rtt_ms, false, %s
+          from jsonb_to_recordset(%s::jsonb) as item(
+            local_history_id bigint, device_id text, owner_username text, ts timestamptz,
+            cls_id integer, cls_name text, confidence numeric, route_label text,
+            bin_index integer, uart_command text, rtt_ms integer)
+        on conflict (device_id, local_history_id) do update set
+          owner_username = excluded.owner_username, ts = excluded.ts, cls_id = excluded.cls_id,
+          cls_name = excluded.cls_name, confidence = excluded.confidence,
+          route_label = excluded.route_label, bin_index = excluded.bin_index,
+          uart_command = excluded.uart_command, rtt_ms = excluded.rtt_ms,
+          seed_source = excluded.seed_source
+        """,
+        (DEMO_SOURCE, json.dumps(rows, ensure_ascii=False)),
+    )
+
+
+def demo_history_rows(
+    username: str, device_id: str, digest: str, count: int, now: datetime | None = None
+) -> list[dict[str, Any]]:
     base_id = 9_000_000_000 + int(digest[:8], 16) * 100
-    now = datetime.now(UTC)
+    current = now or datetime.now(UTC)
+    rng = random.Random(int(digest[:16], 16))
+    day_offsets = list(range(180))
+    day_offsets.extend(rng.randrange(180) for _ in range(max(0, count - 180)))
+    rng.shuffle(day_offsets)
+    rows: list[dict[str, Any]] = []
     for index in range(count):
         cls_id, cls_name, route_label, bin_index, command = CLASSES[(index + int(digest[8:10], 16)) % len(CLASSES)]
-        timestamp = now - timedelta(days=(index * 7) % 180, hours=(index * 5) % 24)
-        confidence = 0.72 + ((index * 13 + int(digest[10:12], 16)) % 26) / 100
-        conn.execute(
-            """
-            insert into public.history
-              (local_history_id, device_id, owner_username, ts, cls_id, cls_name, confidence,
-               route_label, bin_index, uart_command, ack_status, rtt_ms, image_available)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'ok', %s, false)
-            on conflict (device_id, local_history_id) do update set
-              owner_username = excluded.owner_username, ts = excluded.ts, confidence = excluded.confidence
-            """,
-            (
-                base_id + index, device_id, username, timestamp, cls_id, cls_name,
-                confidence, route_label, bin_index, command, 18 + index % 23,
-            ),
-        )
+        day = current.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=day_offsets[index])
+        timestamp = min(current, day + timedelta(hours=rng.randrange(7, 22), minutes=rng.randrange(60)))
+        rows.append({
+            "local_history_id": base_id + index,
+            "device_id": device_id,
+            "owner_username": username,
+            "ts": timestamp.isoformat(),
+            "cls_id": cls_id,
+            "cls_name": cls_name,
+            "confidence": round(0.72 + rng.randrange(27) / 100, 4),
+            "route_label": route_label,
+            "bin_index": bin_index,
+            "uart_command": command,
+            "rtt_ms": 18 + rng.randrange(23),
+        })
+    return rows
 
 
 def seed_schedule_and_alert(
     conn: psycopg.Connection[Any], username: str, station_ids: list[str]
 ) -> None:
-    station_id = station_ids[0]
     alert_derived = db_bool(conn, "alerts", "derived", True)
-    conn.execute(
-        """
-        insert into public.collection_schedules
-          (schedule_id, station_id, assigned_owner_username, scheduled_date, window_start,
-           window_end, status, note, completed_by, created_at, updated_at)
-        values (%s, %s, %s, current_date + 2, '08:00', '10:00', 'scheduled', %s, '', now(), now())
-        on conflict (schedule_id) do update set scheduled_date = excluded.scheduled_date, updated_at = now()
-        """,
-        (f"demo-schedule-{station_id}", station_id, username, f"Seed: {DEMO_SOURCE}"),
+    schedules = (
+        ("past", station_ids[0], -7, "completed", "Demo đã thu gom", username),
+        ("next", station_ids[1], 2, "scheduled", "Demo lịch sắp tới", ""),
+        ("later", station_ids[2], 9, "scheduled", "Demo lịch định kỳ", ""),
     )
-    conn.execute(
-        """
-        insert into public.alerts
-          (alert_id, station_id, bin_id, device_id, severity, title, message, status, source,
-           actor_username, derived, created_at, updated_at, resolved_at)
-        values (%s, %s, %s, '', 'warning', 'Thùng gần đầy', %s, 'open', %s, %s, %s, now(), now(), '')
-        on conflict (alert_id) do update set message = excluded.message, status = 'open', updated_at = now()
-        """,
-        (
-            f"demo-warning-{station_id}", station_id, f"{station_id}-I",
-            "Thùng tái chế đang ở mức 83%, cần theo dõi.", DEMO_SOURCE, username,
-            alert_derived,
-        ),
-    )
-
-
-def ensure_demo_target_table(conn: psycopg.Connection[Any]) -> None:
-    conn.execute(
-        """
-        create table if not exists public.demo_hardware_targets (
-          owner_username text primary key,
-          station_id text not null references public.bin_stations(station_id) on delete cascade,
-          bin_id text not null default '', bin_index integer not null check (bin_index between 1 and 3),
-          selected_by text not null default '', selected_at timestamptz not null default now(),
-          last_applied_at timestamptz, last_percent numeric(5,2), active boolean not null default true
+    for suffix, station_id, day_delta, status, note, completed_by in schedules:
+        conn.execute(
+            """
+            insert into public.collection_schedules
+              (schedule_id, station_id, assigned_owner_username, scheduled_date, window_start,
+               window_end, status, note, completed_by, completed_at, created_at, updated_at)
+            values (%s, %s, %s, current_date + %s, '08:00', '10:00', %s, %s, %s,
+                    case when %s = 'completed' then now() - interval '7 days' else null end,
+                    now(), now())
+            on conflict (schedule_id) do update set
+              scheduled_date = excluded.scheduled_date, status = excluded.status,
+              note = excluded.note, completed_by = excluded.completed_by,
+              completed_at = excluded.completed_at, updated_at = now()
+            """,
+            (f"demo-schedule-{suffix}-{station_id}", station_id, username, day_delta,
+             status, f"{note}; Seed: {DEMO_SOURCE}", completed_by, status),
         )
-        """
+    alert_rows = (
+        ("full", station_ids[2], "I", "danger", "Thùng đã đầy", "Thùng tái chế đã đầy 97%, cần thu gom.", "open", ""),
+        ("resolved", station_ids[0], "I", "warning", "Đã xử lý thùng gần đầy", "Cảnh báo demo đã được xử lý.", "resolved", datetime.now(UTC).isoformat()),
     )
+    for suffix, station_id, command, severity, title, message, status, resolved_at in alert_rows:
+        conn.execute(
+            """
+            insert into public.alerts
+              (alert_id, station_id, bin_id, device_id, severity, title, message, status, source,
+               actor_username, derived, created_at, updated_at, resolved_at)
+            values (%s, %s, %s, '', %s, %s, %s, %s, %s, %s, %s, now(), now(), %s)
+            on conflict (alert_id) do update set
+              severity = excluded.severity, title = excluded.title, message = excluded.message,
+              status = excluded.status, resolved_at = excluded.resolved_at, updated_at = now()
+            """,
+            (f"demo-{suffix}-{station_id}", station_id, f"{station_id}-{command}", severity,
+             title, message, status, DEMO_SOURCE, username, alert_derived, resolved_at),
+        )
+
+
+def require_demo_schema(conn: psycopg.Connection[Any]) -> None:
+    if not table_exists(conn, "demo_hardware_targets"):
+        raise RuntimeError("Run Supabase migrations before seeding demo data.")
+    column = conn.execute(
+        """select 1 from information_schema.columns
+             where table_schema = 'public' and table_name = 'history' and column_name = 'seed_source'"""
+    ).fetchone()
+    if not column:
+        raise RuntimeError("Migration 202606180005_performance_demo_seed.sql is required.")
+
+
+def verify_seed(conn: psycopg.Connection[Any], users: list[str], expected_history: int) -> None:
+    for username in users:
+        counts = conn.execute(
+            """select
+                 (select count(*) from public.bin_stations where assigned_owner_username = %s and seed_source = %s),
+                 (select count(*) from public.history where owner_username = %s and seed_source = %s)""",
+            (username, DEMO_SOURCE, username, DEMO_SOURCE),
+        ).fetchone()
+        station_count, history_count = (int(counts[0]), int(counts[1])) if counts else (0, 0)
+        if station_count < 3 or history_count < expected_history:
+            raise RuntimeError(
+                f"Seed verification failed for {username}: stations={station_count}, history={history_count}"
+            )
+        print(f"Verified {username}: {station_count} stations, {history_count} demo history rows")
 
 
 def table_exists(conn: psycopg.Connection[Any], table: str) -> bool:

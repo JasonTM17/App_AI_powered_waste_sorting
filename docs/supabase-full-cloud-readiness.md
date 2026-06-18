@@ -59,6 +59,8 @@ The Vercel chat routes call DeepSeek server-side and read only role-scoped aggre
 history, map, alert, schedule, and enabled knowledge data. They never send session
 tokens, database credentials, raw logs, image paths, or hardware secrets. User chat
 shares the existing `chat_usage` table and enforces 36 requests per calendar month.
+Chat responses use SSE (`meta`, `delta`, `done`, and safe `error` events) so the UI
+renders the first provider tokens without waiting for the complete answer.
 
 ## Hardware Bridge
 
@@ -97,8 +99,10 @@ Apply it after setting `TRASH_SORTER_SUPABASE_DATABASE_URL` or `POSTGRES_URL`:
 python -m uv run python scripts/seed_supabase_demo_data.py --apply
 ```
 
-Each active User receives three assigned stations, nine child bins, one online
-demo device, collection/alert records, and 60 idempotent history rows. Set
+Apply `supabase/migrations/202606180005_performance_demo_seed.sql` before the
+current seed. Each active User receives three assigned stations, nine child bins,
+one online demo device, collection/alert records, and 240 deterministic,
+idempotent history rows spanning 180 days. Set
 `NEXT_PUBLIC_DEMO_HARDWARE_TARGET=1` on Vercel and
 `TRASH_SORTER_DEMO_HARDWARE_TARGET=1` on the hardware bridge. The latest bin
 selected on the map receives the next local fullness reading; `95%` or higher
@@ -138,11 +142,15 @@ Broadcast. Payloads intentionally contain IDs/status values, not raw row dumps.
 - `GET /api/user/device`
 - `GET /api/user/report?range_days=`
 - `GET /api/user/experience?range_days=`
+- `GET /api/user/dashboard-summary?range_days=7|30|90|180`
 - `POST /api/user/advisor`
 - `GET /api/user/history/export.csv?range_days=`
 
 These routes require an active User session. Missing sessions return `401`,
 non-User sessions return `403`, and all database reads use the session username.
+The dashboard uses the summary route to authenticate once and reuse one analytics
+aggregate for report and experience output; the individual routes remain available
+for dedicated screens and backward compatibility.
 
 ## Deployment Gate
 

@@ -67,15 +67,19 @@ def test_admin_and_user_operations_routes_work_and_stay_scoped(monkeypatch, tmp_
 
         bin_map = client.get("/api/user/bin-map", headers=user_headers)
         assert bin_map.status_code == 200
-        assert bin_map.json()["total"] == 2
-        assert {station["station_id"] for station in bin_map.json()["stations"]} == {"td-bin-001", "td-bin-002"}
+        assert bin_map.json()["total"] == 3
+        assert {station["station_id"] for station in bin_map.json()["stations"]} == {
+            "td-bin-001",
+            "td-bin-002",
+            "td-bin-003",
+        }
 
         forbidden_issue = client.post(
             "/api/user/device-issues",
             headers=user_headers,
             json={
-                "station_id": "td-bin-003",
-                "bin_id": "td-bin-003-R",
+            "station_id": "td-bin-004",
+            "bin_id": "td-bin-004-R",
                 "device_id": "dev-thu-duc-001",
                 "issue_type": "camera_problem",
                 "severity": "warning",
