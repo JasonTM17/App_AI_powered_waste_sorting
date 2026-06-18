@@ -92,16 +92,17 @@ export function polishAnswer(raw: string, role: "admin" | "user") {
     .replace(/^\s*#{1,6}\s*/gm, "")
     .replace(/\r\n/g, "\n")
     .split("\n")
-    .map((line) => line.trim().replace(/^[-*]\s+/, "• "))
+    .map((line) => line.trim().replace(/^[-*•]\s+/, "• "))
     .filter(Boolean);
   return lines.slice(0, role === "admin" ? 7 : 5).join("\n").trim();
 }
 
 export function keepGreetingAnswerFocused(question: string, answer: string) {
   if (!isGreetingQuestion(question)) return answer;
-  const compact = answer.replace(/\s*\n+\s*/g, " ").replace(/\s+/g, " ").trim();
-  const withoutLists = compact.replace(/\s+(?:[0-9]+[.)]|[•*-])\s+.*$/s, "");
-  const sentences = withoutLists.match(/[^.!?]+[.!?]?/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [];
+  const listStart = answer.search(/(?:^|\n|\s)(?:[0-9]+[.)]\s+|[•*-]\s+)/u);
+  const focused = listStart >= 0 ? answer.slice(0, listStart) : answer;
+  const compact = focused.replace(/\s*\n+\s*/g, " ").replace(/\s+/g, " ").trim();
+  const sentences = compact.match(/[^.!?]+[.!?]?/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [];
   return (sentences.slice(0, 2).join(" ") || compact).trim();
 }
 
@@ -116,7 +117,15 @@ function isGreetingQuestion(message: string) {
     .replace(/đ/g, "d")
     .replace(/Đ/g, "D")
     .toLowerCase();
-  return /\b(xin chao|chao|ban co khoe|ban khoe|ban the nao|ban thay the nao|hom nay ban the nao|how are you)\b/.test(normalized);
+  return [
+    "xin chao",
+    "chao",
+    "ban co khoe",
+    "ban khoe",
+    "ban the nao",
+    "ban thay the nao",
+    "how are you"
+  ].some((phrase) => normalized.includes(phrase));
 }
 
 function boundedNumber(raw: string | undefined, fallback: number, min: number, max: number) {
