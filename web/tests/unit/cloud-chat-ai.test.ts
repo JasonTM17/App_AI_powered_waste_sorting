@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { askCloudDeepSeek, needsAccentRepair, polishAnswer } from "@/lib/server/cloud-chat-ai";
+import { askCloudDeepSeek, keepGreetingAnswerFocused, needsAccentRepair, polishAnswer } from "@/lib/server/cloud-chat-ai";
 
 describe("cloud DeepSeek client", () => {
   beforeEach(() => {
@@ -19,7 +19,7 @@ describe("cloud DeepSeek client", () => {
     }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const answer = await askCloudDeepSeek("user", "Hôm nay bạn thế nào?", { scope: "user_owned_cloud_data" });
+    const answer = await askCloudDeepSeek("user", "Xem Eco Score", { scope: "user_owned_cloud_data" });
     expect(answer).toBe("Mình ổn nhé.\n• Hôm nay bạn muốn xem Eco Score không?");
     const request = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
     expect(request.messages[0].content).toContain("tiếng Việt có dấu");
@@ -49,5 +49,13 @@ describe("cloud DeepSeek client", () => {
     expect(needsAccentRepair("Day la mot cau tra loi rat dai nhung hoan toan khong co dau tieng Viet trong noi dung.")).toBe(true);
     expect(needsAccentRepair("Đây là câu trả lời tiếng Việt có dấu đầy đủ và dễ đọc cho người dùng.")).toBe(false);
     expect(polishAnswer("## Tiêu đề\n**Nội dung**\n- Bước một", "user")).toBe("Tiêu đề\nNội dung\n• Bước một");
+  });
+
+  it("keeps greeting answers focused instead of listing unrelated features", () => {
+    const answer = keepGreetingAnswerFocused(
+      "Hôm nay bạn thế nào?",
+      "Chào bạn, mình vẫn ổn và sẵn sàng hỗ trợ bạn.\n1. Eco Score: chưa có dữ liệu.\n2. Lịch sử: chưa có dữ liệu."
+    );
+    expect(answer).toBe("Chào bạn, mình vẫn ổn và sẵn sàng hỗ trợ bạn.");
   });
 });

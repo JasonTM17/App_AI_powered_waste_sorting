@@ -19,10 +19,10 @@ export async function askCloudDeepSeek(role: "admin" | "user", message: string, 
     { role: "system", content: systemPrompt(role) },
     { role: "user", content: JSON.stringify({ question: message, context }) }
   ]);
-  const polished = polishAnswer(answer, role);
+  const polished = keepGreetingAnswerFocused(message, polishAnswer(answer, role));
   if (!needsAccentRepair(polished)) return polished;
 
-  const repaired = polishAnswer(
+  const repaired = keepGreetingAnswerFocused(message, polishAnswer(
     await complete([
       {
         role: "system",
@@ -31,7 +31,7 @@ export async function askCloudDeepSeek(role: "admin" | "user", message: string, 
       { role: "user", content: polished }
     ]),
     role
-  );
+  ));
   if (needsAccentRepair(repaired)) throw new CloudChatProviderError();
   return repaired;
 }
@@ -97,8 +97,26 @@ export function polishAnswer(raw: string, role: "admin" | "user") {
   return lines.slice(0, role === "admin" ? 7 : 5).join("\n").trim();
 }
 
+export function keepGreetingAnswerFocused(question: string, answer: string) {
+  if (!isGreetingQuestion(question)) return answer;
+  const compact = answer.replace(/\s*\n+\s*/g, " ").replace(/\s+/g, " ").trim();
+  const withoutLists = compact.replace(/\s+(?:[0-9]+[.)]|[•*-])\s+.*$/s, "");
+  const sentences = withoutLists.match(/[^.!?]+[.!?]?/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [];
+  return (sentences.slice(0, 2).join(" ") || compact).trim();
+}
+
 export function needsAccentRepair(text: string) {
   return text.length >= 60 && !/[À-ỹĐđ]/u.test(text);
+}
+
+function isGreetingQuestion(message: string) {
+  const normalized = message
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .toLowerCase();
+  return /\b(xin chao|chao|ban co khoe|ban khoe|ban the nao|ban thay the nao|hom nay ban the nao|how are you)\b/.test(normalized);
 }
 
 function boundedNumber(raw: string | undefined, fallback: number, min: number, max: number) {
