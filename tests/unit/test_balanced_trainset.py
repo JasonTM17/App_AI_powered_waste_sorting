@@ -198,3 +198,49 @@ def test_balanced_export_can_limit_to_operator_sources(tmp_path):
     assert stats["blocked_items"]["source_not_allowed"] == 1
     assert list((out / "images" / "train").glob("camera_pen.jpg"))
     assert not list((out / "images").glob("**/external_pen.jpg"))
+
+
+def test_balanced_export_keeps_priority_camera_source_before_focus_class(tmp_path):
+    queue = tmp_path / "queue"
+    queue.mkdir()
+    _write_alias_item(queue, "camera_organic", "Organic", source="manual_camera_capture")
+    _write_alias_item(queue, "external_pen", "Pen", source="roboflow_pen_v3")
+    out = tmp_path / "fast"
+
+    stats = export_balanced_trainset(
+        queue,
+        out,
+        ("Organic", "Pen"),
+        max_images=1,
+        legacy_quota=10,
+        focus_classes=("Pen",),
+        priority_sources=("manual_camera_capture",),
+    )
+
+    assert stats["images"] == 1
+    assert stats["priority_sources"] == ["manual_camera_capture"]
+    assert list((out / "images").glob("**/camera_organic.jpg"))
+    assert not list((out / "images").glob("**/external_pen.jpg"))
+
+
+def test_balanced_export_caps_focus_class_with_separate_quota(tmp_path):
+    queue = tmp_path / "queue"
+    queue.mkdir()
+    for index in range(6):
+        _write_alias_item(queue, f"pen_{index}", "Pen", source="roboflow_pen_v3")
+    for index in range(3):
+        _write_alias_item(queue, f"organic_{index}", "Organic", source="manual_import")
+    out = tmp_path / "fast"
+
+    stats = export_balanced_trainset(
+        queue,
+        out,
+        ("Organic", "Pen"),
+        max_images=20,
+        legacy_quota=2,
+        focus_classes=("Pen",),
+        focus_quota=3,
+    )
+
+    assert stats["focus_quota"] == 3
+    assert stats["classes"] == {"Pen": 3, "Organic": 2}

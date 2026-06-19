@@ -52,6 +52,11 @@ def main() -> int:
     parser.add_argument("--flipud", type=float, default=0.0)
     parser.add_argument("--cos-lr", action="store_true", help="Use cosine LR schedule")
     parser.add_argument("--optimizer", default="SGD", help="Use a fixed optimizer so lr0 is respected")
+    parser.add_argument(
+        "--serial-label-cache",
+        action="store_true",
+        help="Validate labels serially when Windows blocks Ultralytics worker pipes.",
+    )
     args = parser.parse_args()
 
     if not args.data.exists():
@@ -64,6 +69,11 @@ def main() -> int:
     data_path = args.data.resolve()
     model_path = args.model.resolve()
     project_path = (ROOT / args.project).resolve() if not args.project.is_absolute() else args.project
+
+    if args.serial_label_cache:
+        from app.utils.ultralytics_cache import enable_serial_label_cache
+
+        enable_serial_label_cache()
 
     from ultralytics import YOLO
 

@@ -25,12 +25,22 @@ def main() -> int:
     parser.add_argument("--plots", action="store_true")
     parser.add_argument("--device", default="0")
     parser.add_argument("--out", type=Path, default=Path("runs") / "eval" / "metrics.json")
+    parser.add_argument(
+        "--serial-label-cache",
+        action="store_true",
+        help="Validate labels serially when Windows blocks Ultralytics worker pipes.",
+    )
     args = parser.parse_args()
 
     if not args.model.exists():
         raise SystemExit(f"model not found: {args.model}")
     if not args.data.exists():
         raise SystemExit(f"data.yaml not found: {args.data}")
+
+    if args.serial_label_cache:
+        from app.utils.ultralytics_cache import enable_serial_label_cache
+
+        enable_serial_label_cache()
 
     from ultralytics import YOLO
 

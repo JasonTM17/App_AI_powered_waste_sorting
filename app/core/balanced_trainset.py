@@ -35,10 +35,12 @@ def export_balanced_trainset(
     max_images: int = 4500,
     legacy_quota: int = 75,
     focus_classes: tuple[str, ...] = ("Pen", "Battery", "Toothbrush"),
+    focus_quota: int = 0,
     min_box_area: float = 0.0,
     min_box_side: float = 0.0,
     require_reviewed: bool = False,
     allowed_sources: tuple[str, ...] = (),
+    priority_sources: tuple[str, ...] = (),
     generated_cap_ratio: float = GENERATED_CAP_RATIO,
     seed: int = 42,
 ) -> dict[str, object]:
@@ -57,6 +59,8 @@ def export_balanced_trainset(
         max_images=max_images,
         legacy_quota=legacy_quota,
         focus_classes=set(focus_classes),
+        focus_quota=focus_quota,
+        priority_sources=set(priority_sources),
         generated_cap_ratio=generated_cap_ratio,
         seed=seed,
     )
@@ -71,10 +75,12 @@ def export_balanced_trainset(
         "focus_classes": list(focus_classes),
         "max_images": max_images,
         "legacy_quota": legacy_quota,
+        "focus_quota": focus_quota,
         "min_box_area": min_box_area,
         "min_box_side": min_box_side,
         "require_reviewed": require_reviewed,
         "allowed_sources": list(allowed_sources),
+        "priority_sources": list(priority_sources),
         "generated_cap_ratio": generated_cap_ratio,
         "skipped_small_boxes": 0,
         "skipped_unknown_boxes": 0,
@@ -179,13 +185,21 @@ def _select_items(
     max_images: int,
     legacy_quota: int,
     focus_classes: set[str],
+    focus_quota: int,
+    priority_sources: set[str],
     generated_cap_ratio: float,
     seed: int,
 ) -> list[QueueItem]:
     rng = random.Random(seed)
     ordered = list(items)
     rng.shuffle(ordered)
-    ordered.sort(key=lambda item: (not bool(item.classes & focus_classes), _is_generated(item.meta)))
+    ordered.sort(
+        key=lambda item: (
+            str(item.meta.get("source") or "unknown") not in priority_sources,
+            not bool(item.classes & focus_classes),
+            _is_generated(item.meta),
+        )
+    )
     selected: list[QueueItem] = []
     class_counts: Counter[str] = Counter()
     generated_counts: Counter[str] = Counter()
@@ -193,8 +207,11 @@ def _select_items(
         if len(selected) >= max_images:
             break
         focus = item.classes & focus_classes
+        needed_focus = bool(focus) and (
+            focus_quota <= 0 or any(class_counts[name] < focus_quota for name in focus)
+        )
         needed_legacy = any(class_counts[name] < legacy_quota for name in item.classes)
-        if not focus and not needed_legacy:
+        if not needed_focus and not needed_legacy:
             continue
         if _is_generated(item.meta) and not _within_generated_cap(
             item.classes,
