@@ -182,6 +182,8 @@ class Pipeline:
         self.dispatch_status = "waiting empty tray"
         self._dispatch_guard = DispatchGuard()
         self._last_multi_class_warning_at = 0.0
+        self._manual_reference_log_last_at: dict[tuple[str, str, str, str], float] = {}
+        self._manual_reference_log_interval_seconds = 2.0
         self._manual_reference_recognizer = self._build_manual_reference_recognizer()
         self._three_bin_classifier = self._build_three_bin_classifier()
         self._configure_dispatch_guard()
@@ -312,6 +314,22 @@ class Pipeline:
     def _reset_foreground_gate(self) -> None:
         self._foreground_background = None
         self._foreground_background_frames = 0
+
+    def _should_log_manual_reference(
+        self,
+        *,
+        mode: str,
+        source_class: str,
+        target_class: str,
+        source_path: str,
+    ) -> bool:
+        key = (mode, source_class, target_class, source_path)
+        now = time.monotonic()
+        last = self._manual_reference_log_last_at.get(key)
+        if last is not None and now - last < self._manual_reference_log_interval_seconds:
+            return False
+        self._manual_reference_log_last_at[key] = now
+        return True
 
     def _has_uart(self) -> bool:
         if isinstance(self.uart, _NoopUart):
@@ -692,27 +710,39 @@ class Pipeline:
             )
             self.dispatch_status = f"manual reference {match.cls_name}"
             if mode == "correction":
-                logger.info(
-                    "manual reference corrected {} as {} similarity={:.3f} votes={} margin={:.3f} area={:.3f} backend={} source={}",
-                    detection.cls_name,
-                    match.cls_name,
-                    match.similarity,
-                    match.votes,
-                    match.margin,
-                    area_ratio,
-                    match.backend,
-                    match.image_path,
-                )
+                if self._should_log_manual_reference(
+                    mode=mode,
+                    source_class=detection.cls_name,
+                    target_class=match.cls_name,
+                    source_path=str(match.image_path),
+                ):
+                    logger.info(
+                        "manual reference corrected {} as {} similarity={:.3f} votes={} margin={:.3f} area={:.3f} backend={} source={}",
+                        detection.cls_name,
+                        match.cls_name,
+                        match.similarity,
+                        match.votes,
+                        match.margin,
+                        area_ratio,
+                        match.backend,
+                        match.image_path,
+                    )
             else:
-                logger.info(
-                    "manual reference matched unknown as {} similarity={:.3f} votes={} margin={:.3f} backend={} source={}",
-                    match.cls_name,
-                    match.similarity,
-                    match.votes,
-                    match.margin,
-                    match.backend,
-                    match.image_path,
-                )
+                if self._should_log_manual_reference(
+                    mode=mode,
+                    source_class=detection.cls_name,
+                    target_class=match.cls_name,
+                    source_path=str(match.image_path),
+                ):
+                    logger.info(
+                        "manual reference matched unknown as {} similarity={:.3f} votes={} margin={:.3f} backend={} source={}",
+                        match.cls_name,
+                        match.similarity,
+                        match.votes,
+                        match.margin,
+                        match.backend,
+                        match.image_path,
+                    )
         return out
 
     def _manual_reference_correction_candidates(

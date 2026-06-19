@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from app.core import pipeline as pipeline_module
 from app.core.config import MULTI_CLASS_WARNING_TEXT, AppConfig, ClassMapping
 from app.core.events import Detection
 from app.core.inference import YOLO_SPECIALIST_SOURCE
@@ -550,6 +551,31 @@ def test_pipeline_labels_unknown_with_reviewed_manual_reference(tmp_path, monkey
     assert detections[0].source == "manual_reference"
     assert detections[0].conf >= 0.9
     assert uart.sent == []
+
+
+def test_pipeline_throttles_repeated_manual_reference_log_events(tmp_path, monkeypatch):
+    pipeline = Pipeline(AppConfig(), _StubInfer(), None, tmp_path / "h.db")
+    pipeline._manual_reference_log_interval_seconds = 2.0
+    now = [100.0]
+    monkeypatch.setattr(pipeline_module.time, "monotonic", lambda: now[0])
+
+    event = {
+        "mode": "correction",
+        "source_class": "Glass bottle",
+        "target_class": "Iron utensils",
+        "source_path": "manual_live_metal_spoon_20260615_7.jpg",
+    }
+
+    assert pipeline._should_log_manual_reference(**event) is True
+    assert pipeline._should_log_manual_reference(**event) is False
+    now[0] += 1.9
+    assert pipeline._should_log_manual_reference(**event) is False
+    now[0] += 0.2
+    assert pipeline._should_log_manual_reference(**event) is True
+    assert pipeline._should_log_manual_reference(
+        **{**event, "source_class": "Battery"}
+    ) is True
+    pipeline.close()
 
 
 def test_pipeline_labels_unknown_with_one_fresh_reviewed_reference(tmp_path, monkeypatch):
