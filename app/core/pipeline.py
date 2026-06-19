@@ -137,6 +137,14 @@ def _boxes_overlap(
     return intersection / max(union, 1) >= iou_threshold or intersection / smaller >= 0.85
 
 
+def _visual_safety_operator_label(reason: str) -> str:
+    return {
+        "camera blurry": "Camera mờ - không phân loại",
+        "camera frame invalid": "Khung hình lỗi - không phân loại",
+        "object framing invalid": "Đặt vật gọn trong ROI",
+    }.get(str(reason or "").strip(), "Chưa đủ an toàn")
+
+
 class _NoopUart:
     def send(self, track_id, command, conf) -> None:
         logger.debug(
@@ -1084,7 +1092,7 @@ class Pipeline:
                 for t in tracked:
                     self.tracker.mark_emitted(t.track_id)
             return detections_for_render
-        for t in tracked:
+        for render_index, t in enumerate(tracked):
             if self._low_confidence_dispatch_blocked(t.detection):
                 self.dispatch_status = "low confidence review required"
                 if t.stable_frames == self.cfg.dispatch_guard.min_stable_frames:
@@ -1133,6 +1141,13 @@ class Pipeline:
             )
             if not visual_safety.allowed:
                 self.dispatch_status = visual_safety.reason
+                if render_index < len(detections_for_render):
+                    detections_for_render[render_index] = replace(
+                        t.detection,
+                        operator_label=_visual_safety_operator_label(
+                            visual_safety.reason,
+                        ),
+                    )
                 logger.warning(
                     "dispatch blocked visual safety track={} cls={} reason={} "
                     "area_ratio={:.3f} sharpness={:.1f}",

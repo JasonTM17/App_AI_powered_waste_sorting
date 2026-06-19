@@ -497,6 +497,7 @@ def test_pipeline_blocks_near_full_frame_detection_before_uart(tmp_path):
     detections = p.process_frame(frame, datetime.now(UTC))
 
     assert [item.cls_name for item in detections] == ["Plastic bottle"]
+    assert [item.operator_label for item in detections] == ["Đặt vật gọn trong ROI"]
     assert p.dispatch_status == "object framing invalid"
     assert uart.sent == []
     assert p.history.query(limit=10) == []
