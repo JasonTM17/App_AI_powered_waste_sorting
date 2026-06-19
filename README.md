@@ -1,5 +1,39 @@
 # Trash Sorter Pro
 
+> Hệ thống phân loại rác thông minh dùng YOLO, camera USB, điều khiển UART/Arduino,
+> desktop app PySide6 và web dashboard Next.js cho Admin/User.
+
+[![Production](https://img.shields.io/badge/Production-trash--sorter--v2.vercel.app-10B981?style=for-the-badge)](https://trash-sorter-v2.vercel.app)
+[![Desktop](https://img.shields.io/badge/Desktop-PySide6_+_YOLO-0F172A?style=for-the-badge)](docs/project-showcase.md#desktop-app)
+[![Web](https://img.shields.io/badge/Web-Next.js_+_Vercel-2563EB?style=for-the-badge)](docs/project-showcase.md#web-dashboard)
+[![Hardware](https://img.shields.io/badge/Hardware-USB_Camera_+_UART-F59E0B?style=for-the-badge)](#quy-tắc-camera-và-uart)
+
+## Tổng quan nhanh
+
+Trash Sorter Pro là một hệ sinh thái AI phân loại rác end-to-end:
+
+- Nhận diện vật thể bằng YOLO và gom về 3 nhóm vận hành: Hữu cơ, Vô cơ, Tái chế.
+- Vận hành máy thật qua desktop app: camera USB, ROI, UART, loa, lịch sử, mapping, data review và huấn luyện thủ công.
+- Theo dõi cloud qua web: dashboard Admin/User, bản đồ thùng, cảnh báo, lịch thu gom, báo cáo, Eco Score và EcoPet AI.
+- Phân quyền rõ ràng: User chỉ xem dữ liệu của chính mình; Admin quản lý toàn hệ thống và phần cứng.
+- Production web đang chạy tại: [trash-sorter-v2.vercel.app](https://trash-sorter-v2.vercel.app).
+
+## Ảnh minh hoạ
+
+| Desktop app vận hành máy phân loại | Web dashboard cho User |
+| --- | --- |
+| ![Desktop app Live Detection](docs/assets/screenshots/desktop-app-shell.png) | ![Web User Dashboard](docs/assets/screenshots/web-user-dashboard.png) |
+
+![EcoPet AI trên web](docs/assets/screenshots/web-ecopet-chat.png)
+
+## Tài liệu chi tiết
+
+- [Project showcase, kiến trúc và GitHub About](docs/project-showcase.md)
+- [Hướng dẫn chạy web app](docs/huong-dan-chay-web-app.md)
+- [Supabase/cloud readiness](docs/supabase-full-cloud-readiness.md)
+- [Checklist tích hợp phần cứng](docs/hardware_integration_checklist.md)
+- [Operations map local-first](docs/operations-map-local-first.md)
+
 Hướng dẫn chạy web app cho đồng nghiệp: [docs/huong-dan-chay-web-app.md](docs/huong-dan-chay-web-app.md).
 
 Mở Desktop App bằng `Trash Sorter Pro.lnk` ngay thư mục gốc, hoặc chạy trực tiếp
