@@ -52,6 +52,32 @@ def test_test_uart_emits_failure_for_bad_port(ctl):
     assert results[0][0] is False
 
 
+def test_test_uart_ping_reuses_connected_worker(tmp_path, monkeypatch):
+    class _ConnectedUart:
+        is_connected = True
+
+        def __init__(self):
+            self.sent = []
+
+        def isRunning(self):  # noqa: N802
+            return True
+
+        def send_ping_test(self, track_id):
+            self.sent.append(track_id)
+
+    cfg = AppConfig()
+    cfg.uart.port = "COM8"
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    uart = _ConnectedUart()
+    controller._uart = uart  # type: ignore[assignment]
+    monkeypatch.setattr(controller, "_is_usb_uart_port", lambda _port: True)
+
+    controller.test_uart_ping("COM8", 9600)
+
+    assert uart.sent == [-2]
+    assert controller._pending_uart_tests[-2][:3] == ("PING", "PING\n", "COM8")
+
+
 def test_reload_model_emits_failure_for_bad_path(ctl):
     results = []
     ctl.reload_model_result.connect(lambda ok, msg: results.append((ok, msg)))

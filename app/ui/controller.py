@@ -971,6 +971,18 @@ class AppController(QObject):
         if not self._is_usb_uart_port(port):
             self.test_uart_result.emit(False, "Chưa thấy cổng USB/Arduino để test UART.")
             return
+        if (
+            self._uart is not None
+            and self._uart.isRunning()
+            and self._uart.is_connected
+        ):
+            sender = getattr(self._uart, "send_ping_test", None)
+            if callable(sender):
+                track_id = self._next_uart_test_id
+                self._next_uart_test_id -= 1
+                self._pending_uart_tests[track_id] = ("PING", "PING\n", port, time.time())
+                sender(track_id)
+                return
         worker = _UartProbe(port, baud, self.cfg.uart.protocol)
         worker.done.connect(self.test_uart_result.emit)
         self._track_probe(worker)

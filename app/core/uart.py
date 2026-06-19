@@ -95,6 +95,16 @@ class UartWorker(QThread):
                 self._queue.get_nowait()
             self._queue.put_nowait(item)
 
+    def send_ping_test(self, track_id: int) -> None:
+        """Probe the open serial connection without competing for the COM port."""
+        item = _Cmd(int(track_id), "PING", 0.0, time.time())
+        try:
+            self._queue.put_nowait(item)
+        except queue.Full:
+            with suppress(queue.Empty):
+                self._queue.get_nowait()
+            self._queue.put_nowait(item)
+
     def _open(self):
         try:
             self._ser = serial.Serial(self._port, self._baud, timeout=0.1)
@@ -140,6 +150,25 @@ class UartWorker(QThread):
                 return ("error", payload)
             self._handle_unsolicited_message(kind, cmd, payload)
         return None
+
+    def _read_until_pong(self, deadline: float) -> bool:
+        if self._ser is None:
+            return False
+        while time.time() < deadline:
+            try:
+                raw = self._ser.readline()
+            except Exception:
+                return False
+            if not raw:
+                continue
+            parsed = parse_line(raw)
+            if parsed is None:
+                continue
+            kind, cmd, payload = parsed
+            if kind == "pong":
+                return True
+            self._handle_unsolicited_message(kind, cmd, payload)
+        return False
 
     def _read_unsolicited_once(self) -> None:
         if self._ser is None:
@@ -193,7 +222,11 @@ class UartWorker(QThread):
             except queue.Empty:
                 self._read_unsolicited_once()
                 continue
-            if cmd.audio_track is None:
+            is_ping = cmd.command == "PING" and cmd.audio_track is None
+            if is_ping:
+                payload = encode_ping()
+                expected_ack = "PONG"
+            elif cmd.audio_track is None:
                 payload = encode_sort(
                     cmd.command,
                     cmd.conf,
@@ -224,6 +257,16 @@ class UartWorker(QThread):
                 self._close()
                 continue
             rtt = int((time.time() - t0) * 1000)
+            if is_ping:
+                ok = self._read_until_pong(t0 + min(self._ack_timeout, 1.5))
+                rtt = int((time.time() - t0) * 1000)
+                self.ack_received.emit(
+                    cmd.track_id,
+                    cmd.command,
+                    "ok" if ok else "no_ack",
+                    rtt,
+                )
+                continue
             if not self._expects_ack:
                 self.ack_received.emit(cmd.track_id, cmd.command, "ok", rtt)
                 continue

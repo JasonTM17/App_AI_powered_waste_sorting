@@ -213,3 +213,28 @@ def test_audio_only_test_sends_track_and_emits_ack(monkeypatch, qtbot):
 
     assert instances[0]._tx == [b"PING\n", b"PROFILE\n", b"AUDIO:4\n"]
     assert acks == [(-2, "AUDIO:4", "ok")]
+
+
+def test_ping_test_reuses_open_uart_connection(fake_serial, qtbot):
+    acks = []
+    worker = UartWorker(
+        port="COM_FAKE",
+        baud=9600,
+        ack_timeout_ms=500,
+        protocol="plain_group",
+    )
+    worker.ack_received.connect(
+        lambda track_id, command, status, _rtt: acks.append(
+            (track_id, command, status)
+        )
+    )
+    worker.start()
+    _wait(lambda: worker.is_connected, 2.0)
+    worker.send_ping_test(track_id=-3)
+    _wait(lambda: len(acks) >= 1, 2.0)
+    worker.stop()
+    worker.wait(2000)
+
+    assert len(fake_serial) == 1
+    assert fake_serial[0]._tx == [b"PING\n", b"PROFILE\n", b"PING\n"]
+    assert acks == [(-3, "PING", "ok")]
