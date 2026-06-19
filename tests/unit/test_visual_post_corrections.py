@@ -228,6 +228,24 @@ def test_visual_correction_relabels_shiny_metal_spoon_unknown_as_iron_utensils()
     assert corrected[0].operator_label == "Muong kim loai"
 
 
+def test_visual_correction_relabels_close_up_blurry_metal_spoon_unknown():
+    frame = np.full((480, 640, 3), 225, dtype=np.uint8)
+    cv2.line(frame, (-40, 310), (345, 286), (86, 86, 86), 96)
+    cv2.line(frame, (-30, 285), (326, 260), (164, 164, 162), 32)
+    cv2.ellipse(frame, (455, 262), (148, 104), -7, 0, 360, (74, 74, 76), -1)
+    cv2.ellipse(frame, (414, 252), (84, 48), -11, 0, 360, (162, 162, 160), -1)
+    cv2.circle(frame, (526, 207), 22, (252, 252, 252), -1)
+    cv2.circle(frame, (560, 214), 14, (246, 246, 246), -1)
+    frame = cv2.GaussianBlur(frame, (15, 15), 0)
+    detection = Detection(-1, "Unknown object", 0.98, (0, 72, 638, 466))
+
+    corrected = apply_visual_post_corrections(frame, [detection])
+
+    assert corrected[0].cls_name == "Iron utensils"
+    assert corrected[0].source == "visual_correction:metal_utensil"
+    assert corrected[0].operator_label == "Muong kim loai"
+
+
 def test_visual_correction_relabels_blue_pen_like_unknown_as_pen():
     frame = np.full((260, 420, 3), 230, dtype=np.uint8)
     cv2.line(frame, (28, 176), (372, 142), (92, 92, 92), 28)

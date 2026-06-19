@@ -196,7 +196,7 @@ def _looks_like_metal_utensil(
     box_w = max(1, int(xyxy[2]) - int(xyxy[0]))
     box_h = max(1, int(xyxy[3]) - int(xyxy[1]))
     box_aspect = box_w / float(box_h)
-    if not (box_aspect >= 1.45 or box_aspect <= 0.69):
+    if not (box_aspect >= 1.20 or box_aspect <= 0.83):
         return False
 
     mask = _foreground_mask(crop)
@@ -218,7 +218,7 @@ def _looks_like_metal_utensil(
         mask, horizontal=box_aspect >= 1.0
     )
 
-    return (
+    standard_utensil = (
         stats["area_ratio"] >= 0.055
         and stats["extent"] >= 0.08
         and stats["oriented_aspect"] >= 2.05
@@ -233,6 +233,25 @@ def _looks_like_metal_utensil(
         and contrast >= 16.0
         and stats["edge_ratio"] >= 0.0025
     )
+    close_up_spoon = (
+        box_aspect >= 1.20
+        and stats["area_ratio"] >= 0.45
+        and stats["extent"] >= 0.40
+        and stats["oriented_aspect"] >= 1.25
+        and stats["circularity"] <= 0.42
+        and stats["saturation_mean"] <= 24.0
+        and abs(stats["warmth"]) <= 18.0
+        and low_saturation_ratio >= 0.72
+        and colored_ratio <= 0.08
+        and strong_colored_ratio <= 0.035
+        and width_variation >= 0.42
+        and max_to_median_width >= 1.20
+        and glare_ratio >= 0.002
+        and dark_metal_ratio >= 0.035
+        and contrast >= 12.0
+        and stats["edge_ratio"] >= 0.0025
+    )
+    return standard_utensil or close_up_spoon
 
 
 def _looks_like_pen_like_tool(
