@@ -176,6 +176,8 @@ def _foreground_fragments_same_object(
         return False
     larger = first if first_area >= second_area else second
     smaller = second if first_area >= second_area else first
+    if _elongated_foreground_fragments_same_object(first, second):
+        return True
     if min(first_area, second_area) / max(first_area, second_area) > 0.35:
         return False
     return _small_foreground_fragment_belongs_to_object(smaller, larger)
@@ -195,6 +197,42 @@ def _union_boxes(
         max(box[2] for box in boxes),
         max(box[3] for box in boxes),
     )
+
+
+def _elongated_foreground_fragments_same_object(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+) -> bool:
+    """Join split foreground pieces of one long pen/utensil without merging two bulky items."""
+    ax1, ay1, ax2, ay2 = first
+    bx1, by1, bx2, by2 = second
+    union = _union_boxes([first, second])
+    ux1, uy1, ux2, uy2 = union
+    union_width = max(1, ux2 - ux1)
+    union_height = max(1, uy2 - uy1)
+    aspect = union_width / union_height
+    horizontal_shape = aspect >= 3.8
+    vertical_shape = aspect <= 0.26
+    if not horizontal_shape and not vertical_shape:
+        return False
+
+    first_width = max(1, ax2 - ax1)
+    first_height = max(1, ay2 - ay1)
+    second_width = max(1, bx2 - bx1)
+    second_height = max(1, by2 - by1)
+    horizontal_overlap = max(0, min(ax2, bx2) - max(ax1, bx1))
+    vertical_overlap = max(0, min(ay2, by2) - max(ay1, by1))
+    gap_x = max(ax1 - bx2, bx1 - ax2, 0)
+    gap_y = max(ay1 - by2, by1 - ay2, 0)
+
+    if horizontal_shape:
+        vertical_ratio = vertical_overlap / min(first_height, second_height)
+        close_gap = max(24, min(96, round(union_width * 0.16)))
+        return vertical_ratio >= 0.45 and gap_x <= close_gap
+
+    horizontal_ratio = horizontal_overlap / min(first_width, second_width)
+    close_gap = max(24, min(96, round(union_height * 0.16)))
+    return horizontal_ratio >= 0.45 and gap_y <= close_gap
 
 
 def _foreground_belongs_to_reference(

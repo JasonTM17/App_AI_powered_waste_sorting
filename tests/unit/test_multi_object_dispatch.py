@@ -229,6 +229,23 @@ def test_adjacent_thin_shadow_is_grouped_with_long_reference_object():
     assert decision.unmatched_foreground_count == 0
 
 
+def test_split_long_pen_without_reference_counts_as_one_object():
+    frame = np.full((240, 420, 3), 245, dtype=np.uint8)
+    frame[100:126, 36:178] = (35, 70, 180)
+    frame[104:130, 210:372] = (44, 56, 112)
+
+    decision = evaluate_foreground_multi_object_dispatch(
+        frame,
+        roi=_roi(width=420, height=240),
+        max_objects=1,
+        min_area_ratio=0.002,
+    )
+
+    assert decision.allowed is True
+    assert decision.object_count == 1
+    assert decision.foreground_count == 2
+
+
 def test_two_yolo_boxes_stay_blocked_even_when_foreground_merges_cleanly():
     decision = evaluate_foreground_multi_object_dispatch(
         _two_object_frame(),

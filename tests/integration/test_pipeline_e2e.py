@@ -349,6 +349,14 @@ class _BlankTrayPaperInfer:
         return [Detection(18, "Paper", 0.54, (2, 2, width - 2, height - 2))]
 
 
+class _FullFramePlasticBottleInfer:
+    class_names: ClassVar[dict[int, str]] = {22: "Plastic bottle"}
+
+    def predict(self, frame):
+        height, width = frame.shape[:2]
+        return [Detection(22, "Plastic bottle", 0.92, (2, 2, width - 2, height - 2))]
+
+
 class _BagasseAmbiguityInfer:
     class_names: ClassVar[dict[int, str]] = {17: "Organic", 19: "Paper bag"}
 
@@ -373,6 +381,8 @@ def _dispatch_ready_config(*, mappings=None) -> AppConfig:
     cfg.dispatch_guard.min_sort_interval_seconds = 0
     cfg.dispatch_guard.busy_settle_seconds = 0
     cfg.dispatch_guard.min_stable_frames = 1
+    cfg.dispatch_guard.max_dispatch_bbox_area_ratio = 1.0
+    cfg.dispatch_guard.min_dispatch_sharpness = 0
     return cfg
 
 
@@ -472,6 +482,24 @@ def test_pipeline_rejects_blank_tray_paper_false_positive(tmp_path):
 
     assert detections == []
     assert uart.sent == []
+    p.close()
+
+
+def test_pipeline_blocks_near_full_frame_detection_before_uart(tmp_path):
+    cfg = _dispatch_ready_config()
+    cfg.dispatch_guard.max_dispatch_bbox_area_ratio = 0.82
+    uart = _StubUart()
+    p = Pipeline(cfg, _FullFramePlasticBottleInfer(), uart, tmp_path / "h.db")
+    frame = np.full((240, 320, 3), 235, dtype=np.uint8)
+    frame[70:170, 45:275] = (35, 85, 170)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [item.cls_name for item in detections] == ["Plastic bottle"]
+    assert p.dispatch_status == "object framing invalid"
+    assert uart.sent == []
+    assert p.history.query(limit=10) == []
     p.close()
 
 
@@ -1077,6 +1105,36 @@ def test_pipeline_corrects_leafy_unknown_before_three_bin_recycle_fallback(
         ("Organic", "visual_correction:leafy_organic", "La cay")
     ]
     assert uart.sent == [(1, "O", detections[0].conf)]
+    p.close()
+
+
+def test_pipeline_corrects_pen_like_unknown_before_three_bin_recycle_fallback(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
+    )
+    cfg.model.conf_threshold = 0.3
+    cfg.three_bin_classifier.enabled = True
+    cfg.three_bin_classifier.unknown_only = True
+    infer = _ScriptedInfer([[Detection(999, "Unknown object", 0.74, (18, 106, 404, 216))]])
+    uart = _StubUart()
+    p = Pipeline(cfg, infer, uart, tmp_path / "h.db")
+    p._three_bin_classifier = _StubThreeBinClassifier("I")
+    frame = np.full((260, 420, 3), 230, dtype=np.uint8)
+    cv2.line(frame, (28, 176), (372, 142), (92, 92, 92), 28)
+    cv2.line(frame, (32, 160), (360, 130), (166, 166, 164), 10)
+    cv2.rectangle(frame, (86, 158), (160, 190), (210, 70, 20), -1)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(item.cls_name, item.source, item.operator_label) for item in detections] == [
+        ("Pen", "visual_correction:pen", "But bi")
+    ]
+    assert uart.sent == [(1, "R", detections[0].conf)]
     p.close()
 
 

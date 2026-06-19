@@ -62,6 +62,14 @@ def apply_visual_post_corrections(
                     source="visual_correction:plastic_bottle",
                     operator_label="Chai nhua PET",
                 )
+        elif detection.cls_name == "Plastic bottle":
+            if _looks_like_pen_like_tool(frame_bgr, detection.xyxy):
+                corrected = _replace_detection(
+                    detection,
+                    "Pen",
+                    source="visual_correction:pen",
+                    operator_label="But bi",
+                )
         elif detection.cls_name == "Glass bottle" and detection.conf < 0.45:
             corrected = _replace_detection(
                 detection,
@@ -78,7 +86,21 @@ def apply_visual_post_corrections(
                     operator_label="Muong kim loai",
                 )
         elif detection.cls_name == unknown_class_name:
-            if _looks_like_metal_utensil(frame_bgr, detection.xyxy):
+            if _looks_like_unknown_transparent_plastic_bottle(frame_bgr, detection.xyxy):
+                corrected = _replace_detection(
+                    detection,
+                    "Plastic bottle",
+                    source="visual_correction:plastic_bottle",
+                    operator_label="Chai nhua PET",
+                )
+            elif _looks_like_pen_like_tool(frame_bgr, detection.xyxy):
+                corrected = _replace_detection(
+                    detection,
+                    "Pen",
+                    source="visual_correction:pen",
+                    operator_label="But bi",
+                )
+            elif _looks_like_metal_utensil(frame_bgr, detection.xyxy):
                 corrected = _replace_detection(
                     detection,
                     "Iron utensils",
@@ -210,6 +232,51 @@ def _looks_like_metal_utensil(
         and (glare_ratio >= 0.004 or (dark_metal_ratio >= 0.05 and width_variation >= 0.50))
         and contrast >= 16.0
         and stats["edge_ratio"] >= 0.0025
+    )
+
+
+def _looks_like_pen_like_tool(
+    frame_bgr: np.ndarray,
+    xyxy: tuple[int, int, int, int],
+) -> bool:
+    crop = _crop(frame_bgr, xyxy, pad_ratio=0.015)
+    if crop is None:
+        return False
+
+    box_w = max(1, int(xyxy[2]) - int(xyxy[0]))
+    box_h = max(1, int(xyxy[3]) - int(xyxy[1]))
+    box_aspect = box_w / float(box_h)
+    if not (box_aspect >= 3.1 or box_aspect <= 0.32):
+        return False
+
+    if _looks_like_unknown_transparent_plastic_bottle(frame_bgr, xyxy):
+        return False
+
+    mask = _foreground_mask(crop)
+    stats = _mask_stats(crop, mask)
+    if stats is None:
+        return False
+
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    saturation = hsv[:, :, 1]
+    value = hsv[:, :, 2]
+    blue_ratio = float(np.mean((hsv[:, :, 0] >= 88) & (hsv[:, :, 0] <= 135) & (saturation > 45)))
+    dark_ratio = float(np.mean(value < 120))
+    low_saturation_ratio = float(np.mean(saturation < 80))
+    width_variation, max_to_median_width = _silhouette_width_variation(
+        mask,
+        horizontal=box_aspect >= 1.0,
+    )
+
+    return (
+        stats["area_ratio"] >= 0.035
+        and stats["extent"] >= 0.08
+        and stats["oriented_aspect"] >= 3.0
+        and stats["circularity"] <= 0.38
+        and stats["edge_ratio"] >= 0.0015
+        and max_to_median_width <= 2.80
+        and width_variation <= 0.78
+        and (blue_ratio >= 0.015 or dark_ratio >= 0.08 or low_saturation_ratio >= 0.55)
     )
 
 
@@ -388,6 +455,16 @@ def _looks_like_transparent_plastic_bottle(
         and contrast >= 12.0
         and saturation_mean <= 85.0
     )
+
+
+def _looks_like_unknown_transparent_plastic_bottle(
+    frame_bgr: np.ndarray,
+    xyxy: tuple[int, int, int, int],
+) -> bool:
+    box_w = max(1, int(xyxy[2]) - int(xyxy[0]))
+    box_h = max(1, int(xyxy[3]) - int(xyxy[1]))
+    box_aspect = box_w / float(box_h)
+    return 0.42 <= box_aspect <= 2.75 and _looks_like_transparent_plastic_bottle(frame_bgr, xyxy)
 
 
 def _looks_like_crumpled_paper(

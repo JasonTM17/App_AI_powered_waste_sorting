@@ -28,6 +28,7 @@ from app.core.detection_filtering import (
     suppress_overlapping_detections,
 )
 from app.core.dispatch_guard import DispatchGuard
+from app.core.dispatch_visual_safety import evaluate_dispatch_visual_safety
 from app.core.events import Detection, TrackedDetection
 from app.core.hardware_profile import route_for_command
 from app.core.history import HistoryService
@@ -1121,6 +1122,26 @@ class Pipeline:
                 continue
             if not self._foreground_changed_for_dispatch(frame_bgr, t.detection.xyxy):
                 self.dispatch_status = "waiting foreground"
+                continue
+            visual_safety = evaluate_dispatch_visual_safety(
+                frame_bgr,
+                t.detection.xyxy,
+                max_bbox_area_ratio=(
+                    self.cfg.dispatch_guard.max_dispatch_bbox_area_ratio
+                ),
+                min_sharpness=self.cfg.dispatch_guard.min_dispatch_sharpness,
+            )
+            if not visual_safety.allowed:
+                self.dispatch_status = visual_safety.reason
+                logger.warning(
+                    "dispatch blocked visual safety track={} cls={} reason={} "
+                    "area_ratio={:.3f} sharpness={:.1f}",
+                    t.track_id,
+                    t.detection.cls_name,
+                    visual_safety.reason,
+                    visual_safety.area_ratio,
+                    visual_safety.sharpness,
+                )
                 continue
             mapping = self._mapping_for_detection(t.detection)
             owner_username = self.cfg.device.owner_username.strip()

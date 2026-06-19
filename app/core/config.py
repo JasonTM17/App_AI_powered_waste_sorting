@@ -196,6 +196,8 @@ class DispatchGuardConfig(BaseModel):
     require_roi_for_dispatch: bool = True
     max_objects_per_dispatch: int = Field(1, ge=1, le=5)
     max_classes_per_dispatch: int = Field(1, ge=1, le=5)
+    max_dispatch_bbox_area_ratio: float = Field(0.82, ge=0.1, le=1.0)
+    min_dispatch_sharpness: float = Field(24.0, ge=0.0, le=1000.0)
     multi_class_warning_cooldown_seconds: float = Field(5.0, ge=0.0, le=120.0)
     multi_class_warning_text: str = MULTI_CLASS_WARNING_TEXT
     multi_class_warning_audio_track: int = Field(8, ge=0, le=8)
@@ -271,6 +273,8 @@ def default_dispatch_guard_config() -> DispatchGuardConfig:
         require_roi_for_dispatch=True,
         max_objects_per_dispatch=1,
         max_classes_per_dispatch=1,
+        max_dispatch_bbox_area_ratio=0.82,
+        min_dispatch_sharpness=24.0,
         multi_class_warning_cooldown_seconds=5.0,
         multi_class_warning_text=MULTI_CLASS_WARNING_TEXT,
         multi_class_warning_audio_track=8,
@@ -363,11 +367,8 @@ def normalize_speaker_output_config(cfg: AppConfig) -> AppConfig:
 
 
 def startup_hardware_speaker_config(cfg: AppConfig) -> AppConfig:
-    """Use hardware speaker as the app startup default while preserving voice choice."""
-    clean = cfg.model_copy(deep=True)
-    clean.speaker.output_mode = "hardware"
-    clean.speaker.enabled = False
-    return clean
+    """Normalize the persisted speaker choice without overriding the operator."""
+    return normalize_speaker_output_config(cfg)
 
 
 def merge_missing_mappings(cfg: AppConfig, seed: AppConfig) -> tuple[AppConfig, bool]:

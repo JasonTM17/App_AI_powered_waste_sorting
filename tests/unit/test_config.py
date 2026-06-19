@@ -68,6 +68,8 @@ def _default_dict():
             "require_roi_for_dispatch": True,
             "max_objects_per_dispatch": 1,
             "max_classes_per_dispatch": 1,
+            "max_dispatch_bbox_area_ratio": 0.82,
+            "min_dispatch_sharpness": 24.0,
             "multi_class_warning_cooldown_seconds": 5.0,
             "multi_class_warning_text": MULTI_CLASS_WARNING_TEXT,
             "multi_class_warning_audio_track": 8,
@@ -112,6 +114,8 @@ def test_app_config_parses_default_dict():
     assert c.dispatch_guard.require_roi_for_dispatch is True
     assert c.dispatch_guard.max_objects_per_dispatch == 1
     assert c.dispatch_guard.max_classes_per_dispatch == 1
+    assert c.dispatch_guard.max_dispatch_bbox_area_ratio == 0.82
+    assert c.dispatch_guard.min_dispatch_sharpness == 24.0
     assert c.dispatch_guard.multi_class_warning_cooldown_seconds == 5.0
     assert c.dispatch_guard.multi_class_warning_text == MULTI_CLASS_WARNING_TEXT
     assert c.dispatch_guard.multi_class_warning_audio_track == 8
@@ -186,6 +190,8 @@ def test_default_dispatch_guard_filters_post_sort_vibration() -> None:
     assert AppConfig().dispatch_guard.min_stable_frames == 2
     assert AppConfig().dispatch_guard.empty_rearm_seconds == 2.5
     assert AppConfig().dispatch_guard.empty_rearm_frames == 12
+    assert AppConfig().dispatch_guard.max_dispatch_bbox_area_ratio == 0.82
+    assert AppConfig().dispatch_guard.min_dispatch_sharpness == 24.0
 
 
 def test_load_config_hardens_legacy_dispatch_guard_against_scale_vibration(
@@ -387,7 +393,7 @@ def test_load_config_enables_speaker_when_computer_speaker_mode_selected(tmp_pat
     assert cfg.speaker.voice_gender == "male"
 
 
-def test_startup_hardware_speaker_config_preserves_laptop_voice_choice():
+def test_startup_hardware_speaker_config_preserves_operator_output_choice():
     cfg = AppConfig()
     cfg.speaker.output_mode = "computer_speaker"
     cfg.speaker.enabled = True
@@ -396,8 +402,8 @@ def test_startup_hardware_speaker_config_preserves_laptop_voice_choice():
 
     out = startup_hardware_speaker_config(cfg)
 
-    assert out.speaker.output_mode == "hardware"
-    assert out.speaker.enabled is False
+    assert out.speaker.output_mode == "computer_speaker"
+    assert out.speaker.enabled is True
     assert out.speaker.voice_gender == "male"
     assert out.speaker.cooldown_seconds == 4.5
 

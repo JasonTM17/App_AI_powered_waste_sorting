@@ -2,6 +2,7 @@ from app.core.config import MULTI_CLASS_WARNING_TEXT
 from app.ui.live_status import (
     TEST_OFF_ACK_TEXT,
     UART_OFF_ACK_TEXT,
+    WAITING_EMPTY_ACK_TEXT,
     live_ack_status_text,
     multi_object_warning_text,
 )
@@ -49,4 +50,31 @@ def test_live_ack_status_reports_uart_off_when_test_mode_on_and_idle():
             multi_class_warning_text="only one",
         )
         == UART_OFF_ACK_TEXT
+    )
+
+
+def test_live_ack_status_explains_waiting_empty_tray_for_operator():
+    assert (
+        live_ack_status_text(
+            test_mode_enabled=True,
+            dispatch_status="waiting empty tray",
+            uart_connected=True,
+            multi_class_warning_text="only one",
+        )
+        == WAITING_EMPTY_ACK_TEXT
+    )
+
+
+def test_live_ack_status_explains_visual_safety_blocks() -> None:
+    assert "Camera bị mờ" in live_ack_status_text(
+        test_mode_enabled=True,
+        dispatch_status="camera blurry",
+        uart_connected=True,
+        multi_class_warning_text="only one",
+    )
+    assert "Khung vật thể không hợp lệ" in live_ack_status_text(
+        test_mode_enabled=True,
+        dispatch_status="object framing invalid",
+        uart_connected=True,
+        multi_class_warning_text="only one",
     )

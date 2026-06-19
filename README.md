@@ -489,7 +489,8 @@ The current real hardware profile follows the user-provided block diagram and re
 - Wait/upright position after every dump: D6=90, D7=85.
 - Audio output defaults to the OPEN-SMART hardware speaker. Admin can switch
   Settings -> Am thanh / Loa phan loai to `Loa may tinh` and choose `Giong nu`
-  or `Giong nam` for bundled MP3 playback. PC speech fires at UART send time,
+  or `Giong nam` for bundled MP3 playback. The selected output persists across
+  desktop restarts. PC speech fires at UART send time,
   not after ACK. In PC-speaker mode the app sends `SORTSILENT:<O|R|I>` so the
   firmware moves the servos without playing the hardware sort track.
 - Startup audio: OPEN-SMART track `1`.
@@ -508,3 +509,4 @@ The current real hardware profile follows the user-provided block diagram and re
 - If UART is off, UI shows `UART OFF, khong gui xuong phan cung`.
 - Admin desktop/web has `Actuation Test Mode` for the real camera path: detected class -> group -> bin -> serial payload -> UART sent -> ACK -> history row. Use this before placing real test objects in front of the camera.
 - Camera-driven dispatch is guarded by defaults in `dispatch_guard`: enabling automatic sorting arms the first valid object after `2` stable frames of the same visible label; one active dump remains locked until ACK/NACK/timeout plus `2.0s` settle; after ACK/HOME the camera must observe an empty tray for `2.5` seconds and at least `12` frames before accepting the next object, so scale vibration cannot create an immediate second dump; and ROI must be valid and enabled. Manual Test Huu co/Vo co/Tai che buttons remain direct hardware tests.
+- Immediately before UART dispatch, visual safety also rejects a detection whose box covers more than `82%` of the camera frame or whose padded object crop has Laplacian sharpness below `24`. Live preview remains visible for diagnosis, but history insertion, speaker dispatch, and servo commands are blocked. The current USB camera does not expose software autofocus, so move the camera farther from the tray or adjust its physical focus whenever Live reports `Camera bị mờ`.

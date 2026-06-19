@@ -128,6 +128,36 @@ def test_visual_correction_relabels_clear_bottle_with_red_label_from_aluminum_ca
     assert corrected[0].operator_label == "Chai nhua PET"
 
 
+def test_visual_correction_relabels_clear_labeled_unknown_as_plastic_bottle():
+    frame = np.full((360, 480, 3), 230, dtype=np.uint8)
+    body = np.array(
+        [
+            [150, 312],
+            [126, 118],
+            [188, 62],
+            [302, 62],
+            [360, 118],
+            [334, 312],
+        ],
+        dtype=np.int32,
+    )
+    cv2.fillPoly(frame, [body], (224, 228, 232))
+    cv2.polylines(frame, [body], True, (158, 162, 168), 4)
+    cv2.rectangle(frame, (146, 132), (338, 218), (194, 125, 42), -1)
+    cv2.rectangle(frame, (154, 146), (330, 202), (210, 150, 58), -1)
+    cv2.line(frame, (162, 190), (326, 170), (246, 246, 246), 5)
+    cv2.rectangle(frame, (142, 222), (178, 246), (34, 52, 188), -1)
+    cv2.circle(frame, (194, 86), 13, (252, 252, 252), -1)
+    cv2.circle(frame, (286, 270), 18, (248, 248, 248), -1)
+    detection = Detection(-1, "Unknown object", 0.82, (118, 54, 370, 322))
+
+    corrected = apply_visual_post_corrections(frame, [detection])
+
+    assert corrected[0].cls_name == "Plastic bottle"
+    assert corrected[0].source == "visual_correction:plastic_bottle"
+    assert corrected[0].operator_label == "Chai nhua PET"
+
+
 def test_visual_correction_keeps_compact_red_aluminum_can():
     frame = np.full((260, 360, 3), 225, dtype=np.uint8)
     cv2.rectangle(frame, (128, 55), (228, 205), (36, 45, 182), -1)
@@ -198,7 +228,7 @@ def test_visual_correction_relabels_shiny_metal_spoon_unknown_as_iron_utensils()
     assert corrected[0].operator_label == "Muong kim loai"
 
 
-def test_visual_correction_keeps_blue_pen_like_unknown():
+def test_visual_correction_relabels_blue_pen_like_unknown_as_pen():
     frame = np.full((260, 420, 3), 230, dtype=np.uint8)
     cv2.line(frame, (28, 176), (372, 142), (92, 92, 92), 28)
     cv2.line(frame, (32, 160), (360, 130), (166, 166, 164), 10)
@@ -208,7 +238,35 @@ def test_visual_correction_keeps_blue_pen_like_unknown():
 
     corrected = apply_visual_post_corrections(frame, [detection])
 
-    assert corrected[0].cls_name == "Unknown object"
+    assert corrected[0].cls_name == "Pen"
+    assert corrected[0].source == "visual_correction:pen"
+    assert corrected[0].operator_label == "But bi"
+
+
+def test_visual_correction_relabels_pen_like_plastic_bottle_as_pen():
+    frame = np.full((260, 420, 3), 230, dtype=np.uint8)
+    cv2.line(frame, (28, 176), (372, 142), (92, 92, 92), 28)
+    cv2.line(frame, (32, 160), (360, 130), (166, 166, 164), 10)
+    cv2.rectangle(frame, (86, 158), (160, 190), (210, 70, 20), -1)
+    detection = Detection(24, "Plastic bottle", 0.82, (18, 106, 404, 216))
+
+    corrected = apply_visual_post_corrections(frame, [detection])
+
+    assert corrected[0].cls_name == "Pen"
+    assert corrected[0].source == "visual_correction:pen"
+
+
+def test_visual_correction_keeps_high_conf_upright_plastic_bottle():
+    frame = np.full((320, 300, 3), 230, dtype=np.uint8)
+    cv2.rectangle(frame, (108, 68), (192, 272), (190, 198, 205), -1)
+    cv2.rectangle(frame, (128, 38), (172, 78), (175, 182, 190), -1)
+    cv2.rectangle(frame, (112, 132), (188, 206), (205, 100, 35), -1)
+    detection = Detection(24, "Plastic bottle", 0.91, (96, 28, 204, 284))
+
+    corrected = apply_visual_post_corrections(frame, [detection])
+
+    assert corrected[0].cls_name == "Plastic bottle"
+    assert corrected[0].source == detection.source
 
 
 def test_visual_correction_keeps_plain_dark_bar_unknown():

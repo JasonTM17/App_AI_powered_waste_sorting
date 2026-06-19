@@ -563,6 +563,8 @@
     "require_roi_for_dispatch": true,
     "max_objects_per_dispatch": 1,
     "max_classes_per_dispatch": 1,
+    "max_dispatch_bbox_area_ratio": 0.82,
+    "min_dispatch_sharpness": 24.0,
     "multi_class_warning_cooldown_seconds": 5.0,
     "multi_class_warning_text": "Chỉ đặt 1 vật trong khay. Đang thấy nhiều loại/vật nên không phân loại.",
     "multi_class_warning_audio_track": 8
