@@ -30,12 +30,23 @@ if (-not $slug) {
 $prefix = "learn-now-$TrainProfile-$slug-$timestamp"
 $logPath = Join-Path $logDir "$prefix.log"
 
+$configuredModel = $null
+$configPath = Join-Path $root "config.json"
+if (Test-Path $configPath) {
+    try {
+        $configuredModel = (Get-Content -Raw -Encoding UTF8 $configPath | ConvertFrom-Json).model.path
+    } catch {
+        Write-Warning "Could not read configured runtime model: $($_.Exception.Message)"
+    }
+}
 $seedCandidates = @(
+    $configuredModel,
+    "models\manual-capture-20260612-candidate.pt",
     "runs\train\trash-sorter-common-software-stage2-fast512-b16\weights\best.pt",
     "runs\train\trash-sorter-common-software-stage2\weights\best.pt",
     "runs\train\trash-sorter-v6-pen-hardware-b8\weights\best.pt",
     "models\best.pt"
-)
+) | Where-Object { $_ }
 $seedModel = $seedCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $seedModel) {
     throw "Missing seed model. Checked: $($seedCandidates -join ', ')"

@@ -23,6 +23,8 @@ def _clear_auth_env(monkeypatch):
         local_web.DATABASE_URL_ENV,
         local_web.BOOTSTRAP_ADMIN_USERNAME_ENV,
         local_web.BOOTSTRAP_ADMIN_PASSWORD_ENV,
+        local_web.DESKTOP_WEB_LOCAL_ENV,
+        local_web.DESKTOP_WEB_URL_ENV,
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -48,10 +50,37 @@ def _patch_successful_launch(monkeypatch, root: Path):
     return started
 
 
+def test_desktop_launcher_opens_production_web_by_default(tmp_path, monkeypatch):
+    _clear_auth_env(monkeypatch)
+    root = _project_root(tmp_path)
+    started = _patch_successful_launch(monkeypatch, root)
+
+    result = local_web.ensure_local_web_stack()
+
+    assert result.ok is True
+    assert result.url == local_web.PRODUCTION_WEB_URL
+    assert "production" in result.message
+    assert started == []
+
+
+def test_desktop_launcher_allows_custom_production_web_url(tmp_path, monkeypatch):
+    _clear_auth_env(monkeypatch)
+    root = _project_root(tmp_path)
+    started = _patch_successful_launch(monkeypatch, root)
+    monkeypatch.setenv(local_web.DESKTOP_WEB_URL_ENV, "https://example.com/admin?tab=live")
+
+    result = local_web.ensure_local_web_stack()
+
+    assert result.ok is True
+    assert result.url == "https://example.com/admin?tab=live"
+    assert started == []
+
+
 def test_desktop_launcher_injects_dev_auth_defaults_for_unconfigured_local_launch(
     tmp_path, monkeypatch
 ):
     _clear_auth_env(monkeypatch)
+    monkeypatch.setenv(local_web.DESKTOP_WEB_LOCAL_ENV, "1")
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     root = _project_root(tmp_path)
@@ -77,6 +106,7 @@ def test_desktop_launcher_injects_dev_auth_defaults_for_unconfigured_local_launc
 
 def test_desktop_launcher_preserves_explicit_production_auth_env(tmp_path, monkeypatch):
     _clear_auth_env(monkeypatch)
+    monkeypatch.setenv(local_web.DESKTOP_WEB_LOCAL_ENV, "1")
     monkeypatch.setenv(local_web.BOOTSTRAP_ADMIN_USERNAME_ENV, "owner")
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
@@ -91,6 +121,7 @@ def test_desktop_launcher_preserves_explicit_production_auth_env(tmp_path, monke
 
 def test_desktop_launcher_preserves_postgres_auth_env(tmp_path, monkeypatch):
     _clear_auth_env(monkeypatch)
+    monkeypatch.setenv(local_web.DESKTOP_WEB_LOCAL_ENV, "1")
     monkeypatch.setenv(local_web.AUTH_DATABASE_URL_ENV, "postgresql://user:pass@db.local/trash")
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
@@ -105,6 +136,7 @@ def test_desktop_launcher_preserves_postgres_auth_env(tmp_path, monkeypatch):
 
 def test_desktop_launcher_keeps_existing_auth_db(tmp_path, monkeypatch):
     _clear_auth_env(monkeypatch)
+    monkeypatch.setenv(local_web.DESKTOP_WEB_LOCAL_ENV, "1")
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     auth_db = local_web.auth_db_path()
@@ -121,6 +153,7 @@ def test_desktop_launcher_keeps_existing_auth_db(tmp_path, monkeypatch):
 
 def test_desktop_launcher_loads_local_agent_env_file(tmp_path, monkeypatch):
     _clear_auth_env(monkeypatch)
+    monkeypatch.setenv(local_web.DESKTOP_WEB_LOCAL_ENV, "1")
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     root = _project_root(tmp_path)

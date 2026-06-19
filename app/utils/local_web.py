@@ -17,7 +17,11 @@ from app.utils.paths import auth_db_path
 AGENT_PORT = 8765
 WEB_PORT = 3000
 AGENT_URL = f"http://127.0.0.1:{AGENT_PORT}"
-WEB_URL = f"http://127.0.0.1:{WEB_PORT}/?tab=live"
+LOCAL_WEB_URL = f"http://127.0.0.1:{WEB_PORT}/admin?tab=live"
+PRODUCTION_WEB_URL = "https://trash-sorter-v2.vercel.app/admin?tab=live"
+DESKTOP_WEB_URL_ENV = "TRASH_SORTER_DESKTOP_WEB_URL"
+DESKTOP_WEB_LOCAL_ENV = "TRASH_SORTER_DESKTOP_WEB_LOCAL"
+WEB_URL = PRODUCTION_WEB_URL
 AUTH_DEV_DEFAULTS_ENV = "TRASH_SORTER_AUTH_DEV_DEFAULTS"
 AUTH_DB_ENV = "TRASH_SORTER_AUTH_DB"
 AUTH_DATABASE_URL_ENV = "TRASH_SORTER_AUTH_DATABASE_URL"
@@ -46,6 +50,14 @@ class LocalWebResult:
 
 
 def ensure_local_web_stack() -> LocalWebResult:
+    if os.getenv(DESKTOP_WEB_LOCAL_ENV, "").strip() != "1":
+        url = os.getenv(DESKTOP_WEB_URL_ENV, "").strip() or PRODUCTION_WEB_URL
+        return LocalWebResult(
+            ok=True,
+            message="Dang mo web production. Vui long dang nhap Admin.",
+            url=url,
+        )
+
     root = _project_root()
     if root is None:
         return LocalWebResult(
@@ -74,10 +86,10 @@ def ensure_local_web_stack() -> LocalWebResult:
         )
         logger.info("local web launcher started Next.js web")
 
-    if not _wait_http(f"http://127.0.0.1:{WEB_PORT}/?tab=live", timeout_s=35):
+    if not _wait_http(f"http://127.0.0.1:{WEB_PORT}/admin?tab=live", timeout_s=35):
         return LocalWebResult(ok=False, message="Web chưa sẵn sàng ở cổng 3000.")
 
-    return LocalWebResult(ok=True, message="Web dashboard đã sẵn sàng. Vui lòng đăng nhập.", url=WEB_URL)
+    return LocalWebResult(ok=True, message="Web dashboard đã sẵn sàng. Vui lòng đăng nhập.", url=LOCAL_WEB_URL)
 
 
 def apply_local_auth_environment(*, allow_dev_defaults: bool = False) -> dict[str, str]:

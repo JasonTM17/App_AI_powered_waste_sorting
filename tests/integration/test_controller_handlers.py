@@ -756,7 +756,7 @@ def test_capture_reviewed_camera_sample_rejects_tiny_bbox(tmp_path, monkeypatch)
     assert "BBox qua nho" in messages[-1][1]
 
 
-def test_training_status_auto_loads_candidate_for_live_test_without_saving_production(
+def test_training_status_does_not_auto_load_candidate_for_live_test(
     tmp_path,
     monkeypatch,
 ):
@@ -780,11 +780,10 @@ def test_training_status_auto_loads_candidate_for_live_test_without_saving_produ
     )
 
     assert controller._engine is not None
-    assert getattr(controller._engine, "path", "") == str(best_model)
-    assert pipeline.reset_count == 1
+    assert getattr(controller._engine, "path", "") == "models/production.pt"
+    assert pipeline.reset_count == 0
     assert controller.cfg.model.path == "models/production.pt"
-    assert results and results[-1][0] is True
-    assert "Loaded candidate" in results[-1][1]
+    assert results == []
 
 
 def test_import_manual_phone_samples_writes_pending_review_item(tmp_path, monkeypatch):

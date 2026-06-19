@@ -75,7 +75,7 @@ def main(*, require_admin_login: bool = True) -> int:
     if startup_cfg.speaker != cfg.speaker:
         cfg = startup_cfg
         save_config(cfg, cfg_path)
-        logger.info("speaker output reset to hardware for desktop startup")
+        logger.info("speaker output normalized for desktop startup")
     apply_theme(app, cfg.theme)
 
     from app.utils.i18n import install_translator

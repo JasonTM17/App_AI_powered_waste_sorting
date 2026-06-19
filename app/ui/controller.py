@@ -1472,7 +1472,6 @@ class AppController(QObject):
             logger.warning("training status failed: {}", error)
             return
         self.training_status_changed.emit(status)
-        self._auto_load_completed_candidate(status)
 
     def _on_training_status_worker_finished(self, worker: _TrainingStatusWorker) -> None:
         if self._training_status_worker is worker:
@@ -1575,6 +1574,7 @@ class AppController(QObject):
         )
 
     def _auto_load_completed_candidate(self, status: object) -> None:
+        """Deprecated: candidates are loaded only by explicit operator action."""
         if not isinstance(status, dict) or status.get("running"):
             return
         path = str(status.get("best_model_path") or "").strip()
@@ -1583,8 +1583,7 @@ class AppController(QObject):
         if not Path(path).exists():
             return
         self._auto_loaded_candidate_path = path
-        logger.info("candidate model ready; auto-loading for live test path={}", path)
-        self.load_candidate_model_for_test(path)
+        logger.info("candidate model ready for manual live test path={}", path)
 
     def reload_model(self, path: str) -> None:
         try:
