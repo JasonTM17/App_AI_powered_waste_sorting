@@ -1,5 +1,9 @@
 # Trash Sorter Pro — Project Showcase
 
+<p align="center">
+  <img src="assets/brand/trash-sorter-pro-logo.png" alt="Trash Sorter Pro logo" width="140" />
+</p>
+
 Tài liệu này dùng để giới thiệu dự án trên GitHub/portfolio và làm checklist
 nhanh khi bàn giao cho người vận hành. Ảnh minh hoạ trong file được chụp trực
 tiếp từ desktop app và web production.
@@ -19,7 +23,13 @@ xuất:
 
 ### Desktop app
 
-![Desktop app Live Detection](assets/screenshots/desktop-app-shell.png)
+| Live Detection | Mapping 80 lớp -> 3 thùng |
+| --- | --- |
+| ![Desktop Live Detection](assets/screenshots/desktop-live-detection.png) | ![Desktop Mapping](assets/screenshots/desktop-mapping.png) |
+
+| Huấn luyện thủ công | Cài đặt camera/ROI/UART |
+| --- | --- |
+| ![Desktop Training](assets/screenshots/desktop-training.png) | ![Desktop Settings](assets/screenshots/desktop-settings.png) |
 
 Desktop app là bề mặt vận hành trực tiếp tại máy phân loại. Màn hình Live cho
 Admin bật/tắt camera, chọn chế độ chỉ nhận diện hoặc tự động phân loại, xem
@@ -27,15 +37,23 @@ camera stream, kết quả hiện tại, trạng thái UART/model/FPS và cấu 
 
 ### Web dashboard
 
-![Web User Dashboard](assets/screenshots/web-user-dashboard.png)
+| User Dashboard | EcoPet AI |
+| --- | --- |
+| ![Web User Dashboard](assets/screenshots/web-user-dashboard.png) | ![EcoPet AI trên web](assets/screenshots/web-ecopet-chat.png) |
+
+| Bản đồ thùng | Phân tích |
+| --- | --- |
+| ![Web Bin Map](assets/screenshots/web-bin-map.png) | ![Web Analytics](assets/screenshots/web-analytics.png) |
+
+| Cảnh báo |
+| --- |
+| ![Web Alerts](assets/screenshots/web-alerts.png) |
 
 Web dashboard cho User tổng hợp dữ liệu đã phân quyền: tổng lượt phân loại, tỷ
 lệ tái chế, độ tin cậy AI, Eco Score, biểu đồ theo ngày, trạng thái thùng, cảnh
 báo và lịch sử gần đây.
 
 ### EcoPet AI
-
-![EcoPet AI trên web](assets/screenshots/web-ecopet-chat.png)
 
 EcoPet AI trả lời bằng tiếng Việt có dấu, dùng context đã scope theo quyền tài
 khoản và không gửi secret, token, raw log, ảnh camera hoặc dữ liệu của tài khoản
@@ -112,4 +130,3 @@ flowchart LR
 - UART chỉ bật khi cổng USB/Arduino thật sẵn sàng.
 - DeepSeek key nằm ở server-side env, không dùng `NEXT_PUBLIC_*`.
 - Ảnh README đã cập nhật sau khi UI thay đổi lớn.
-

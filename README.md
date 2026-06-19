@@ -1,5 +1,9 @@
 # Trash Sorter Pro
 
+<p align="center">
+  <img src="docs/assets/brand/trash-sorter-pro-logo.png" alt="Trash Sorter Pro logo" width="140" />
+</p>
+
 > Hệ thống phân loại rác thông minh dùng YOLO, camera USB, điều khiển UART/Arduino,
 > desktop app PySide6 và web dashboard Next.js cho Admin/User.
 
@@ -18,13 +22,29 @@ Trash Sorter Pro là một hệ sinh thái AI phân loại rác end-to-end:
 - Phân quyền rõ ràng: User chỉ xem dữ liệu của chính mình; Admin quản lý toàn hệ thống và phần cứng.
 - Production web đang chạy tại: [trash-sorter-v2.vercel.app](https://trash-sorter-v2.vercel.app).
 
-## Ảnh minh hoạ
+## Ảnh minh hoạ Desktop app
 
-| Desktop app vận hành máy phân loại | Web dashboard cho User |
+| Live Detection | Mapping 80 lớp -> 3 thùng |
 | --- | --- |
-| ![Desktop app Live Detection](docs/assets/screenshots/desktop-app-shell.png) | ![Web User Dashboard](docs/assets/screenshots/web-user-dashboard.png) |
+| ![Desktop Live Detection](docs/assets/screenshots/desktop-live-detection.png) | ![Desktop Mapping](docs/assets/screenshots/desktop-mapping.png) |
 
-![EcoPet AI trên web](docs/assets/screenshots/web-ecopet-chat.png)
+| Huấn luyện thủ công | Cài đặt camera/ROI/UART |
+| --- | --- |
+| ![Desktop Training](docs/assets/screenshots/desktop-training.png) | ![Desktop Settings](docs/assets/screenshots/desktop-settings.png) |
+
+## Ảnh minh hoạ Web dashboard
+
+| User Dashboard | EcoPet AI |
+| --- | --- |
+| ![Web User Dashboard](docs/assets/screenshots/web-user-dashboard.png) | ![EcoPet AI trên web](docs/assets/screenshots/web-ecopet-chat.png) |
+
+| Bản đồ thùng | Phân tích |
+| --- | --- |
+| ![Web Bin Map](docs/assets/screenshots/web-bin-map.png) | ![Web Analytics](docs/assets/screenshots/web-analytics.png) |
+
+| Cảnh báo |
+| --- |
+| ![Web Alerts](docs/assets/screenshots/web-alerts.png) |
 
 ## Tài liệu chi tiết
 
