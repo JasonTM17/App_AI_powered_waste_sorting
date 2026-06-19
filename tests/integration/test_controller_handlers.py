@@ -274,6 +274,35 @@ def test_uart_preserves_configured_port_when_temporarily_missing(tmp_path, monke
     assert controller.cfg.uart.port == "COM9"
 
 
+def test_uart_replaces_missing_configured_port_with_single_usb_port(tmp_path, monkeypatch):
+    _FakeUartWorker.instances.clear()
+    monkeypatch.setattr(
+        serial_enum,
+        "list_serial_ports",
+        lambda: [
+            {"device": "COM7", "name": "USB-SERIAL CH340", "hwid": "USB VID:PID=1A86:7523", "is_usb": True}
+        ],
+    )
+    monkeypatch.setattr(controller_module, "UartWorker", _FakeUartWorker)
+    monkeypatch.setattr(controller_module, "acquire_runtime_lock", lambda _name: _FakeRuntimeLock())
+    cfg = AppConfig()
+    cfg.uart.port = "COM8"
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    spy = _PipelineSpy()
+    controller._pipeline = spy
+
+    controller._start_uart_if_configured()
+
+    assert len(_FakeUartWorker.instances) == 1
+    worker = _FakeUartWorker.instances[0]
+    assert worker.started is True
+    assert worker.port == "COM7"
+    assert spy.uart is worker
+    assert controller.cfg.uart.port == "COM7"
+    saved = json.loads((tmp_path / "cfg.json").read_text(encoding="utf-8"))
+    assert saved["uart"]["port"] == "COM7"
+
+
 def test_uart_clears_present_non_usb_port(tmp_path, monkeypatch):
     monkeypatch.setattr(
         serial_enum,

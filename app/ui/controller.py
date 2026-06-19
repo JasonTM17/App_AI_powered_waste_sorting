@@ -466,6 +466,24 @@ class AppController(QObject):
         save_config(self.cfg, self.config_path)
         logger.info("uart auto-selected port={}", result.port)
 
+    def _replace_missing_uart_with_single_usb(self, missing_port: str) -> str:
+        if os.environ.get("TRASH_SORTER_DISABLE_UART_AUTO_SELECT") == "1":
+            return ""
+        result = serial_enum.select_single_usb_serial_port(serial_enum.list_serial_ports())
+        if not result.selected:
+            return ""
+        replacement = result.port.strip()
+        if not replacement or replacement.upper() == missing_port.strip().upper():
+            return ""
+        self.cfg.uart.port = replacement
+        save_config(self.cfg, self.config_path)
+        logger.info(
+            "uart configured port {} is missing; auto-selected replacement port={}",
+            missing_port,
+            replacement,
+        )
+        return replacement
+
     def _sanitize_uart_config(self, cfg: AppConfig) -> AppConfig:
         clean = cfg.model_copy(deep=True)
         port = clean.uart.port.strip()
@@ -482,6 +500,7 @@ class AppController(QObject):
                 self._pipeline.set_uart(None)
             self.uart_status.emit(False, "")
             return
+
         if not self._is_usb_uart_port(port):
             if port:
                 present, eligible = self._uart_port_presence(port)
@@ -489,18 +508,31 @@ class AppController(QObject):
                     logger.info("uart port ignored because it is not USB/Arduino: {}", port)
                     self.cfg.uart.port = ""
                     save_config(self.cfg, self.config_path)
+                    port = ""
                 else:
-                    self._log_uart_retry(
-                        f"waiting:{port}",
-                        f"uart port {port} not visible yet; keeping config and retrying",
-                    )
-                    self._schedule_uart_retry()
+                    replacement = self._replace_missing_uart_with_single_usb(port)
+                    if replacement:
+                        port = replacement
+                    else:
+                        message = f"uart port {port} not visible yet; keeping config and retrying"
+                        self._log_uart_retry(f"waiting:{port}", message)
+                        self._schedule_uart_retry()
+                        self._set_uart_unavailable()
+                        return
             else:
                 self._log_uart_retry("blank", "uart port blank; waiting for USB/Arduino and retrying")
                 self._schedule_uart_retry()
-            if self._pipeline is not None:
-                self._pipeline.set_uart(None)
-            self.uart_status.emit(False, "")
+                self._set_uart_unavailable()
+                return
+
+        if not self._is_usb_uart_port(port):
+            if port:
+                message = f"uart port {port} not visible yet; keeping config and retrying"
+                self._log_uart_retry(f"waiting:{port}", message)
+            else:
+                self._log_uart_retry("blank", "uart port blank; waiting for USB/Arduino and retrying")
+            self._schedule_uart_retry()
+            self._set_uart_unavailable()
             return
 
         try:
@@ -530,6 +562,11 @@ class AppController(QObject):
         self._uart_retry_log_count = 0
         self._uart.start()
         logger.info("uart start requested port={}", port)
+
+    def _set_uart_unavailable(self) -> None:
+        if self._pipeline is not None:
+            self._pipeline.set_uart(None)
+        self.uart_status.emit(False, "")
 
     def _log_uart_retry(self, key: str, message: str) -> None:
         if key != self._last_uart_retry_log_key:
