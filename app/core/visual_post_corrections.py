@@ -89,14 +89,7 @@ def apply_visual_post_corrections(
                     operator_label="Muong kim loai",
                 )
         elif detection.cls_name == unknown_class_name:
-            if _looks_like_unknown_transparent_plastic_bottle(frame_bgr, detection.xyxy):
-                corrected = _replace_detection(
-                    detection,
-                    "Plastic bottle",
-                    source="visual_correction:plastic_bottle",
-                    operator_label="Chai nhua PET",
-                )
-            elif _looks_like_pen_like_tool(frame_bgr, detection.xyxy):
+            if _looks_like_pen_like_tool(frame_bgr, detection.xyxy):
                 corrected = _replace_detection(
                     detection,
                     "Pen",
@@ -117,14 +110,24 @@ def apply_visual_post_corrections(
                     cls_id=UNKNOWN_OBJECT_CLASS_ID - 1,
                     source="visual_correction:eggshell",
                 )
-            elif _looks_like_ceramic_dish(frame_bgr, detection.xyxy):
+            elif detection.conf >= 0.70 and _looks_like_unknown_transparent_plastic_bottle(
+                frame_bgr,
+                detection.xyxy,
+            ):
+                corrected = _replace_detection(
+                    detection,
+                    "Plastic bottle",
+                    source="visual_correction:plastic_bottle",
+                    operator_label="Chai nhua PET",
+                )
+            elif detection.conf >= 0.35 and _looks_like_ceramic_dish(frame_bgr, detection.xyxy):
                 corrected = _replace_detection(
                     detection,
                     "Ceramic",
                     source="visual_correction:ceramic_dish",
                     operator_label="Gom su",
                 )
-            else:
+            elif detection.conf >= 0.35:
                 crumpled_paper_box = _crumpled_paper_box(frame_bgr, detection.xyxy)
                 if crumpled_paper_box is not None:
                     corrected = _replace_detection(

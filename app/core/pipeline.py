@@ -693,19 +693,28 @@ class Pipeline:
             )
             allowed_classes = None if mode == "unknown" else source_targets or correction_targets
             strict_correction = mode == "correction" and detection.conf > 0.80
+            low_confidence_fallback = (
+                mode == "unknown"
+                and detection.source.startswith("unknown_fallback:")
+                and detection.conf < 0.20
+            )
             match = recognizer.classify(
                 frame_bgr,
                 detection,
                 allowed_classes=allowed_classes or None,
                 min_similarity=(
-                    ref_cfg.unknown_min_similarity
+                    min(ref_cfg.unknown_min_similarity, 0.84)
+                    if low_confidence_fallback
+                    else ref_cfg.unknown_min_similarity
                     if mode == "unknown"
                     else max(ref_cfg.min_similarity, 0.92)
                     if strict_correction
                     else None
                 ),
                 min_votes=(
-                    ref_cfg.unknown_min_votes
+                    max(ref_cfg.unknown_min_votes, 4)
+                    if low_confidence_fallback
+                    else ref_cfg.unknown_min_votes
                     if mode == "unknown"
                     else max(ref_cfg.min_votes, 4)
                     if strict_correction
@@ -831,14 +840,6 @@ class Pipeline:
         if decision.allowed:
             return []
         if len(clusters) < 2:
-            if len(raw) > 1 and clusters:
-                raw_names = {detection.cls_name for detection in raw}
-                if (
-                    self.cfg.unknown_fallback.class_name in raw_names
-                    and len(raw_names - {self.cfg.unknown_fallback.class_name}) >= 1
-                ):
-                    return []
-                return self._ambiguous_foreground_split_markers(clusters[0])
             return []
 
         if len(self._multi_object_display_hold) == len(clusters) and all(
@@ -949,27 +950,6 @@ class Pipeline:
             if new.cls_name == unknown_name and old.cls_name != unknown_name
             else new
             for old, new in zip(previous, current, strict=True)
-        ]
-
-    def _ambiguous_foreground_split_markers(
-        self,
-        box: tuple[int, int, int, int],
-    ) -> list[Detection]:
-        """Show ambiguous overlapping YOLO labels as two safe unknown markers."""
-        x1, y1, x2, y2 = box
-        width = max(2, x2 - x1)
-        midpoint = x1 + width // 2
-        marker_boxes = ((x1, y1, midpoint, y2), (midpoint, y1, x2, y2))
-        return [
-            Detection(
-                cls_id=-450 - index,
-                cls_name=self.cfg.unknown_fallback.class_name,
-                conf=0.50,
-                xyxy=marker_box,
-                source="foreground_multi_object",
-                operator_label=f"Vật {index} - nhãn YOLO chồng lấn",
-            )
-            for index, marker_box in enumerate(marker_boxes, start=1)
         ]
 
     @staticmethod

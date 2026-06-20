@@ -158,6 +158,23 @@ def test_visual_correction_relabels_clear_labeled_unknown_as_plastic_bottle():
     assert corrected[0].operator_label == "Chai nhua PET"
 
 
+def test_visual_correction_does_not_promote_low_conf_unknown_to_plastic_bottle():
+    frame = np.full((360, 480, 3), 230, dtype=np.uint8)
+    body = np.array(
+        [[150, 312], [126, 118], [188, 62], [302, 62], [360, 118], [334, 312]],
+        dtype=np.int32,
+    )
+    cv2.fillPoly(frame, [body], (224, 228, 232))
+    cv2.polylines(frame, [body], True, (158, 162, 168), 4)
+    cv2.rectangle(frame, (146, 132), (338, 218), (194, 125, 42), -1)
+    detection = Detection(-1, "Unknown object", 0.08, (118, 54, 370, 322))
+
+    corrected = apply_visual_post_corrections(frame, [detection])
+
+    assert corrected[0].cls_name == "Unknown object"
+    assert corrected[0].source == "YOLO"
+
+
 def test_visual_correction_keeps_compact_red_aluminum_can():
     frame = np.full((260, 360, 3), 225, dtype=np.uint8)
     cv2.rectangle(frame, (128, 55), (228, 205), (36, 45, 182), -1)

@@ -1643,8 +1643,7 @@ def test_pipeline_collapses_many_labels_on_one_object_without_warning(tmp_path, 
     _arm_dispatch(p)
     detections = p.process_frame(frame, ts=datetime.now(UTC))
 
-    assert len(detections) == 2
-    assert {item.cls_name for item in detections} == {"Unknown object"}
+    assert [item.cls_name for item in detections] == ["Pen"]
     assert p.dispatch_status == "TEST OFF"
     assert uart.audio_tracks == []
     assert speaker.texts == []
@@ -2227,6 +2226,43 @@ def test_pipeline_detects_low_conf_unknown_object_without_dispatch(tmp_path, mon
     assert p.uart.sent == []
     assert p.history.query(limit=1) == []
     assert p.dispatch_status == "unknown object review required"
+    p.close()
+
+
+def test_pipeline_uses_consensus_reference_for_low_conf_unknown_fallback(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Organic", command="O", bin_index=1)]
+    )
+    cfg.model.conf_threshold = 0.4
+    cfg.unknown_fallback.stable_frames = 1
+
+    class ConsensusRecognizer:
+        def __init__(self):
+            self.calls = []
+
+        def classify(self, _frame, _detection, **kwargs):
+            self.calls.append(kwargs)
+            return SimpleNamespace(
+                cls_id=17,
+                cls_name="Organic",
+                similarity=0.85,
+                operator_label="Vo trung",
+                image_path="manual_live_eggshell.jpg",
+                votes=7,
+                margin=1.0,
+                backend="test",
+            )
+
+    recognizer = ConsensusRecognizer()
+    p = Pipeline(cfg, _LowConfidencePenInfer(), _StubUart(), tmp_path / "h.db")
+    p._manual_reference_recognizer = recognizer
+    p.set_hardware_dispatch_enabled(False)
+
+    detections = p.process_frame(np.zeros((480, 640, 3), dtype=np.uint8), ts=datetime.now(UTC))
+
+    assert [d.cls_name for d in detections] == ["Organic"]
+    assert recognizer.calls == [{"allowed_classes": None, "min_similarity": 0.84, "min_votes": 4}]
     p.close()
 
 

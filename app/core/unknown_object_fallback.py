@@ -11,6 +11,7 @@ from app.core.events import Detection
 
 RoiFilter = Callable[[tuple[int, int, int, int]], bool]
 MAX_UNKNOWN_BBOX_COVERAGE = 0.45
+MAX_TRANSPARENT_BBOX_COVERAGE = 0.82
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,12 @@ class UnknownObjectFallback:
             )
         if candidate is None:
             candidate = self._from_static_contrast(
+                frame_bgr,
+                roi_filter=roi_filter,
+                min_area_ratio=min_area_ratio,
+            )
+        if candidate is None:
+            candidate = self._from_transparent_edges(
                 frame_bgr,
                 roi_filter=roi_filter,
                 min_area_ratio=min_area_ratio,
@@ -241,3 +248,63 @@ class UnknownObjectFallback:
         area_ratio = ((x2 - x1) * (y2 - y1)) / max(frame_area, 1.0)
         confidence = max(0.12, min(0.39, area_ratio / max(min_area_ratio * 6.0, 1e-6)))
         return UnknownObjectCandidate((x1, y1, x2, y2), confidence, "static_contrast")
+
+    @staticmethod
+    def _from_transparent_edges(
+        frame_bgr: np.ndarray,
+        *,
+        roi_filter: RoiFilter,
+        min_area_ratio: float,
+    ) -> UnknownObjectCandidate | None:
+        """Find large, translucent tray items that are too bright for color fallback.
+
+        Clear plastic bags often have little saturation or darkness. Their folds and
+        glare still create a dense edge field, which is enough to offer a bounded
+        ``Unknown object`` crop to reviewed-reference recognition.
+        """
+        try:
+            import cv2
+        except Exception:
+            return None
+        if frame_bgr.size == 0:
+            return None
+
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(gray, 16, 56)
+        kernel = np.ones((9, 9), dtype=np.uint8)
+        merged = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+        merged = cv2.dilate(merged, np.ones((5, 5), dtype=np.uint8), iterations=1)
+        contours, _ = cv2.findContours(merged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        height, width = gray.shape[:2]
+        frame_area = float(width * height)
+        min_bbox_area = frame_area * max(min_area_ratio * 2.0, 0.012)
+        candidates: list[tuple[int, int, int, int, float]] = []
+        for contour in contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            if w <= 8 or h <= 8:
+                continue
+            xyxy = (int(x), int(y), int(x + w), int(y + h))
+            if not roi_filter(xyxy):
+                continue
+            bbox_area = float(w * h)
+            coverage = bbox_area / max(frame_area, 1.0)
+            if bbox_area < min_bbox_area or coverage > MAX_TRANSPARENT_BBOX_COVERAGE:
+                continue
+            edge_pixels = float(np.count_nonzero(edges[y : y + h, x : x + w]))
+            edge_density = edge_pixels / max(bbox_area, 1.0)
+            if edge_density < 0.012:
+                continue
+            touches = sum((x <= 1, y <= 1, x + w >= width - 1, y + h >= height - 1))
+            if touches >= 3 and coverage > 0.55:
+                continue
+            score = edge_pixels + bbox_area * min(edge_density, 0.10)
+            candidates.append((xyxy[0], xyxy[1], xyxy[2], xyxy[3], score))
+        if not candidates:
+            return None
+
+        x1, y1, x2, y2, score = max(candidates, key=lambda item: item[4])
+        area_ratio = ((x2 - x1) * (y2 - y1)) / max(frame_area, 1.0)
+        confidence = max(0.10, min(0.34, area_ratio / max(min_area_ratio * 12.0, 1e-6)))
+        return UnknownObjectCandidate((x1, y1, x2, y2), confidence, "transparent_edges")
