@@ -30,6 +30,15 @@ def _two_object_frame() -> np.ndarray:
     return frame
 
 
+def _spoon_and_pen_frame() -> np.ndarray:
+    frame = np.full((480, 640, 3), 235, dtype=np.uint8)
+    cv2.line(frame, (0, 180), (300, 162), (76, 76, 78), 62)
+    cv2.ellipse(frame, (405, 155), (105, 82), -5, 0, 360, (62, 62, 64), -1)
+    cv2.line(frame, (0, 365), (470, 352), (48, 58, 92), 30)
+    cv2.line(frame, (70, 353), (450, 347), (95, 105, 125), 8)
+    return frame
+
+
 def test_multi_object_dispatch_allows_one_object():
     decision = evaluate_single_class_dispatch(
         [_tracked("Pen", 1)],
@@ -80,6 +89,20 @@ def test_foreground_multi_object_dispatch_blocks_two_visible_objects():
     assert decision.object_count == 2
     assert decision.reason == "multiple waste types (2 visible objects)"
     assert decision.class_names == ("2 visible objects",)
+
+
+def test_spoon_and_pen_stay_separate_when_one_loose_yolo_box_contains_both():
+    decision = evaluate_foreground_multi_object_dispatch(
+        _spoon_and_pen_frame(),
+        roi=_roi(width=640, height=480),
+        max_objects=1,
+        min_area_ratio=0.003,
+        reference_boxes=((0, 45, 525, 410),),
+    )
+
+    assert decision.allowed is False
+    assert decision.object_count == 2
+    assert decision.reason == "multiple waste types (2 visible objects)"
 
 
 def test_foreground_multi_object_dispatch_allows_one_visible_object():
@@ -161,7 +184,7 @@ def test_close_foreground_objects_without_yolo_reference_stay_blocked():
     assert decision.foreground_count == 2
 
 
-def test_foreground_components_inside_one_yolo_box_count_as_one_object():
+def test_two_foreground_objects_inside_one_loose_yolo_box_stay_blocked():
     decision = evaluate_foreground_multi_object_dispatch(
         _two_object_frame(),
         roi=_roi(),
@@ -170,11 +193,31 @@ def test_foreground_components_inside_one_yolo_box_count_as_one_object():
         reference_boxes=((20, 20, 285, 205),),
     )
 
-    assert decision.allowed is True
-    assert decision.object_count == 1
+    assert decision.allowed is False
+    assert decision.object_count == 2
     assert decision.foreground_count == 2
     assert decision.reference_count == 1
     assert decision.unmatched_foreground_count == 0
+
+
+def test_single_spoon_with_highlights_inside_one_yolo_box_stays_one_object():
+    frame = np.full((260, 420, 3), 230, dtype=np.uint8)
+    cv2.line(frame, (22, 174), (258, 142), (82, 82, 82), 34)
+    cv2.line(frame, (22, 160), (258, 130), (168, 168, 166), 14)
+    cv2.ellipse(frame, (312, 128), (74, 56), -8, 0, 360, (76, 76, 78), -1)
+    cv2.ellipse(frame, (292, 122), (46, 28), -10, 0, 360, (168, 168, 166), -1)
+    cv2.circle(frame, (330, 94), 12, (250, 250, 250), -1)
+
+    decision = evaluate_foreground_multi_object_dispatch(
+        frame,
+        roi=_roi(width=420, height=260),
+        max_objects=1,
+        min_area_ratio=0.002,
+        reference_boxes=((12, 55, 395, 205),),
+    )
+
+    assert decision.allowed is True
+    assert decision.object_count == 1
 
 
 def test_foreground_component_outside_yolo_box_still_counts_as_second_object():

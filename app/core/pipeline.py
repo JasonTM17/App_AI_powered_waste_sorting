@@ -36,6 +36,7 @@ from app.core.manual_reference_recognition import ManualReferenceRecognizer
 from app.core.multi_object_dispatch import (
     evaluate_foreground_multi_object_dispatch,
     evaluate_single_class_dispatch,
+    foreground_object_clusters,
 )
 from app.core.speaker import NoopSpeaker, Speaker
 from app.core.three_bin_classifier import (
@@ -649,6 +650,9 @@ class Pipeline:
         height, width = frame_bgr.shape[:2] if frame_bgr.ndim >= 2 else (0, 0)
         out: list[Detection] = []
         for detection in detections:
+            if detection.source == "manual_reference":
+                out.append(detection)
+                continue
             mode = ""
             area_ratio = 0.0
             if detection.cls_name == fallback_name and ref_cfg.allow_unknown_matches:
@@ -773,6 +777,70 @@ class Pipeline:
                 continue
             candidates.append(detection)
         return suppress_overlapping_detections(candidates, iou_threshold=0.55)
+
+    def _manual_reference_split_candidates(
+        self,
+        frame_bgr: np.ndarray,
+        raw: list[Detection],
+    ) -> list[Detection]:
+        """Split one loose YOLO box when reviewed references identify two objects."""
+        recognizer = self._manual_reference_recognizer
+        ref_cfg = self.cfg.manual_reference_recognition
+        if recognizer is None or not ref_cfg.enabled or len(raw) > 1:
+            return []
+        height, width = frame_bgr.shape[:2] if frame_bgr.ndim >= 2 else (0, 0)
+        clusters = foreground_object_clusters(
+            frame_bgr,
+            roi=self.cfg.roi,
+            min_area_ratio=self.cfg.unknown_fallback.min_area_ratio,
+        )
+        source = raw[0] if raw else None
+        if source is not None and _box_area_ratio(source.xyxy, width, height) < 0.30:
+            return []
+        reference_boxes = (source.xyxy,) if source is not None else ()
+        decision = evaluate_foreground_multi_object_dispatch(
+            frame_bgr,
+            roi=self.cfg.roi,
+            max_objects=1,
+            min_area_ratio=self.cfg.unknown_fallback.min_area_ratio,
+            reference_boxes=reference_boxes,
+        )
+        if decision.allowed or len(clusters) < 2:
+            return []
+
+        matches: list[Detection] = []
+        for box in clusters:
+            match = recognizer.classify(
+                frame_bgr,
+                Detection(
+                    cls_id=source.cls_id if source is not None else 999,
+                    cls_name=self.cfg.unknown_fallback.class_name,
+                    conf=source.conf if source is not None else 0.0,
+                    xyxy=box,
+                ),
+                min_similarity=0.72,
+                min_votes=1,
+            )
+            if match is None:
+                continue
+            matches.append(
+                Detection(
+                    cls_id=match.cls_id,
+                    cls_name=match.cls_name,
+                    conf=match.similarity,
+                    xyxy=box,
+                    source="manual_reference",
+                    operator_label=match.operator_label,
+                )
+            )
+        if len(matches) < 2:
+            return []
+        logger.info(
+            "manual reference split loose {} box into {}",
+            source.cls_name if source is not None else "missing YOLO",
+            [match.cls_name for match in matches],
+        )
+        return matches
 
     def _apply_three_bin_classifier(
         self,
@@ -936,6 +1004,9 @@ class Pipeline:
             raw = []
         else:
             raw = self._correct_ambiguous_organic(frame_bgr, raw)
+            split_candidates = self._manual_reference_split_candidates(frame_bgr, raw)
+            if split_candidates:
+                raw = split_candidates
         threshold_for_detection = getattr(self.engine, "threshold_for_detection", None)
         filtered = [
             detection

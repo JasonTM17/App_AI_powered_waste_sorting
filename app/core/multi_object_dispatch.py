@@ -127,6 +127,10 @@ def evaluate_foreground_multi_object_dispatch(
     boxes = _foreground_boxes(frame_bgr, roi=roi, min_area_ratio=min_area_ratio)
     object_boxes = _cluster_foreground_boxes(boxes)
     references = tuple(reference_boxes)
+    contained_counts = tuple(
+        _contained_independent_object_count(object_boxes, reference)
+        for reference in references
+    )
     unmatched_count = sum(
         1
         for foreground_box in object_boxes
@@ -135,7 +139,8 @@ def evaluate_foreground_multi_object_dispatch(
             for reference in references
         )
     )
-    count = len(references) + unmatched_count if references else len(object_boxes)
+    reference_object_count = sum(max(1, count) for count in contained_counts)
+    count = reference_object_count + unmatched_count if references else len(object_boxes)
     decision_meta = {
         "object_count": count,
         "foreground_count": len(boxes),
@@ -150,6 +155,58 @@ def evaluate_foreground_multi_object_dispatch(
         reason=f"multiple waste types ({count} visible objects)",
         **decision_meta,
     )
+
+
+def _contained_independent_object_count(
+    boxes: tuple[tuple[int, int, int, int], ...],
+    reference: tuple[int, int, int, int],
+) -> int:
+    """Count clearly separate foreground objects hidden by one loose detector box."""
+    rx1, ry1, rx2, ry2 = reference
+    reference_area = _box_area(reference)
+    if reference_area <= 0:
+        return 0
+
+    contained = [
+        box
+        for box in boxes
+        if rx1 <= (box[0] + box[2]) / 2.0 <= rx2
+        and ry1 <= (box[1] + box[3]) / 2.0 <= ry2
+        and _box_area(box) >= reference_area * 0.025
+    ]
+    if len(contained) < 2:
+        return len(contained)
+
+    independent: list[tuple[int, int, int, int]] = []
+    for candidate in sorted(contained, key=_box_area, reverse=True):
+        if all(
+            _foreground_objects_clearly_separate(candidate, accepted, reference)
+            for accepted in independent
+        ):
+            independent.append(candidate)
+    return len(independent)
+
+
+def _foreground_objects_clearly_separate(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+    reference: tuple[int, int, int, int],
+) -> bool:
+    """Reject highlight/shadow fragments while preserving genuinely separate items."""
+    first_area = _box_area(first)
+    second_area = _box_area(second)
+    if min(first_area, second_area) / max(first_area, second_area, 1) < 0.12:
+        return False
+
+    ax1, ay1, ax2, ay2 = first
+    bx1, by1, bx2, by2 = second
+    gap_x = max(ax1 - bx2, bx1 - ax2, 0)
+    gap_y = max(ay1 - by2, by1 - ay2, 0)
+    reference_width = max(1, reference[2] - reference[0])
+    reference_height = max(1, reference[3] - reference[1])
+    clear_horizontal_gap = gap_x >= max(8, round(reference_width * 0.025))
+    clear_vertical_gap = gap_y >= max(8, round(reference_height * 0.025))
+    return clear_horizontal_gap or clear_vertical_gap
 
 
 def _cluster_foreground_boxes(
@@ -300,6 +357,19 @@ def _small_foreground_fragment_belongs_to_object(
     vertical_ratio = vertical_overlap / min(foreground_height, reference_height)
     gap_x = max(rx1 - fx2, fx1 - rx2, 0)
     gap_y = max(ry1 - fy2, fy1 - ry2, 0)
+    foreground_aspect = foreground_width / foreground_height
+    reference_aspect = reference_width / reference_height
+    foreground_is_horizontal_item = foreground_aspect >= 3.0
+    foreground_is_vertical_item = foreground_aspect <= 1 / 3.0
+    reference_is_bulky = 1 / 3.0 < reference_aspect < 3.0
+    # A pen below a spoon is a distinct long item, not a highlight fragment of
+    # the spoon. Preserve thin satellites only when they overlap the bulky
+    # object's silhouette instead of sitting across a visible background gap.
+    if reference_is_bulky:
+        if foreground_is_horizontal_item and gap_y > 0:
+            return False
+        if foreground_is_vertical_item and gap_x > 0:
+            return False
     # Crumpled paper and glossy trash often appear as one dominant blob with
     # smaller fold/shadow fragments separated by bright creases. Keep a wider
     # attachment band for those small satellites, while the caller still keeps
@@ -318,6 +388,18 @@ def foreground_object_boxes(
 ) -> tuple[tuple[int, int, int, int], ...]:
     """Return foreground object candidates for UI annotation suggestions."""
     return _foreground_boxes(frame_bgr, roi=roi, min_area_ratio=min_area_ratio)
+
+
+def foreground_object_clusters(
+    frame_bgr: np.ndarray,
+    *,
+    roi: object | None,
+    min_area_ratio: float = 0.003,
+) -> tuple[tuple[int, int, int, int], ...]:
+    """Return foreground candidates clustered into likely physical objects."""
+    return _cluster_foreground_boxes(
+        _foreground_boxes(frame_bgr, roi=roi, min_area_ratio=min_area_ratio)
+    )
 
 
 def evaluate_single_class_dispatch(
@@ -363,4 +445,5 @@ __all__ = [
     "evaluate_foreground_multi_object_dispatch",
     "evaluate_single_class_dispatch",
     "foreground_object_boxes",
+    "foreground_object_clusters",
 ]

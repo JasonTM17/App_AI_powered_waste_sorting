@@ -2,6 +2,7 @@ import json
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import ClassVar
 
 import cv2
@@ -323,6 +324,31 @@ class _WidePenInfer:
 
     def predict(self, frame):
         return [Detection(42, "Pen", 0.93, (20, 20, 285, 205))]
+
+
+class _LooseMergedObjectInfer:
+    class_names: ClassVar[dict[int, str]] = {18: "Paper shavings"}
+
+    def predict(self, frame):
+        return [Detection(18, "Paper shavings", 0.09, (0, 20, 620, 440))]
+
+
+class _SpoonAndPenReferenceRecognizer:
+    def classify(self, _frame, detection, **_kwargs):
+        center_y = (detection.xyxy[1] + detection.xyxy[3]) / 2
+        if center_y < 300:
+            return SimpleNamespace(
+                cls_id=32,
+                cls_name="Iron utensils",
+                similarity=0.77,
+                operator_label="Muong kim loai",
+            )
+        return SimpleNamespace(
+            cls_id=42,
+            cls_name="Pen",
+            similarity=0.84,
+            operator_label="But bi",
+        )
 
 
 class _OverlappingPaperUnknownInfer:
@@ -1715,7 +1741,7 @@ def test_pipeline_blocks_two_foreground_objects_when_yolo_sees_one(tmp_path, mon
     p.close()
 
 
-def test_pipeline_allows_split_foreground_inside_one_yolo_object(tmp_path, monkeypatch):
+def test_pipeline_blocks_two_objects_merged_into_one_yolo_box(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config(
         mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
@@ -1730,8 +1756,62 @@ def test_pipeline_allows_split_foreground_inside_one_yolo_object(tmp_path, monke
     detections = p.process_frame(frame, ts=datetime.now(UTC))
 
     assert [item.cls_name for item in detections] == ["Pen"]
-    assert p.dispatch_status == "TEST OFF"
+    assert p.dispatch_status == "multiple waste types (2 visible objects)"
     assert p.uart.sent == []
+    p.close()
+
+
+def test_pipeline_splits_loose_yolo_box_into_reviewed_spoon_and_pen(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config()
+    cfg.manual_reference_recognition.enabled = True
+    uart = _StubUart()
+    p = Pipeline(cfg, _LooseMergedObjectInfer(), uart, tmp_path / "h.db", speaker=_StubSpeaker())
+    p._manual_reference_recognizer = _SpoonAndPenReferenceRecognizer()
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.full((480, 640, 3), 235, dtype=np.uint8)
+    cv2.line(frame, (0, 180), (300, 162), (76, 76, 78), 62)
+    cv2.ellipse(frame, (405, 155), (105, 82), -5, 0, 360, (62, 62, 64), -1)
+    cv2.line(frame, (0, 365), (470, 352), (48, 58, 92), 30)
+    cv2.line(frame, (70, 353), (450, 347), (95, 105, 125), 8)
+
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert sorted((item.cls_name, item.operator_label) for item in detections) == [
+        ("Iron utensils", "Muong kim loai"),
+        ("Pen", "But bi"),
+    ]
+    assert p.dispatch_status == "multiple waste types"
+    assert uart.sent == []
+    assert p.history.query(limit=10) == []
+    p.close()
+
+
+def test_pipeline_recovers_reviewed_spoon_and_pen_when_yolo_returns_nothing(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config()
+    cfg.manual_reference_recognition.enabled = True
+    uart = _StubUart()
+    p = Pipeline(cfg, _NoDetectionInfer(), uart, tmp_path / "h.db", speaker=_StubSpeaker())
+    p._manual_reference_recognizer = _SpoonAndPenReferenceRecognizer()
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.full((480, 640, 3), 235, dtype=np.uint8)
+    cv2.line(frame, (0, 180), (300, 162), (76, 76, 78), 62)
+    cv2.ellipse(frame, (405, 155), (105, 82), -5, 0, 360, (62, 62, 64), -1)
+    cv2.line(frame, (0, 365), (470, 352), (48, 58, 92), 30)
+
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert {item.cls_name for item in detections} == {"Iron utensils", "Pen"}
+    assert p.dispatch_status == "multiple waste types"
+    assert uart.sent == []
+    assert p.history.query(limit=10) == []
     p.close()
 
 
