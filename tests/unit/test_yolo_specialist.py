@@ -1,5 +1,6 @@
 from typing import ClassVar
 
+import app.core.inference as inference_module
 from app.core.config import SpecialistModelConfig
 from app.core.events import Detection
 from app.core.inference import (
@@ -119,3 +120,14 @@ def test_specialist_load_keeps_primary_class_names_isolated(tmp_path):
     assert engine.class_names == {0: "Aerosols", 1: "Aluminum can"}
     assert engine._specialist_class_names == {0: "Pen", 1: "Battery"}
     assert engine._specialist_class_ids == [0, 1]
+
+
+def test_model_path_falls_back_to_project_data_for_desktop_shortcut(tmp_path, monkeypatch):
+    model_path = tmp_path / "models" / "real-camera.pt"
+    model_path.parent.mkdir()
+    model_path.write_bytes(b"stub")
+
+    monkeypatch.setattr(inference_module, "resource_path", lambda _path: tmp_path / "bundle-missing")
+    monkeypatch.setattr(inference_module, "resolve_data_path", lambda _path: model_path)
+
+    assert inference_module._resolve_model_path("models/real-camera.pt") == model_path

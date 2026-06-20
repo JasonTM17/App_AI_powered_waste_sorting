@@ -8,7 +8,7 @@ from typing import Any, cast
 from app.core.config import SpecialistModelConfig
 from app.core.events import Detection
 from app.utils.logging import logger
-from app.utils.paths import resource_path
+from app.utils.paths import resolve_data_path, resource_path
 
 YOLO_SPECIALIST_SOURCE = "YOLO specialist"
 
@@ -209,11 +209,10 @@ class InferenceEngine:
 
 def _resolve_model_path(model_path: str | Path) -> Path:
     path = Path(model_path)
-    if path.exists():
-        return path
-    bundled = resource_path(path)
-    if bundled.exists():
-        return bundled
+    candidates = (path, resource_path(path), resolve_data_path(path))
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
     raise FileNotFoundError(f"model not found: {model_path}")
 
 
