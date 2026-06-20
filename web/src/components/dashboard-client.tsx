@@ -83,6 +83,7 @@ import {
   OperationDevice,
   OperationDevicesResponse,
   OperationDeviceUpsertPayload,
+  OperationEventsResponse,
   OperationsHealthResponse,
   RoleCatalogResponse,
   RuntimeStatus,
@@ -354,6 +355,7 @@ export function DashboardClient() {
   const dashboardAbortRef = useRef<AbortController | null>(null);
   const dashboardRequestRef = useRef(0);
   const userOperationsRefreshInFlightRef = useRef(false);
+  const userOperationsEventCursorRef = useRef(0);
   const userOperationsInteractionUntilRef = useRef(0);
   const shownBinFullAlertRanksRef = useRef<Map<string, number>>(new Map());
 
@@ -1700,6 +1702,45 @@ export function DashboardClient() {
     if (auth?.role !== "user" || auth.password_default || !agentToken || !refreshableUserViews.includes(userView)) {
       return;
     }
+    let cancelled = false;
+    let eventRequestInFlight = false;
+    userOperationsEventCursorRef.current = 0;
+    const pollOperationEvents = async () => {
+      if (cancelled || eventRequestInFlight || document.visibilityState === "hidden") {
+        return;
+      }
+      eventRequestInFlight = true;
+      try {
+        const payload = await cloudFetch<OperationEventsResponse>(
+          `/api/user/operation-events?after=${userOperationsEventCursorRef.current}`,
+          { timeoutMs: 8000 },
+          agentToken
+        );
+        if (cancelled) return;
+        userOperationsEventCursorRef.current = payload.cursor;
+        if (payload.changed) {
+          void refreshUserOperations({ background: true });
+        }
+      } catch {
+        // Six-second map polling below remains the fallback if the realtime
+        // event table is temporarily unavailable.
+      } finally {
+        eventRequestInFlight = false;
+      }
+    };
+    void pollOperationEvents();
+    const eventTimer = window.setInterval(() => void pollOperationEvents(), 1200);
+    return () => {
+      cancelled = true;
+      window.clearInterval(eventTimer);
+    };
+  }, [agentToken, auth?.role, auth?.password_default, userView]);
+
+  useEffect(() => {
+    const refreshableUserViews: UserView[] = ["dashboard", "map", "alerts", "schedule", "collect", "report-issue"];
+    if (auth?.role !== "user" || auth.password_default || !agentToken || !refreshableUserViews.includes(userView)) {
+      return;
+    }
     const timer = window.setInterval(() => {
       if (document.visibilityState === "hidden") {
         return;
@@ -1746,7 +1787,32 @@ export function DashboardClient() {
       return;
     }
     if (USE_CLOUD_HARDWARE_BRIDGE) {
-      return;
+      let cancelled = false;
+      let refreshInFlight = false;
+      const refreshSnapshot = async () => {
+        if (cancelled || refreshInFlight || document.visibilityState === "hidden") {
+          return;
+        }
+        refreshInFlight = true;
+        try {
+          const payload = await fetchHardware<AgentSnapshot>("/api/live", { timeoutMs: 8000 });
+          if (!cancelled) {
+            if (payload.status) setStatus(payload.status);
+            if (payload.detections) setDetections(payload.detections);
+          }
+        } catch {
+          // The normal status refresh reports bridge errors. Keep the last
+          // valid detections during a short tunnel interruption.
+        } finally {
+          refreshInFlight = false;
+        }
+      };
+      void refreshSnapshot();
+      const timer = window.setInterval(() => void refreshSnapshot(), 1000);
+      return () => {
+        cancelled = true;
+        window.clearInterval(timer);
+      };
     }
     let socket: WebSocket | null = null;
     try {
@@ -2736,6 +2802,7 @@ export function DashboardClient() {
           <AdminCameraPanel
             busy={busy}
             config={config}
+            detections={detections}
             status={status}
             stream={cameraStream}
             onChange={updateConfig}

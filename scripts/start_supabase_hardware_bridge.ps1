@@ -1,5 +1,5 @@
 param(
-  [double]$Interval = 5,
+  [double]$Interval = 2,
   [int]$HistoryLimit = 50
 )
 

@@ -270,7 +270,11 @@ class OperationsStore:
         database_url: str | None = None,
         device_defaults: dict[str, str] | None = None,
     ):
-        configured_url = database_url or configured_operations_database_url()
+        configured_url = (
+            normalize_database_url(database_url)
+            if database_url is not None
+            else configured_operations_database_url()
+        )
         self.db_path = db_path
         self.database_url = configured_url
         self._device_defaults = dict(device_defaults or {})

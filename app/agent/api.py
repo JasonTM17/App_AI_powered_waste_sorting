@@ -915,6 +915,15 @@ def create_app(
     def camera_stream_token() -> CameraStreamTokenResponse:
         return _issue_stream_token()
 
+    @router.get("/live")
+    def live_snapshot() -> dict[str, object]:
+        """Return the same inference snapshot emitted by the local WebSocket.
+
+        Vercel's hardware bridge polls this endpoint because the public bridge
+        cannot forward the local WebSocket connection reliably.
+        """
+        return rt.live_payload()
+
     @app.get("/api/camera/stream")
     async def camera_stream(
         token: str | None = None,

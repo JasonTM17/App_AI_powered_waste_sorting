@@ -31,7 +31,7 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = argparse.ArgumentParser(description="Sync local hardware state to Supabase.")
     parser.add_argument("--once", action="store_true", help="Run one sync cycle and exit.")
-    parser.add_argument("--interval", type=float, default=10.0, help="Seconds between sync cycles.")
+    parser.add_argument("--interval", type=float, default=2.0, help="Seconds between sync cycles.")
     parser.add_argument("--history-limit", type=int, default=200, help="Recent history rows to sync.")
     parser.add_argument("--operations-db", type=Path, default=operations_db_path())
     parser.add_argument("--history-db", type=Path, default=db_path())
@@ -47,7 +47,7 @@ def main() -> int:
             conn.commit()
         if args.once:
             return 0
-        time.sleep(max(2.0, args.interval))
+        time.sleep(max(1.0, args.interval))
 
 
 def sync_once(conn: psycopg.Connection[Any], operations_db: Path, history_db: Path, history_limit: int) -> None:
@@ -58,7 +58,10 @@ def sync_once(conn: psycopg.Connection[Any], operations_db: Path, history_db: Pa
 
 
 def sync_operations(conn: psycopg.Connection[Any], operations_db: Path) -> dict[int, dict[str, Any]]:
-    store = OperationsStore(operations_db)
+    # This side of the bridge must always read the hardware machine's local
+    # SQLite state. Destination credentials may also be present in the process
+    # environment and must not redirect the source store back to Supabase.
+    store = OperationsStore(operations_db, database_url="")
     bin_readings: dict[int, dict[str, Any]] = {}
     try:
         for device in store.list_devices():

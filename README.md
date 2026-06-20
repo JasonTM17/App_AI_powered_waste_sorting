@@ -248,8 +248,9 @@ Local operations map:
 - Admin APIs manage roles, devices, bin map, alerts, collection schedules, model,
   audio, and reports. User APIs are scoped to map, alerts, schedule, mark-collected,
   device issue reporting, own history, and own account.
-- Supabase Realtime push notifications are still a later enhancement; the current
-  web UI refreshes/polls the local agent APIs.
+- Supabase bin/alert triggers write scoped `realtime_events`. User dashboard/map
+  consumes an authenticated event cursor every 1.2 seconds and refreshes after a
+  hardware fullness event; the six-second map poll remains a connection fallback.
 
 Public Admin hardware bridge:
 
@@ -264,6 +265,8 @@ powershell -ExecutionPolicy Bypass -File scripts/start_public_hardware_bridge.ps
 - Copy the generated `https://*.trycloudflare.com` URL from `logs/public-hardware-bridge.err.log` into Vercel production as `TRASH_SORTER_HARDWARE_BRIDGE_URL`, and set the same secret in Vercel as `TRASH_SORTER_HARDWARE_BRIDGE_SECRET`.
 - When the bridge secret is enabled, use the Vercel Admin UI for public camera/live/training. Direct browser calls from a local dev UI to protected agent admin APIs will be rejected unless you remove the secret and restart the agent.
 - Vercel proxies only an allowlist: status, camera start/stop/stream-token, model class catalog, camera sample capture, capture-session, learn-now status/refresh/unknown capture, and micro-train start. Settings writes, logs, model/audio config, servo/UART tests, and generic proxying are intentionally not exposed through this public bridge.
+- Admin Live/Camera reads the same local `Pipeline` detection snapshot as the desktop app. Production polls the protected hardware snapshot once per second while the camera screen is open; camera frames and AI results remain Admin-only.
+- When a Supabase/Auth database URL is configured, the public bridge also starts the hardware-state synchronizer. `BIN:<index>:<percent>` readings reach cloud operations on a two-second cycle.
 
 Full Stitch User screens:
 

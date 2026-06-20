@@ -86,6 +86,24 @@ describe("hardware bridge proxy", () => {
     expect(payload.stream_url).toBe("https://hardware.example.com/api/camera/stream?stream_token=stream-ticket");
     expect(payload.stream_url).not.toContain("bridge-secret");
   });
+
+  it("forwards live AI snapshots used by the production camera", async () => {
+    authMock.authenticateSession.mockResolvedValue({
+      role: "admin",
+      username: "admin",
+      password_default: false
+    });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ status: { camera: { running: true } }, detections: [{ cls_name: "Paper" }] })
+    );
+
+    const response = await proxyHardwareBridge(adminRequest("/api/admin/hardware/live", "GET"), ["live"]);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(payload.detections[0].cls_name).toBe("Paper");
+  });
 });
 
 describe("Admin connection card", () => {

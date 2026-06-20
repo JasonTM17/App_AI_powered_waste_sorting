@@ -357,6 +357,18 @@ def test_live_payload_reuses_device_scan_cache(tmp_path, monkeypatch):
         runtime.close()
 
 
+def test_live_snapshot_http_matches_websocket_payload(tmp_path):
+    client, runtime = _client(tmp_path)
+    try:
+        response = client.get("/api/live")
+        assert response.status_code == 200
+        payload = response.json()
+        assert "status" in payload
+        assert "detections" in payload
+    finally:
+        runtime.close()
+
+
 def test_devices_refresh_clears_device_scan_cache(tmp_path, monkeypatch):
     monkeypatch.delenv("TRASH_SORTER_AGENT_TOKEN", raising=False)
     state = {"name": "USB Camera A"}

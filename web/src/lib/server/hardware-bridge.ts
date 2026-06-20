@@ -12,6 +12,7 @@ const ALLOWED_ROUTES: BridgeRoute[] = [
   route("/api/camera/start", ["POST"]),
   route("/api/camera/stop", ["POST"]),
   route("/api/camera/stream-token", ["POST"]),
+  route("/api/live", ["GET"]),
   route("/api/training/status", ["GET"]),
   route("/api/settings", ["GET"]),
   route("/api/model/classes", ["GET"]),

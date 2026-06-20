@@ -3,12 +3,14 @@
 import { Camera, Play, RefreshCcw, Save, Square, Zap } from "lucide-react";
 
 import { DeviceList } from "@/components/primitives/device-list";
+import { DetectionOverlay } from "@/components/primitives/detection-overlay";
 import { NumberField } from "@/components/primitives/number-field";
-import type { AppConfig, RuntimeStatus } from "@/lib/agent";
+import type { AppConfig, Detection, RuntimeStatus } from "@/lib/agent";
 
 type AdminCameraPanelProps = {
   busy: boolean;
   config: AppConfig | null;
+  detections: Detection[];
   status: RuntimeStatus | null;
   stream: string;
   onChange: (patch: (cfg: AppConfig) => AppConfig) => void;
@@ -21,6 +23,7 @@ type AdminCameraPanelProps = {
 export function AdminCameraPanel({
   busy,
   config,
+  detections,
   status,
   stream,
   onChange,
@@ -64,7 +67,10 @@ export function AdminCameraPanel({
         </div>
         <div className="camera-stage">
           {status?.camera.running && stream ? (
-            <img className="camera-stream" src={stream} alt="USB camera stream" />
+            <>
+              <img className="camera-stream" src={stream} alt="USB camera stream" />
+              <DetectionOverlay detections={detections} />
+            </>
           ) : (
             <div className="black-frame">
               <Camera size={42} />
@@ -84,7 +90,17 @@ export function AdminCameraPanel({
           <DiagnosticRow label="Backend" value={formatDiagnostic(status?.camera_diagnostics?.backend)} />
           <DiagnosticRow label="Mean brightness" value={formatDiagnostic(status?.camera_diagnostics?.mean_brightness)} />
           <DiagnosticRow label="Non-black" value={formatPercent(status?.camera_diagnostics?.non_black_ratio)} />
+          <DiagnosticRow label="AI nhận diện" value={detections.length ? `${detections.length} vật thể` : "Chưa thấy vật thể"} />
         </div>
+        {detections.slice(0, 5).map((detection, index) => (
+          <div className="detection-card" key={`${detection.timestamp}-camera-${index}`}>
+            <div>
+              <strong>{detection.cls_name}</strong>
+              <small>{detection.route_label || detection.source || "YOLO"}</small>
+            </div>
+            <span>{Math.round(detection.confidence * 100)}%</span>
+          </div>
+        ))}
       </aside>
 
       <div className="panel camera-config-panel">

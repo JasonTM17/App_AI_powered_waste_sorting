@@ -3,6 +3,16 @@ from sqlalchemy import create_engine
 from app.agent.operations_store import OperationsStore, configured_operations_database_url, devices
 
 
+def test_explicit_local_store_ignores_cloud_database_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRASH_SORTER_OPERATIONS_DATABASE_URL", "postgresql://invalid.example/test")
+    store = OperationsStore(tmp_path / "operations.db", database_url="")
+    try:
+        assert store.database_url == ""
+        store.ensure_ready()
+    finally:
+        store.close()
+
+
 def test_operations_database_url_uses_installed_psycopg_driver(monkeypatch):
     monkeypatch.setenv("TRASH_SORTER_TEST_ALLOW_OPERATIONS_DATABASE_URL", "1")
     monkeypatch.setenv(

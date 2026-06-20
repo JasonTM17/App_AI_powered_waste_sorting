@@ -483,6 +483,18 @@ export type AgentSnapshot = {
   detections?: Detection[];
 };
 
+export type OperationEventsResponse = {
+  cursor: number;
+  changed: boolean;
+  events: Array<{
+    id: number;
+    event_name: string;
+    topic: string;
+    payload: Record<string, unknown>;
+    created_at: string;
+  }>;
+};
+
 export type AuthRole = "admin" | "user";
 
 export type AuthMe = {

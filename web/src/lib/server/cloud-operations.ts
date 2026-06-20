@@ -265,6 +265,65 @@ export async function cloudOperationsHealth() {
   };
 }
 
+export async function cloudOperationEvents(identity: CloudAuthIdentity, afterId: number) {
+  const cursor = Math.max(0, Math.trunc(afterId || 0));
+  const owner = identity.role === "user" ? identity.username : "";
+  if (cursor === 0) {
+    const latest = await pool().query<{ cursor: string | number | null }>(
+      `select max(event.id) as cursor
+         from public.realtime_events event
+        where ($1::text = '' or exists (
+          select 1
+            from public.bin_stations station
+           where station.station_id = coalesce(event.payload ->> 'station_id', '')
+             and station.assigned_owner_username = $1
+             and ${ACTIVE_SQL}
+        ))`,
+      [owner]
+    );
+    const latestCursor = Number(latest.rows[0]?.cursor ?? 0);
+    return { cursor: latestCursor, changed: latestCursor > 0, events: [] };
+  }
+
+  const result = await pool().query<{
+    id: string | number;
+    event_name: string;
+    topic: string;
+    payload: Record<string, unknown>;
+    created_at: Date | string;
+  }>(
+    `select event.id, event.event_name, event.topic, event.payload, event.created_at
+       from public.realtime_events event
+      where event.id > $1
+        and event.event_name in (
+          'bin_status_changed', 'alert_created', 'alert_resolved',
+          'collection_completed', 'device_issue_created'
+        )
+        and ($2::text = '' or exists (
+          select 1
+            from public.bin_stations station
+           where station.station_id = coalesce(event.payload ->> 'station_id', '')
+             and station.assigned_owner_username = $2
+             and ${ACTIVE_SQL}
+        ))
+      order by event.id asc
+      limit 50`,
+    [cursor, owner]
+  );
+  const events = result.rows.map((row) => ({
+    id: Number(row.id),
+    event_name: row.event_name,
+    topic: row.topic,
+    payload: row.payload ?? {},
+    created_at: iso(row.created_at)
+  }));
+  return {
+    cursor: events.length ? events[events.length - 1].id : cursor,
+    changed: events.length > 0,
+    events
+  };
+}
+
 export async function cloudPatchAlert(alertId: string, status: "open" | "acknowledged" | "resolved", actor: string) {
   await pool().query(
     `update public.alerts

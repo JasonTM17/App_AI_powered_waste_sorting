@@ -109,6 +109,47 @@ function Start-Agent {
   Start-Sleep -Seconds 5
 }
 
+function Start-SupabaseStateBridge {
+  $databaseUrl = $env:TRASH_SORTER_SUPABASE_DATABASE_URL
+  if ([string]::IsNullOrWhiteSpace($databaseUrl)) {
+    $databaseUrl = $env:TRASH_SORTER_AUTH_DATABASE_URL
+  }
+  if ([string]::IsNullOrWhiteSpace($databaseUrl)) {
+    Write-Host "Supabase state bridge not started: database URL is not configured."
+    return
+  }
+
+  $rootPattern = [Regex]::Escape([string]$Root)
+  $existing = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.CommandLine -and
+      $_.CommandLine -match "supabase_hardware_bridge\.py" -and
+      $_.CommandLine -match $rootPattern
+    } |
+    Select-Object -First 1
+  if ($null -ne $existing) {
+    Write-Host "Supabase state bridge already running (PID $($existing.ProcessId))."
+    return
+  }
+
+  $python = Join-Path $Root ".venv\Scripts\python.exe"
+  if (-not (Test-Path -LiteralPath $python)) {
+    $python = "python"
+  }
+  $env:TRASH_SORTER_SUPABASE_DATABASE_URL = $databaseUrl
+  $env:PYTHONPATH = [string]$Root
+  $syncOut = Join-Path $LogDir "supabase-hardware-bridge.out.log"
+  $syncErr = Join-Path $LogDir "supabase-hardware-bridge.err.log"
+  Start-Process `
+    -FilePath $python `
+    -ArgumentList @("scripts/supabase_hardware_bridge.py", "--interval", "2", "--history-limit", "50") `
+    -WorkingDirectory $Root `
+    -RedirectStandardOutput $syncOut `
+    -RedirectStandardError $syncErr `
+    -WindowStyle Hidden
+  Write-Host "Started Supabase hardware state bridge (2-second sensor sync)."
+}
+
 Ensure-BridgeSecret
 
 if (-not $NoAgentStart) {
@@ -134,6 +175,8 @@ $cloudflared = Get-Command $CloudflaredPath -ErrorAction SilentlyContinue
 if ($null -eq $cloudflared) {
   throw "cloudflared was not found. Install Cloudflare Tunnel, then rerun this script."
 }
+
+Start-SupabaseStateBridge
 
 $out = Join-Path $LogDir "public-hardware-bridge.out.log"
 $err = Join-Path $LogDir "public-hardware-bridge.err.log"
