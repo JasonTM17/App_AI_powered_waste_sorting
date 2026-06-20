@@ -42,7 +42,7 @@ export function UserRouteContent(props: UserDashboardPanelProps) {
         selectedDemoBinKey={props.selectedDemoBinKey}
         onMapInteraction={props.onUserMapInteraction}
         onRefresh={props.onRefreshOperations}
-        demoTargetEnabled={process.env.NEXT_PUBLIC_DEMO_HARDWARE_TARGET === "1"}
+        demoTargetEnabled={false}
         onSelectDemoBin={props.onSelectDemoBin}
       />
     );

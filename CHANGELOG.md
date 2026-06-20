@@ -4,6 +4,30 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · SemVer.
 
 ## [Unreleased]
 
+## [2.1.0] – 2026-06-20
+
+### Added
+- Production cloud map, scoped realtime bin fullness, collection alerts, and the
+  Admin-only hardware bridge for camera/live operations.
+- DeepSeek-backed EcoPet chat with Vietnamese quality safeguards, role-scoped
+  context, User monthly quota, and a safe Vietnamese fallback.
+- A persistent hardware-sensor assignment on the map: Admin maps one physical
+  `BIN:1`, `BIN:2`, or `BIN:3` sensor reading to one cloud bin; Users can view
+  the live result but cannot change the shared hardware mapping.
+- Detailed operator guide for the map-to-hardware sensor flow and release notes.
+
+### Changed
+- Map sensor controls now explain their purpose, state that they never reset a
+  fullness percentage, and keep the action on a separate row to avoid overlap.
+- The persisted sensor assignment is reloaded after a page refresh, so the map
+  continues to show the bin currently receiving hardware data.
+
+### Fixed
+- Removed the misleading generic “Chọn” map control and restored a visible
+  success message on the User map.
+- Hardened bridge restart/reconnection and reduced the demo-target database
+  write to one scoped upsert.
+
 ### Fixed
 - Stabilized Live labels and servo dispatch by tracking route consensus across
   class-name changes for the same physical object.

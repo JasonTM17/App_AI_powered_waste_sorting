@@ -53,6 +53,7 @@ Trash Sorter Pro là một hệ sinh thái AI phân loại rác end-to-end:
 - [Supabase/cloud readiness](docs/supabase-full-cloud-readiness.md)
 - [Checklist tích hợp phần cứng](docs/hardware_integration_checklist.md)
 - [Operations map local-first](docs/operations-map-local-first.md)
+- [Release v2.1.0: cloud map and hardware bridge](docs/releases/v2.1.0.md)
 
 Hướng dẫn chạy web app cho đồng nghiệp: [docs/huong-dan-chay-web-app.md](docs/huong-dan-chay-web-app.md).
 

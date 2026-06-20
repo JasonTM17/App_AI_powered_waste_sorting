@@ -185,12 +185,40 @@ export async function cloudBinMap(identity: CloudAuthIdentity, includeInactive =
   const childBinsByStation = await binsByStation(stationIds);
   const alertsByStation = await openAlertCountsByStation(stationIds, owner);
   const stations = stationRows.map((row) => stationDto(row, childBinsByStation.get(row.station_id) ?? [], alertsByStation));
+  const sensorTarget = await cloudDemoHardwareTarget(identity);
   return {
     generated_at: new Date().toISOString(),
     center: DEFAULT_CENTER,
     stations,
     total: stations.length,
-    seed_source: SEED_SOURCE
+    seed_source: SEED_SOURCE,
+    sensor_target: sensorTarget
+  };
+}
+
+async function cloudDemoHardwareTarget(identity: CloudAuthIdentity) {
+  if (!demoHardwareTargetEnabled()) {
+    return null;
+  }
+  const owner = identity.role === "user" ? identity.username : "";
+  const result = await pool().query<DemoHardwareTargetRow>(
+    `select owner_username, station_id, bin_id, bin_index, selected_by, selected_at, active
+       from public.demo_hardware_targets
+      where active = true
+        and ($1::text = '' or owner_username = $1)
+      order by selected_at desc
+      limit 1`,
+    [owner]
+  );
+  const target = result.rows[0];
+  if (!target) {
+    return null;
+  }
+  return {
+    station_id: target.station_id,
+    bin_id: target.bin_id,
+    bin_index: Number(target.bin_index),
+    selected_at: iso(target.selected_at)
   };
 }
 

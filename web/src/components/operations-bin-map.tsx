@@ -765,6 +765,9 @@ function BinFillRow({
           {selected ? (pending ? "Đang kích hoạt cảm biến..." : "Đang nhận dữ liệu cảm biến") : pending ? "Đang kích hoạt..." : "Gán cảm biến"}
         </button>
       ) : null}
+      {selected && !demoTargetEnabled ? (
+        <span className="popup-sensor-target-status">Cảm biến phần cứng đang đồng bộ</span>
+      ) : null}
     </div>
   );
 }

@@ -1059,7 +1059,7 @@ export function DashboardClient() {
       return;
     }
     const role = auth?.role;
-    if (role !== "admin" && role !== "user") {
+    if (role !== "admin") {
       setAgentError("Bạn cần đăng nhập để chọn thùng demo.");
       return;
     }
@@ -1076,7 +1076,7 @@ export function DashboardClient() {
     setAgentError("");
     try {
       const result = await cloudFetch<DemoHardwareTargetResponse>(
-        role === "admin" ? "/api/admin/demo-bin-target" : "/api/user/demo-bin-target",
+        "/api/admin/demo-bin-target",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1115,6 +1115,14 @@ export function DashboardClient() {
       }
     }
   }, [agentToken, auth?.role]);
+
+  useEffect(() => {
+    const map = auth?.role === "admin" ? adminBinMap : auth?.role === "user" ? userBinMap : null;
+    const target = map?.sensor_target;
+    const targetKey = target ? `${target.station_id}:${target.bin_id}` : "";
+    setSelectedDemoBinKey(targetKey);
+    selectedDemoBinKeyRef.current = targetKey;
+  }, [adminBinMap, auth?.role, userBinMap]);
 
   async function reportDeviceIssue(payload: DeviceIssueCreatePayload) {
     setBusy(true);

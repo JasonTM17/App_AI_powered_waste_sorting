@@ -623,6 +623,12 @@ export type BinMapResponse = {
   };
   stations: BinStation[];
   total: number;
+  sensor_target?: {
+    station_id: string;
+    bin_id: string;
+    bin_index: number;
+    selected_at: string;
+  } | null;
 };
 
 export type BinStationCreatePayload = {
