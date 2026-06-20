@@ -791,15 +791,21 @@ class Pipeline:
         """Split a merged detection into physical objects, labeling matches when possible."""
         recognizer = self._manual_reference_recognizer
         ref_cfg = self.cfg.manual_reference_recognition
-        if len(raw) > 1:
-            return []
         clusters = foreground_object_clusters(
             frame_bgr,
             roi=self.cfg.roi,
             min_area_ratio=self.cfg.unknown_fallback.min_area_ratio,
         )
-        source = raw[0] if raw else None
-        reference_boxes = (source.xyxy,) if source is not None else ()
+        clusters = tuple(
+            sorted(
+                clusters,
+                key=lambda box: (
+                    (box[1] + box[3]) / 2.0,
+                    (box[0] + box[2]) / 2.0,
+                ),
+            )
+        )
+        reference_boxes = tuple(detection.xyxy for detection in raw)
         decision = evaluate_foreground_multi_object_dispatch(
             frame_bgr,
             roi=self.cfg.roi,
@@ -807,7 +813,17 @@ class Pipeline:
             min_area_ratio=self.cfg.unknown_fallback.min_area_ratio,
             reference_boxes=reference_boxes,
         )
-        if decision.allowed or len(clusters) < 2:
+        if decision.allowed:
+            return []
+        if len(clusters) < 2:
+            if len(raw) > 1 and clusters:
+                raw_names = {detection.cls_name for detection in raw}
+                if (
+                    self.cfg.unknown_fallback.class_name in raw_names
+                    and len(raw_names - {self.cfg.unknown_fallback.class_name}) >= 1
+                ):
+                    return []
+                return self._ambiguous_foreground_split_markers(clusters[0])
             return []
 
         if len(self._multi_object_display_hold) == len(clusters):
@@ -833,6 +849,7 @@ class Pipeline:
 
         matches: list[Detection] = []
         for index, box in enumerate(clusters, start=1):
+            source = self._model_detection_for_cluster(raw, box) if len(raw) >= len(clusters) else None
             match = None
             if recognizer is not None and ref_cfg.enabled:
                 match = recognizer.classify(
@@ -858,6 +875,18 @@ class Pipeline:
                     )
                 )
                 continue
+            if source is not None:
+                matches.append(
+                    Detection(
+                        cls_id=source.cls_id,
+                        cls_name=source.cls_name,
+                        conf=max(source.conf, 0.50),
+                        xyxy=box,
+                        source="foreground_multi_object",
+                        operator_label=source.operator_label,
+                    )
+                )
+                continue
             matches.append(
                 Detection(
                     cls_id=-400 - index,
@@ -869,11 +898,72 @@ class Pipeline:
                 )
             )
         logger.info(
-            "foreground split loose {} box into {}",
-            source.cls_name if source is not None else "missing YOLO",
+            "foreground split multi-object frame into {}",
             [match.cls_name for match in matches],
         )
         return matches
+
+    def _ambiguous_foreground_split_markers(
+        self,
+        box: tuple[int, int, int, int],
+    ) -> list[Detection]:
+        """Show ambiguous overlapping YOLO labels as two safe unknown markers."""
+        x1, y1, x2, y2 = box
+        width = max(2, x2 - x1)
+        midpoint = x1 + width // 2
+        marker_boxes = ((x1, y1, midpoint, y2), (midpoint, y1, x2, y2))
+        return [
+            Detection(
+                cls_id=-450 - index,
+                cls_name=self.cfg.unknown_fallback.class_name,
+                conf=0.50,
+                xyxy=marker_box,
+                source="foreground_multi_object",
+                operator_label=f"Vật {index} - nhãn YOLO chồng lấn",
+            )
+            for index, marker_box in enumerate(marker_boxes, start=1)
+        ]
+
+    @staticmethod
+    def _model_detection_for_cluster(
+        detections: list[Detection],
+        cluster: tuple[int, int, int, int],
+    ) -> Detection | None:
+        cx1, cy1, cx2, cy2 = cluster
+        candidates: list[tuple[float, Detection]] = []
+        for detection in detections:
+            dx1, dy1, dx2, dy2 = detection.xyxy
+            center_x = (dx1 + dx2) / 2.0
+            center_y = (dy1 + dy2) / 2.0
+            center_inside = cx1 <= center_x <= cx2 and cy1 <= center_y <= cy2
+            overlaps = _boxes_overlap(detection.xyxy, cluster, iou_threshold=0.05)
+            if not center_inside and not overlaps:
+                continue
+            intersection = max(0, min(dx2, cx2) - max(dx1, cx1)) * max(
+                0,
+                min(dy2, cy2) - max(dy1, cy1),
+            )
+            detection_area = max(1, max(0, dx2 - dx1) * max(0, dy2 - dy1))
+            cluster_area = max(1, max(0, cx2 - cx1) * max(0, cy2 - cy1))
+            detection_coverage = intersection / detection_area
+            cluster_coverage = intersection / cluster_area
+            size_ratio = detection_area / cluster_area
+            similarly_sized = 0.35 <= size_ratio <= 2.25
+            if not (
+                center_inside
+                and similarly_sized
+                and detection_coverage >= 0.60
+                and cluster_coverage >= 0.45
+            ):
+                continue
+            score = max(
+                detection_coverage,
+                cluster_coverage,
+            ) + detection.conf * 0.05
+            candidates.append((score, detection))
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item[0])[1]
 
     def _stabilize_multi_object_display(
         self,
@@ -1174,6 +1264,13 @@ class Pipeline:
             return []
         if low_detail_empty and not tracked:
             self.dispatch_status = "waiting empty tray"
+            return detections_for_render
+        if (
+            not self._hardware_dispatch_enabled
+            and tracked
+            and all(self._is_ambiguous_foreground_marker(t.detection) for t in tracked)
+        ):
+            self.dispatch_status = "TEST OFF"
             return detections_for_render
         multi_class = evaluate_single_class_dispatch(
             tracked,
@@ -1597,6 +1694,13 @@ class Pipeline:
             return False
         threshold = max(0.30, min(float(self.cfg.model.conf_threshold), 0.45) * 0.75)
         return detection.conf < threshold
+
+    @staticmethod
+    def _is_ambiguous_foreground_marker(detection: Detection) -> bool:
+        return (
+            detection.source == "foreground_multi_object"
+            and "nhãn YOLO chồng lấn" in detection.operator_label
+        )
 
     def on_ack(self, track_id: int, command: str, status: str, rtt_ms):
         self._dispatch_guard.complete_dispatch(track_id=track_id, now=time.monotonic())

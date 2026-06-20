@@ -212,15 +212,39 @@ def _foreground_objects_clearly_separate(
 def _cluster_foreground_boxes(
     boxes: tuple[tuple[int, int, int, int], ...],
 ) -> tuple[tuple[int, int, int, int], ...]:
-    clusters: list[list[tuple[int, int, int, int]]] = []
-    for box in boxes:
-        for cluster in clusters:
-            if any(_foreground_fragments_same_object(box, item) for item in cluster):
-                cluster.append(box)
+    clusters: list[list[tuple[int, int, int, int]]] = [[box] for box in boxes]
+    changed = True
+    while changed:
+        changed = False
+        for first_index in range(len(clusters)):
+            for second_index in range(first_index + 1, len(clusters)):
+                if _foreground_clusters_same_object(
+                    clusters[first_index],
+                    clusters[second_index],
+                ):
+                    clusters[first_index].extend(clusters[second_index])
+                    del clusters[second_index]
+                    changed = True
+                    break
+            if changed:
                 break
-        else:
-            clusters.append([box])
     return tuple(_union_boxes(cluster) for cluster in clusters)
+
+
+def _foreground_clusters_same_object(
+    first: list[tuple[int, int, int, int]],
+    second: list[tuple[int, int, int, int]],
+) -> bool:
+    if any(
+        _foreground_fragments_same_object(first_box, second_box)
+        for first_box in first
+        for second_box in second
+    ):
+        return True
+    # A long object can be split into three pieces where neither endpoint
+    # overlaps the other directly. Re-check merged cluster hulls so a pen or
+    # utensil stays one object after its small middle fragments are joined.
+    return _foreground_fragments_same_object(_union_boxes(first), _union_boxes(second))
 
 
 def _foreground_fragments_same_object(

@@ -5,6 +5,7 @@ import numpy as np
 
 from app.core.events import Detection, TrackedDetection
 from app.core.multi_object_dispatch import (
+    _cluster_foreground_boxes,
     evaluate_foreground_multi_object_dispatch,
     evaluate_single_class_dispatch,
 )
@@ -325,3 +326,19 @@ def test_two_yolo_boxes_stay_blocked_even_when_foreground_merges_cleanly():
     assert decision.allowed is False
     assert decision.object_count == 2
     assert decision.reference_count == 2
+
+
+def test_spoon_and_three_piece_pen_clusters_as_two_objects():
+    boxes = (
+        (0, 45, 583, 284),
+        (410, 349, 635, 408),
+        (122, 404, 400, 459),
+        (34, 370, 151, 417),
+        (0, 27, 148, 48),
+    )
+
+    clusters = _cluster_foreground_boxes(boxes)
+
+    assert len(clusters) == 2
+    assert (0, 27, 583, 284) in clusters
+    assert (34, 349, 635, 459) in clusters
