@@ -36,6 +36,9 @@ def apply_visual_post_corrections(
 
     out: list[Detection] = []
     for detection in detections:
+        if detection.source == "foreground_multi_object":
+            out.append(detection)
+            continue
         corrected = detection
         if _can_correct_leafy_organic(detection, unknown_class_name) and _looks_like_leafy_organic(
             frame_bgr, detection.xyxy

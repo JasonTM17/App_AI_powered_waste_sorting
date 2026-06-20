@@ -334,7 +334,11 @@ class _LooseMergedObjectInfer:
 
 
 class _SpoonAndPenReferenceRecognizer:
+    def __init__(self):
+        self.calls = 0
+
     def classify(self, _frame, detection, **_kwargs):
+        self.calls += 1
         center_y = (detection.xyxy[1] + detection.xyxy[3]) / 2
         if center_y < 300:
             return SimpleNamespace(
@@ -1639,7 +1643,8 @@ def test_pipeline_collapses_many_labels_on_one_object_without_warning(tmp_path, 
     _arm_dispatch(p)
     detections = p.process_frame(frame, ts=datetime.now(UTC))
 
-    assert [item.cls_name for item in detections] == ["Pen"]
+    assert len(detections) == 2
+    assert {item.cls_name for item in detections} == {"Unknown object"}
     assert p.dispatch_status == "TEST OFF"
     assert uart.audio_tracks == []
     assert speaker.texts == []
@@ -1722,6 +1727,7 @@ def test_pipeline_blocks_two_foreground_objects_when_yolo_sees_one(tmp_path, mon
     cfg = _dispatch_ready_config(
         mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
     )
+    cfg.manual_reference_recognition.enabled = False
     uart = _StubUart()
     speaker = _StubSpeaker()
     p = Pipeline(cfg, _OnePenInfer(), uart, tmp_path / "h.db", speaker=speaker)
@@ -1733,8 +1739,9 @@ def test_pipeline_blocks_two_foreground_objects_when_yolo_sees_one(tmp_path, mon
     _arm_dispatch(p)
     detections = p.process_frame(frame, ts=datetime.now(UTC))
 
-    assert [item.cls_name for item in detections] == ["Pen"]
-    assert p.dispatch_status == "multiple waste types (2 visible objects)"
+    assert len(detections) == 2
+    assert {item.cls_name for item in detections} == {"Unknown object"}
+    assert p.dispatch_status == "multiple waste types"
     assert uart.sent == []
     assert p.history.query(limit=10) == []
     assert speaker.texts == []
@@ -1746,6 +1753,7 @@ def test_pipeline_blocks_two_objects_merged_into_one_yolo_box(tmp_path, monkeypa
     cfg = _dispatch_ready_config(
         mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
     )
+    cfg.manual_reference_recognition.enabled = False
     p = Pipeline(cfg, _WidePenInfer(), _StubUart(), tmp_path / "h.db", speaker=_StubSpeaker())
     p.set_hardware_dispatch_enabled(False)
     frame = np.full((240, 320, 3), 245, dtype=np.uint8)
@@ -1755,8 +1763,9 @@ def test_pipeline_blocks_two_objects_merged_into_one_yolo_box(tmp_path, monkeypa
     _arm_dispatch(p)
     detections = p.process_frame(frame, ts=datetime.now(UTC))
 
-    assert [item.cls_name for item in detections] == ["Pen"]
-    assert p.dispatch_status == "multiple waste types (2 visible objects)"
+    assert len(detections) == 2
+    assert {item.cls_name for item in detections} == {"Unknown object"}
+    assert p.dispatch_status == "multiple waste types"
     assert p.uart.sent == []
     p.close()
 
@@ -1770,7 +1779,8 @@ def test_pipeline_splits_loose_yolo_box_into_reviewed_spoon_and_pen(
     cfg.manual_reference_recognition.enabled = True
     uart = _StubUart()
     p = Pipeline(cfg, _LooseMergedObjectInfer(), uart, tmp_path / "h.db", speaker=_StubSpeaker())
-    p._manual_reference_recognizer = _SpoonAndPenReferenceRecognizer()
+    recognizer = _SpoonAndPenReferenceRecognizer()
+    p._manual_reference_recognizer = recognizer
     p.set_hardware_dispatch_enabled(False)
     frame = np.full((480, 640, 3), 235, dtype=np.uint8)
     cv2.line(frame, (0, 180), (300, 162), (76, 76, 78), 62)
@@ -1779,12 +1789,15 @@ def test_pipeline_splits_loose_yolo_box_into_reviewed_spoon_and_pen(
     cv2.line(frame, (70, 353), (450, 347), (95, 105, 125), 8)
 
     detections = p.process_frame(frame, ts=datetime.now(UTC))
+    repeated = p.process_frame(frame, ts=datetime.now(UTC))
 
     assert sorted((item.cls_name, item.operator_label) for item in detections) == [
         ("Iron utensils", "Muong kim loai"),
         ("Pen", "But bi"),
     ]
     assert p.dispatch_status == "multiple waste types"
+    assert {item.cls_name for item in repeated} == {"Iron utensils", "Pen"}
+    assert recognizer.calls == 2
     assert uart.sent == []
     assert p.history.query(limit=10) == []
     p.close()
@@ -1811,6 +1824,64 @@ def test_pipeline_recovers_reviewed_spoon_and_pen_when_yolo_returns_nothing(
     assert {item.cls_name for item in detections} == {"Iron utensils", "Pen"}
     assert p.dispatch_status == "multiple waste types"
     assert uart.sent == []
+    assert p.history.query(limit=10) == []
+    p.close()
+
+
+def test_pipeline_shows_two_generic_objects_without_reviewed_labels(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config()
+    cfg.manual_reference_recognition.enabled = False
+    uart = _StubUart()
+    p = Pipeline(cfg, _NoDetectionInfer(), uart, tmp_path / "h.db", speaker=_StubSpeaker())
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.full((480, 640, 3), 235, dtype=np.uint8)
+    frame[70:230, 50:270] = (45, 70, 120)
+    frame[320:390, 80:530] = (55, 55, 55)
+
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert len(detections) == 2
+    assert {item.cls_name for item in detections} == {"Unknown object"}
+    assert {item.operator_label for item in detections} == {
+        "V\u1eadt 1 - c\u1ea7n t\u00e1ch ri\u00eang",
+        "V\u1eadt 2 - c\u1ea7n t\u00e1ch ri\u00eang",
+    }
+    assert p.dispatch_status == "multiple waste types"
+    assert uart.sent == []
+    assert p.history.query(limit=10) == []
+    p.close()
+
+
+def test_pipeline_holds_two_object_display_through_short_segmentation_dropout(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config()
+    cfg.manual_reference_recognition.enabled = False
+    p = Pipeline(cfg, _NoDetectionInfer(), _StubUart(), tmp_path / "h.db")
+    p.set_hardware_dispatch_enabled(False)
+    two_objects = np.full((480, 640, 3), 235, dtype=np.uint8)
+    two_objects[70:230, 50:270] = (45, 70, 120)
+    two_objects[320:390, 80:530] = (55, 55, 55)
+    one_object = np.full((480, 640, 3), 235, dtype=np.uint8)
+    one_object[70:230, 50:270] = (45, 70, 120)
+
+    acquired = p.process_frame(two_objects, ts=datetime.now(UTC))
+    held = [
+        p.process_frame(one_object, ts=datetime.now(UTC))
+        for _ in range(p._multi_object_display_hold_limit)
+    ]
+    released = p.process_frame(one_object, ts=datetime.now(UTC))
+
+    assert len(acquired) == 2
+    assert all(len(items) == 2 for items in held)
+    assert len(released) == 1
+    assert p.uart.sent == []
     assert p.history.query(limit=10) == []
     p.close()
 

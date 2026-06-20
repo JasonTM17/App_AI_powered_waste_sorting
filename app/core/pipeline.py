@@ -185,6 +185,9 @@ class Pipeline:
         self._last_multi_class_warning_at = 0.0
         self._manual_reference_log_last_at: dict[tuple[str, str, str, str], float] = {}
         self._manual_reference_log_interval_seconds = 2.0
+        self._multi_object_display_hold: list[Detection] = []
+        self._multi_object_display_hold_frames = 0
+        self._multi_object_display_hold_limit = 8
         self._manual_reference_recognizer = self._build_manual_reference_recognizer()
         self._three_bin_classifier = self._build_three_bin_classifier()
         self._configure_dispatch_guard()
@@ -268,6 +271,8 @@ class Pipeline:
         self._track_to_row.clear()
         self._track_to_speech.clear()
         self._last_multi_class_warning_at = 0.0
+        self._multi_object_display_hold.clear()
+        self._multi_object_display_hold_frames = 0
         self.dispatch_status = self._dispatch_guard.last_reason
         self._reset_foreground_gate()
 
@@ -650,7 +655,7 @@ class Pipeline:
         height, width = frame_bgr.shape[:2] if frame_bgr.ndim >= 2 else (0, 0)
         out: list[Detection] = []
         for detection in detections:
-            if detection.source == "manual_reference":
+            if detection.source in {"manual_reference", "foreground_multi_object"}:
                 out.append(detection)
                 continue
             mode = ""
@@ -778,25 +783,22 @@ class Pipeline:
             candidates.append(detection)
         return suppress_overlapping_detections(candidates, iou_threshold=0.55)
 
-    def _manual_reference_split_candidates(
+    def _multi_object_split_candidates(
         self,
         frame_bgr: np.ndarray,
         raw: list[Detection],
     ) -> list[Detection]:
-        """Split one loose YOLO box when reviewed references identify two objects."""
+        """Split a merged detection into physical objects, labeling matches when possible."""
         recognizer = self._manual_reference_recognizer
         ref_cfg = self.cfg.manual_reference_recognition
-        if recognizer is None or not ref_cfg.enabled or len(raw) > 1:
+        if len(raw) > 1:
             return []
-        height, width = frame_bgr.shape[:2] if frame_bgr.ndim >= 2 else (0, 0)
         clusters = foreground_object_clusters(
             frame_bgr,
             roi=self.cfg.roi,
             min_area_ratio=self.cfg.unknown_fallback.min_area_ratio,
         )
         source = raw[0] if raw else None
-        if source is not None and _box_area_ratio(source.xyxy, width, height) < 0.30:
-            return []
         reference_boxes = (source.xyxy,) if source is not None else ()
         decision = evaluate_foreground_multi_object_dispatch(
             frame_bgr,
@@ -808,39 +810,97 @@ class Pipeline:
         if decision.allowed or len(clusters) < 2:
             return []
 
-        matches: list[Detection] = []
-        for box in clusters:
-            match = recognizer.classify(
-                frame_bgr,
-                Detection(
-                    cls_id=source.cls_id if source is not None else 999,
-                    cls_name=self.cfg.unknown_fallback.class_name,
-                    conf=source.conf if source is not None else 0.0,
-                    xyxy=box,
+        if len(self._multi_object_display_hold) == len(clusters):
+            ordered_hold = sorted(
+                self._multi_object_display_hold,
+                key=lambda item: (
+                    (item.xyxy[1] + item.xyxy[3]) / 2.0,
+                    (item.xyxy[0] + item.xyxy[2]) / 2.0,
                 ),
-                min_similarity=0.72,
-                min_votes=1,
             )
-            if match is None:
+            ordered_clusters = sorted(
+                clusters,
+                key=lambda box: (
+                    (box[1] + box[3]) / 2.0,
+                    (box[0] + box[2]) / 2.0,
+                ),
+            )
+            self._multi_object_display_hold_frames = self._multi_object_display_hold_limit
+            return [
+                replace(detection, xyxy=box)
+                for detection, box in zip(ordered_hold, ordered_clusters, strict=True)
+            ]
+
+        matches: list[Detection] = []
+        for index, box in enumerate(clusters, start=1):
+            match = None
+            if recognizer is not None and ref_cfg.enabled:
+                match = recognizer.classify(
+                    frame_bgr,
+                    Detection(
+                        cls_id=source.cls_id if source is not None else 999,
+                        cls_name=self.cfg.unknown_fallback.class_name,
+                        conf=source.conf if source is not None else 0.0,
+                        xyxy=box,
+                    ),
+                    min_similarity=0.72,
+                    min_votes=1,
+                )
+            if match is not None:
+                matches.append(
+                    Detection(
+                        cls_id=match.cls_id,
+                        cls_name=match.cls_name,
+                        conf=match.similarity,
+                        xyxy=box,
+                        source="manual_reference",
+                        operator_label=match.operator_label,
+                    )
+                )
                 continue
             matches.append(
                 Detection(
-                    cls_id=match.cls_id,
-                    cls_name=match.cls_name,
-                    conf=match.similarity,
+                    cls_id=-400 - index,
+                    cls_name=self.cfg.unknown_fallback.class_name,
+                    conf=0.50,
                     xyxy=box,
-                    source="manual_reference",
-                    operator_label=match.operator_label,
+                    source="foreground_multi_object",
+                    operator_label=f"Vật {index} - cần tách riêng",
                 )
             )
-        if len(matches) < 2:
-            return []
         logger.info(
-            "manual reference split loose {} box into {}",
+            "foreground split loose {} box into {}",
             source.cls_name if source is not None else "missing YOLO",
             [match.cls_name for match in matches],
         )
         return matches
+
+    def _stabilize_multi_object_display(
+        self,
+        frame_bgr: np.ndarray,
+        detections: list[Detection],
+    ) -> list[Detection]:
+        """Hold a confirmed multi-object view through short blur/merge dropouts."""
+        if len(detections) > 1:
+            self._multi_object_display_hold = list(detections)
+            self._multi_object_display_hold_frames = self._multi_object_display_hold_limit
+            return detections
+        if not self._multi_object_display_hold:
+            return detections
+        clusters = foreground_object_clusters(
+            frame_bgr,
+            roi=self.cfg.roi,
+            min_area_ratio=self.cfg.unknown_fallback.min_area_ratio,
+        )
+        if not clusters:
+            self._multi_object_display_hold.clear()
+            self._multi_object_display_hold_frames = 0
+            return detections
+        if self._multi_object_display_hold_frames <= 0:
+            self._multi_object_display_hold.clear()
+            return detections
+        self._multi_object_display_hold_frames -= 1
+        return list(self._multi_object_display_hold)
 
     def _apply_three_bin_classifier(
         self,
@@ -1004,7 +1064,7 @@ class Pipeline:
             raw = []
         else:
             raw = self._correct_ambiguous_organic(frame_bgr, raw)
-            split_candidates = self._manual_reference_split_candidates(frame_bgr, raw)
+            split_candidates = self._multi_object_split_candidates(frame_bgr, raw)
             if split_candidates:
                 raw = split_candidates
         threshold_for_detection = getattr(self.engine, "threshold_for_detection", None)
@@ -1057,6 +1117,7 @@ class Pipeline:
         filtered = self._apply_three_bin_classifier(frame_bgr, filtered)
         filtered = suppress_overlapping_detections(filtered, iou_threshold=0.55)
         filtered = collapse_duplicate_physical_detections(filtered)
+        filtered = self._stabilize_multi_object_display(frame_bgr, filtered)
         self._save_low_conf_frame(frame_bgr, raw, ts)
         tracked = self.tracker.update(filtered)
         detections_for_render = [t.detection for t in tracked]
