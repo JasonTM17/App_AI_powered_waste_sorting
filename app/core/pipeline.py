@@ -34,6 +34,7 @@ from app.core.hardware_profile import route_for_command
 from app.core.history import HistoryService
 from app.core.manual_reference_recognition import ManualReferenceRecognizer
 from app.core.multi_object_dispatch import (
+    _foreground_fragments_same_object,
     evaluate_foreground_multi_object_dispatch,
     evaluate_single_class_dispatch,
     foreground_object_clusters,
@@ -897,6 +898,7 @@ class Pipeline:
                     operator_label=f"Vật {index} - cần tách riêng",
                 )
             )
+        matches = self._merge_split_same_label_multi_object_matches(matches)
         logger.info(
             "foreground split multi-object frame into {}",
             [match.cls_name for match in matches],
@@ -964,6 +966,31 @@ class Pipeline:
         if not candidates:
             return None
         return max(candidates, key=lambda item: item[0])[1]
+
+    @staticmethod
+    def _merge_split_same_label_multi_object_matches(
+        detections: list[Detection],
+    ) -> list[Detection]:
+        clusters: list[list[Detection]] = []
+        for detection in detections:
+            for cluster in clusters:
+                same_label = all(
+                    item.cls_name == detection.cls_name
+                    and item.operator_label == detection.operator_label
+                    for item in cluster
+                )
+                if same_label and any(
+                    _foreground_fragments_same_object(detection.xyxy, item.xyxy)
+                    for item in cluster
+                ):
+                    cluster.append(detection)
+                    break
+            else:
+                clusters.append([detection])
+        return [
+            cluster[0] if len(cluster) == 1 else _merge_detection_cluster(cluster)
+            for cluster in clusters
+        ]
 
     def _stabilize_multi_object_display(
         self,
