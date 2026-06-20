@@ -54,6 +54,7 @@ Trash Sorter Pro là một hệ sinh thái AI phân loại rác end-to-end:
 - [Checklist tích hợp phần cứng](docs/hardware_integration_checklist.md)
 - [Operations map local-first](docs/operations-map-local-first.md)
 - [Release v2.1.0: cloud map and hardware bridge](docs/releases/v2.1.0.md)
+- [Release v2.1.1: Admin and User realtime](docs/releases/v2.1.1.md)
 
 Hướng dẫn chạy web app cho đồng nghiệp: [docs/huong-dan-chay-web-app.md](docs/huong-dan-chay-web-app.md).
 
@@ -249,9 +250,9 @@ Local operations map:
 - Admin APIs manage roles, devices, bin map, alerts, collection schedules, model,
   audio, and reports. User APIs are scoped to map, alerts, schedule, mark-collected,
   device issue reporting, own history, and own account.
-- Supabase bin/alert triggers write scoped `realtime_events`. User dashboard/map
-  consumes an authenticated event cursor every 1.2 seconds and refreshes after a
-  hardware fullness event; the six-second map poll remains a connection fallback.
+- Supabase bin/alert triggers write scoped `realtime_events`. Admin and User
+  dashboard maps consume authenticated event cursors every 1.2 seconds and refresh
+  after a hardware fullness event; the six-second map poll remains a connection fallback.
 
 Public Admin hardware bridge:
 

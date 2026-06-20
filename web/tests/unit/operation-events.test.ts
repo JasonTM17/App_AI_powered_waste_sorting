@@ -12,6 +12,12 @@ const USER: CloudAuthIdentity = {
   password_default: false
 };
 
+const ADMIN: CloudAuthIdentity = {
+  ...USER,
+  role: "admin",
+  username: "admin"
+};
+
 describe("operation realtime event cursor", () => {
   const query = vi.fn();
 
@@ -51,5 +57,14 @@ describe("operation realtime event cursor", () => {
     expect(result.cursor).toBe(43);
     expect(result.events[0]).toMatchObject({ event_name: "bin_status_changed" });
     expect(query.mock.calls[0][1]).toEqual([42, "nguyen-son"]);
+  });
+
+  it("lets Admin consume the unscoped operations event cursor", async () => {
+    query.mockResolvedValueOnce({ rows: [{ cursor: "57" }] });
+
+    const result = await cloudOperationEvents(ADMIN, 0);
+
+    expect(result).toEqual({ cursor: 57, changed: true, events: [] });
+    expect(query.mock.calls[0][1]).toEqual([""]);
   });
 });

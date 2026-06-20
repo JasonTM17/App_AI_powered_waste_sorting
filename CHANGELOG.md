@@ -4,6 +4,16 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · SemVer.
 
 ## [Unreleased]
 
+## [2.1.1] – 2026-06-20
+
+### Added
+- Authenticated Admin realtime event cursor and map refresh for bin fullness,
+  alerts, devices, and reports.
+
+### Fixed
+- Admin and User dashboards now receive the same hardware fullness changes
+  without requiring a manual map refresh.
+
 ## [2.1.0] – 2026-06-20
 
 ### Added

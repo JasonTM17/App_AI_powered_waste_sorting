@@ -1066,6 +1066,7 @@ const CLOUD_DASHBOARD_API_PREFIXES = [
   "/api/admin/collection-schedules",
   "/api/admin/demo-bin-target",
   "/api/admin/devices",
+  "/api/admin/operation-events",
   "/api/admin/operations/health",
   "/api/admin/roles",
   "/api/user/"

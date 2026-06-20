@@ -357,6 +357,8 @@ export function DashboardClient() {
   const userOperationsRefreshInFlightRef = useRef(false);
   const userOperationsEventCursorRef = useRef(0);
   const userOperationsInteractionUntilRef = useRef(0);
+  const adminOperationsRefreshInFlightRef = useRef(false);
+  const adminOperationsEventCursorRef = useRef(0);
   const shownBinFullAlertRanksRef = useRef<Map<string, number>>(new Map());
 
   const cameraStream = useMemo(() => {
@@ -907,6 +909,29 @@ export function DashboardClient() {
     showNewBinFullnessPopup(alertsData, "admin");
     setAdminSchedules(schedulesData);
     setOperationsHealth(healthData);
+  }
+
+  async function refreshAdminRealtimeOperations() {
+    if (adminOperationsRefreshInFlightRef.current) {
+      return;
+    }
+    adminOperationsRefreshInFlightRef.current = true;
+    try {
+      const [binMapData, alertsData, schedulesData] = await Promise.all([
+        cloudFetch<BinMapResponse>("/api/admin/bin-map", { timeoutMs: 45_000 }, agentToken),
+        cloudFetch<AlertsResponse>("/api/admin/alerts?include_resolved=false", { timeoutMs: 45_000 }, agentToken),
+        cloudFetch<CollectionSchedulesResponse>("/api/admin/collection-schedules", { timeoutMs: 45_000 }, agentToken)
+      ]);
+      setAdminBinMap(binMapData);
+      setAdminAlerts(alertsData);
+      showNewBinFullnessPopup(alertsData, "admin");
+      setAdminSchedules(schedulesData);
+    } catch {
+      // The full Admin refresh remains available from the map button if a
+      // transient realtime request fails.
+    } finally {
+      adminOperationsRefreshInFlightRef.current = false;
+    }
   }
 
   async function refreshUserOperations(options?: { background?: boolean }) {
@@ -1776,6 +1801,58 @@ export function DashboardClient() {
       window.clearInterval(eventTimer);
     };
   }, [agentToken, auth?.role, auth?.password_default, userView]);
+
+  useEffect(() => {
+    const refreshableAdminTabs: TabId[] = ["bin-map", "alerts", "devices", "reports"];
+    if (auth?.role !== "admin" || auth.password_default || !agentToken || !refreshableAdminTabs.includes(active)) {
+      return;
+    }
+    let cancelled = false;
+    let eventRequestInFlight = false;
+    adminOperationsEventCursorRef.current = 0;
+    const pollOperationEvents = async () => {
+      if (cancelled || eventRequestInFlight || document.visibilityState === "hidden") {
+        return;
+      }
+      eventRequestInFlight = true;
+      try {
+        const payload = await cloudFetch<OperationEventsResponse>(
+          `/api/admin/operation-events?after=${adminOperationsEventCursorRef.current}`,
+          { timeoutMs: 8000 },
+          agentToken
+        );
+        if (cancelled) return;
+        adminOperationsEventCursorRef.current = payload.cursor;
+        if (payload.changed) {
+          void refreshAdminRealtimeOperations();
+        }
+      } catch {
+        // The six-second fallback below keeps the Admin map current when the
+        // event cursor is briefly unavailable.
+      } finally {
+        eventRequestInFlight = false;
+      }
+    };
+    void pollOperationEvents();
+    const eventTimer = window.setInterval(() => void pollOperationEvents(), 1200);
+    return () => {
+      cancelled = true;
+      window.clearInterval(eventTimer);
+    };
+  }, [active, agentToken, auth?.role, auth?.password_default]);
+
+  useEffect(() => {
+    const refreshableAdminTabs: TabId[] = ["bin-map", "alerts", "devices", "reports"];
+    if (auth?.role !== "admin" || auth.password_default || !agentToken || !refreshableAdminTabs.includes(active)) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") {
+        void refreshAdminRealtimeOperations();
+      }
+    }, 6000);
+    return () => window.clearInterval(timer);
+  }, [active, agentToken, auth?.role, auth?.password_default]);
 
   useEffect(() => {
     const refreshableUserViews: UserView[] = ["dashboard", "map", "alerts", "schedule", "collect", "report-issue"];
