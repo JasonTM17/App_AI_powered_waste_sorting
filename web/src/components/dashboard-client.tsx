@@ -1097,14 +1097,17 @@ export function DashboardClient() {
         : targetKey;
       setSelectedDemoBinKey(persistedKey);
       selectedDemoBinKeyRef.current = persistedKey;
-      setNotice(`Đã chọn ${bin.label || `bin ${bin.bin_index}`} tại ${station.name} làm thùng demo cảm biến.`);
+      setNotice(
+        `Đã gán cảm biến BIN:${bin.bin_index} cho ${bin.label || `thùng ${bin.bin_index}`} tại ${station.name}. ` +
+          "Dữ liệu mức đầy từ phần cứng sẽ tự động đồng bộ vào thùng này; phần trăm không bị đặt lại."
+      );
     } catch (error) {
       if (controller.signal.aborted || requestId !== demoTargetRequestRef.current) {
         return;
       }
       setSelectedDemoBinKey(previousTargetKey);
       selectedDemoBinKeyRef.current = previousTargetKey;
-      setAgentError(error instanceof Error ? error.message : "Không chọn được thùng demo cảm biến");
+      setAgentError(error instanceof Error ? error.message : "Không gán được cảm biến cho thùng này");
     } finally {
       if (requestId === demoTargetRequestRef.current) {
         setPendingDemoBinKey("");

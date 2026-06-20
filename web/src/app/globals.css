@@ -1382,11 +1382,46 @@ input[type="file"] {
   gap: 8px;
 }
 
+.popup-sensor-assignment-help {
+  background: rgba(5, 150, 105, 0.08);
+  border: 1px solid rgba(5, 150, 105, 0.22);
+  border-radius: 8px;
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+}
+
+.popup-sensor-assignment-help strong {
+  color: #047857;
+  font-size: 12px;
+}
+
+.popup-sensor-assignment-help span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
 .popup-bin-row {
   align-items: center;
   display: grid;
   gap: 8px;
-  grid-template-columns: 26px minmax(0, 1fr) 42px 72px auto;
+  grid-template-columns: 26px minmax(54px, 1fr) 42px 72px;
+}
+
+.popup-demo-target-button {
+  grid-column: 2 / -1;
+  justify-self: stretch;
+  min-width: 0;
+  width: 100%;
+}
+
+.popup-demo-target-button.active:disabled {
+  background: rgba(5, 150, 105, 0.1);
+  border-color: rgba(5, 150, 105, 0.35);
+  color: #047857;
+  cursor: default;
+  opacity: 1;
 }
 
 .popup-bin-row > span,

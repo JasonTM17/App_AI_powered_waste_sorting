@@ -703,6 +703,14 @@ function StationPopupCard({
           <dd>{station.open_alert_total}</dd>
         </div>
       </dl>
+      {demoTargetEnabled ? (
+        <div className="popup-sensor-assignment-help">
+          <strong>Gán cảm biến phần cứng</strong>
+          <span>
+            Chọn thùng sẽ nhận mức đầy từ cảm biến BIN tương ứng. Thao tác này không đặt lại phần trăm hiện tại.
+          </span>
+        </div>
+      ) : null}
       <div className="popup-bin-list">
         {station.bins.map((bin) => (
           <BinFillRow
@@ -747,12 +755,14 @@ function BinFillRow({
       {demoTargetEnabled && onSelectDemoBin ? (
         <button
           aria-pressed={selected}
+          aria-label={selected ? `${bin.label || bin.command} đang nhận dữ liệu cảm biến` : `Gán cảm biến cho ${bin.label || bin.command}`}
           className={`secondary-button compact-button popup-demo-target-button ${selected ? "active" : ""}`}
-          disabled={pending}
+          disabled={pending || selected}
           onClick={onSelectDemoBin}
+          title={selected ? "Dữ liệu cảm biến phần cứng đang được đồng bộ vào thùng này" : "Gán dữ liệu cảm biến phần cứng cho thùng này"}
           type="button"
         >
-          {selected ? (pending ? "Đã chọn · Đang lưu" : "Đã chọn") : pending ? "Đang lưu" : "Chọn"}
+          {selected ? (pending ? "Đang kích hoạt cảm biến..." : "Đang nhận dữ liệu cảm biến") : pending ? "Đang kích hoạt..." : "Gán cảm biến"}
         </button>
       ) : null}
     </div>

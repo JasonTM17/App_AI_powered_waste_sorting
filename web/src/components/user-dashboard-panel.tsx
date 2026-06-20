@@ -226,7 +226,7 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
         ) : null}
 
         {agentError ? <div className="alert">Dữ liệu chưa sẵn sàng: {agentError}</div> : null}
-        {notice && !agentError && !isMapView ? <div className="success">{notice}</div> : null}
+        {notice && !agentError ? <div aria-live="polite" className="success">{notice}</div> : null}
 
         <section className="content-grid user-dashboard-grid">
           <UserRouteContent {...props} />
