@@ -139,6 +139,20 @@ def _boxes_overlap(
     return intersection / max(union, 1) >= iou_threshold or intersection / smaller >= 0.85
 
 
+def _merge_detection_cluster(detections: list[Detection]) -> Detection:
+    strongest = max(detections, key=lambda detection: detection.conf)
+    return replace(
+        strongest,
+        conf=max(detection.conf for detection in detections),
+        xyxy=(
+            min(detection.xyxy[0] for detection in detections),
+            min(detection.xyxy[1] for detection in detections),
+            max(detection.xyxy[2] for detection in detections),
+            max(detection.xyxy[3] for detection in detections),
+        ),
+    )
+
+
 def _visual_safety_operator_label(reason: str) -> str:
     return {
         "camera blurry": "Camera mờ - không phân loại",

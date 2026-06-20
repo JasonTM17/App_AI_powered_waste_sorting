@@ -1722,6 +1722,21 @@ def test_pipeline_blocks_two_objects_of_same_class_in_roi(tmp_path, monkeypatch)
     p.close()
 
 
+def test_pipeline_merges_two_fragments_of_one_pen_in_multi_object_display():
+    detections = [
+        Detection(32, "Iron utensils", 0.78, (0, 26, 582, 283)),
+        Detection(42, "Pen", 0.84, (21, 370, 416, 459)),
+        Detection(42, "Pen", 0.50, (418, 350, 623, 402)),
+    ]
+
+    merged = Pipeline._merge_split_same_label_multi_object_matches(detections)
+
+    assert [(item.cls_name, item.xyxy) for item in merged] == [
+        ("Iron utensils", (0, 26, 582, 283)),
+        ("Pen", (21, 350, 623, 459)),
+    ]
+
+
 def test_pipeline_blocks_two_foreground_objects_when_yolo_sees_one(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config(
