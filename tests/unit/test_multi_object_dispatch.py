@@ -39,6 +39,16 @@ def _spoon_and_pen_frame() -> np.ndarray:
     return frame
 
 
+def _spoon_and_split_pen_frame() -> np.ndarray:
+    frame = np.full((480, 640, 3), 235, dtype=np.uint8)
+    cv2.line(frame, (0, 180), (300, 162), (76, 76, 78), 62)
+    cv2.ellipse(frame, (405, 155), (105, 82), -5, 0, 360, (62, 62, 64), -1)
+    cv2.line(frame, (35, 384), (400, 370), (48, 58, 92), 30)
+    cv2.line(frame, (470, 344), (595, 342), (42, 42, 52), 28)
+    cv2.line(frame, (70, 370), (585, 348), (118, 126, 140), 7)
+    return frame
+
+
 def test_multi_object_dispatch_allows_one_object():
     decision = evaluate_single_class_dispatch(
         [_tracked("Pen", 1)],
@@ -103,6 +113,20 @@ def test_spoon_and_pen_stay_separate_when_one_loose_yolo_box_contains_both():
     assert decision.allowed is False
     assert decision.object_count == 2
     assert decision.reason == "multiple waste types (2 visible objects)"
+
+
+def test_spoon_and_split_pen_fragments_count_as_two_objects_not_three():
+    decision = evaluate_foreground_multi_object_dispatch(
+        _spoon_and_split_pen_frame(),
+        roi=_roi(width=640, height=480),
+        max_objects=1,
+        min_area_ratio=0.003,
+        reference_boxes=((0, 45, 610, 420),),
+    )
+
+    assert decision.allowed is False
+    assert decision.object_count == 2
+    assert decision.foreground_count >= 3
 
 
 def test_foreground_multi_object_dispatch_allows_one_visible_object():

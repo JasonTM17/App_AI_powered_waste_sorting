@@ -285,7 +285,12 @@ def _elongated_foreground_fragments_same_object(
     if horizontal_shape:
         vertical_ratio = vertical_overlap / min(first_height, second_height)
         close_gap = max(24, min(96, round(union_width * 0.16)))
-        return vertical_ratio >= 0.45 and gap_x <= close_gap
+        center_gap_y = abs(((ay1 + ay2) / 2.0) - ((by1 + by2) / 2.0))
+        center_aligned = center_gap_y <= max(first_height, second_height) * 0.85
+        return gap_x <= close_gap and (
+            vertical_ratio >= 0.45
+            or (vertical_ratio >= 0.15 and center_aligned)
+        )
 
     horizontal_ratio = horizontal_overlap / min(first_width, second_width)
     close_gap = max(24, min(96, round(union_height * 0.16)))
