@@ -4,6 +4,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · SemVer.
 
 ## [Unreleased]
 
+## [2.2.0] – 2026-06-21
+
+### Added
+- Cloud-persistent Eco-Share posts, likes, reposts, and comment threads.
+- Private account avatar upload with signed Supabase Storage URLs.
+- Separate Admin Settings, Model, Audio, and Logs experiences through the protected hardware bridge.
+
+### Fixed
+- Corrected AI confidence display from percentage double-scaling.
+- Notification actions now navigate in-app to the assigned bin map instead of reloading the login session.
+- Added password visibility controls and account-chip navigation.
 ## [2.1.1] – 2026-06-20
 
 ### Added

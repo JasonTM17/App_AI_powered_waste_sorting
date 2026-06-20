@@ -260,7 +260,8 @@ export function AdminBinMapPanel({
   onPatchStation,
   onRefresh
 }: AdminBinMapPanelProps) {
-  const [selectedId, setSelectedId] = useState("");
+  const deepLinkedStation = typeof window === "undefined" ? "" : new URL(window.location.href).searchParams.get("station") ?? "";
+  const [selectedId, setSelectedId] = useState(deepLinkedStation);
   const selected = map?.stations.find((station) => station.station_id === selectedId) ?? map?.stations[0] ?? null;
   const [form, setForm] = useState<StationFormState>(() => stationToForm(selected));
 

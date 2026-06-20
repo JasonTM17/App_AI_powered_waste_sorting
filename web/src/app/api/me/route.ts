@@ -6,6 +6,7 @@ import {
   CloudAuthConfigError,
   extractBearerToken
 } from "@/lib/server/cloud-auth";
+import { signedAvatarUrl } from "@/lib/server/cloud-avatar";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,7 @@ export async function GET(request: NextRequest) {
       account_id: identity.account_id,
       username: identity.username,
       display_name: identity.display_name,
+      avatar_url: await signedAvatarUrl(identity.avatar_path),
       token_source: "session",
       session_expires_at: identity.expires_at,
       password_default: identity.password_default

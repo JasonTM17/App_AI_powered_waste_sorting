@@ -54,7 +54,7 @@ describe("hardware bridge proxy", () => {
     });
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 
-    const response = await proxyHardwareBridge(adminRequest("/api/admin/hardware/logs", "GET"), ["logs"]);
+    const response = await proxyHardwareBridge(adminRequest("/api/admin/hardware/forbidden", "GET"), ["forbidden"]);
 
     expect(response.status).toBe(404);
     expect(fetchSpy).not.toHaveBeenCalled();

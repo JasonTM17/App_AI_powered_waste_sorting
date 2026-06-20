@@ -4,6 +4,8 @@ import { Bell, KeyRound, LogOut, MessageCircle, ShieldCheck } from "lucide-react
 
 import { accountDisplayName, accountInitials, accountToneKey } from "@/lib/account-display";
 import type { UserDashboardPanelProps } from "./user-dashboard-types";
+import { PasswordInput } from "@/components/primitives/password-input";
+import { cloudFetch } from "@/lib/agent";
 
 export function UserAccountScreen(props: UserDashboardPanelProps) {
   const quotaSource = props.chatAnswer ?? props.advisor;
@@ -28,8 +30,9 @@ export function UserAccountScreen(props: UserDashboardPanelProps) {
           <p>Quản lý đăng nhập, bảo mật và tùy chọn EcoPet của bạn.</p>
         </div>
         <div className="account-avatar generated-avatar" data-tone={tone} aria-hidden="true">
-          <span>{initials}</span>
+          {props.auth?.avatar_url ? <img alt="Ảnh đại diện" src={props.auth.avatar_url}/> : <span>{initials}</span>}
         </div>
+        <label className="avatar-upload-button">Đổi ảnh đại diện<input accept="image/jpeg,image/png,image/webp" type="file" onChange={async (event) => { const file=event.target.files?.[0]; if(!file)return; const form=new FormData(); form.append("avatar",file); const data=await cloudFetch<{avatar_url:string}>("/api/account/avatar",{method:"POST",body:form},props.imageToken); props.onAvatarChanged(data.avatar_url); }}/></label>
       </div>
 
       <div className="user-account-grid">
@@ -76,27 +79,24 @@ export function UserAccountScreen(props: UserDashboardPanelProps) {
           <div className="account-form-grid">
             <label>
               Mật khẩu hiện tại
-              <input
+              <PasswordInput ariaLabel="mật khẩu hiện tại"
                 autoComplete="current-password"
-                type="password"
                 value={props.passwordCurrent}
                 onChange={(event) => props.onPasswordCurrentChange(event.target.value)}
               />
             </label>
             <label>
               Mật khẩu mới
-              <input
+              <PasswordInput ariaLabel="mật khẩu mới"
                 autoComplete="new-password"
-                type="password"
                 value={props.passwordNew}
                 onChange={(event) => props.onPasswordNewChange(event.target.value)}
               />
             </label>
             <label>
               Nhập lại mật khẩu mới
-              <input
+              <PasswordInput ariaLabel="xác nhận mật khẩu mới"
                 autoComplete="new-password"
-                type="password"
                 value={props.passwordConfirm}
                 onChange={(event) => props.onPasswordConfirmChange(event.target.value)}
               />

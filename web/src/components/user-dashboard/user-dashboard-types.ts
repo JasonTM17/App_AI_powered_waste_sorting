@@ -68,6 +68,7 @@ export type UserDashboardPanelProps = {
   view: UserView;
   onAdvisorQuestionChange: (value: string) => void;
   onAdvisorRequest: () => void;
+  onAvatarChanged: (value: string) => void;
   onChangePassword: () => void;
   onCancelChat: () => void;
   onChatQuestionChange: (value: string) => void;

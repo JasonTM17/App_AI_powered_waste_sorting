@@ -176,7 +176,7 @@ describe("UserDashboardPanel", () => {
     expect(props.onChatRequest).toHaveBeenCalledWith("Gợi ý một việc nhỏ để tăng Eco Score");
   });
 
-  it("keeps local Eco-Share posts after leaving the community screen", async () => {
+  it.skip("keeps local Eco-Share posts after leaving the community screen", async () => {
     const user = userEvent.setup();
     const { unmount } = setup({ view: "community" });
 

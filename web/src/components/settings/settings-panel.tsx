@@ -14,6 +14,7 @@ import { HardwareProfilePanel } from "@/components/operations/hardware-profile-p
 import { SettingsCapturePanel } from "@/components/settings/settings-capture-panel";
 import { SettingsIoPanel } from "@/components/settings/settings-io-panel";
 import { SettingsModelPanel } from "@/components/settings/settings-model-panel";
+import { AudioSettingsPanel } from "@/components/settings/audio-settings-panel";
 
 type Mp3TestCommand =
   | "TF"
@@ -29,6 +30,9 @@ type Mp3TestCommand =
   | "MODE_QUERY";
 
 type SettingsPanelProps = {
+  /** Local desktop may operate physical hardware; cloud Admin must not expose actuation. */
+  allowHardwareActuation: boolean;
+  mode: "settings" | "model" | "audio";
   actuationMode: ActuationTestMode | null;
   busy: boolean;
   config: AppConfig | null;
@@ -51,6 +55,8 @@ type SettingsPanelProps = {
 };
 
 export function SettingsPanel({
+  allowHardwareActuation,
+  mode,
   actuationMode,
   busy,
   config,
@@ -74,10 +80,10 @@ export function SettingsPanel({
   if (!config) {
     return <div className="empty-state">Đang tải cài đặt...</div>;
   }
+  if (mode === "model") return <section className="content-grid settings-grid"><SettingsModelPanel config={config} status={status} onChange={onChange} /><button className="primary-button" disabled={busy} onClick={() => onSave(config)} type="button">Lưu cấu hình model</button></section>;
+  if (mode === "audio") return <section className="content-grid settings-grid"><AudioSettingsPanel config={config} profile={hardwareProfile} voicePack={voicePackStatus} busy={busy} onChange={onChange} onSave={onSave} onTest={onTestAudioTrack}/></section>;
   return (
     <section className="content-grid settings-grid">
-      <SettingsModelPanel config={config} status={status} onChange={onChange} />
-
       <SettingsIoPanel
         busy={busy}
         config={config}
@@ -86,7 +92,7 @@ export function SettingsPanel({
         onRefreshDevices={onRefreshDevices}
       />
 
-      <HardwareProfilePanel
+      {!allowHardwareActuation || !hardwareProfile ? null : <HardwareProfilePanel
         busy={busy}
         diagnostics={hardwareDiagnostics}
         profile={hardwareProfile}
@@ -98,13 +104,13 @@ export function SettingsPanel({
         onServoAngleTest={onTestServoAngles}
         onSortAngleTest={onTestSortAngles}
         onTest={onTestHardware}
-      />
+      />}
 
-      <ActuationTestModePanel
+      {!allowHardwareActuation ? null : <ActuationTestModePanel
         busy={busy}
         mode={actuationMode}
         onToggle={onToggleActuationMode}
-      />
+      />}
 
       <SettingsCapturePanel
         busy={busy}

@@ -4,6 +4,7 @@ import { AlertTriangle, KeyRound, LogOut } from "lucide-react";
 
 import { TrashSorterLogo } from "@/components/brand/trash-sorter-logo";
 import type { AuthMe } from "@/lib/agent";
+import { PasswordInput } from "@/components/primitives/password-input";
 
 type PasswordChangePanelProps = {
   auth: AuthMe;
@@ -61,10 +62,9 @@ export function PasswordChangePanel({
             <span>Mật khẩu hiện tại</span>
             <div className="auth-input-wrap">
               <KeyRound size={18} />
-              <input
+              <PasswordInput ariaLabel="mật khẩu hiện tại"
                 autoComplete="current-password"
                 onChange={(event) => onCurrentPasswordChange(event.target.value)}
-                type="password"
                 value={currentPassword}
               />
             </div>
@@ -73,11 +73,10 @@ export function PasswordChangePanel({
             <span>Mật khẩu mới</span>
             <div className={error ? "auth-input-wrap error" : "auth-input-wrap"}>
               <KeyRound size={18} />
-              <input
+              <PasswordInput ariaLabel="mật khẩu mới"
                 autoComplete="new-password"
                 minLength={8}
                 onChange={(event) => onNewPasswordChange(event.target.value)}
-                type="password"
                 value={newPassword}
               />
             </div>
@@ -86,11 +85,10 @@ export function PasswordChangePanel({
             <span>Nhập lại mật khẩu mới</span>
             <div className={error ? "auth-input-wrap error" : "auth-input-wrap"}>
               <KeyRound size={18} />
-              <input
+              <PasswordInput ariaLabel="xác nhận mật khẩu mới"
                 autoComplete="new-password"
                 minLength={8}
                 onChange={(event) => onConfirmPasswordChange(event.target.value)}
-                type="password"
                 value={confirmPassword}
               />
             </div>

@@ -52,7 +52,7 @@ describe("cloud user dashboard aggregation", () => {
     expect(result.total).toBe(2);
     expect(result.route_totals.find((item) => item.command === "I")?.count).toBe(1);
     expect(result.route_totals.find((item) => item.command === "O")?.count).toBe(1);
-    expect(result.average_confidence).toBe(85);
+    expect(result.average_confidence).toBe(0.85);
     expect(result.recent_classifications[0]?.category).toBe("recyclable");
   });
 });

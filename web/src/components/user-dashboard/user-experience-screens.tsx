@@ -504,7 +504,7 @@ function ExperienceCard({ item }: { item: { title: string; message: string; seve
     <article className={`experience-card ${item.severity ?? "info"}`}>
       <strong>{item.title}</strong>
       <p>{item.message}</p>
-      {route ? <a href={route}>{item.action_label || "Xem"}</a> : null}
+      {route ? <button className="text-link-button" type="button" onClick={() => { window.history.pushState(null, "", route); window.dispatchEvent(new PopStateEvent("popstate")); }}>{item.action_label || "Xem"}</button> : null}
     </article>
   );
 }

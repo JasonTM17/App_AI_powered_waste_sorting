@@ -55,6 +55,7 @@ Trash Sorter Pro là một hệ sinh thái AI phân loại rác end-to-end:
 - [Operations map local-first](docs/operations-map-local-first.md)
 - [Release v2.1.0: cloud map and hardware bridge](docs/releases/v2.1.0.md)
 - [Release v2.1.1: Admin and User realtime](docs/releases/v2.1.1.md)
+- [Release v2.2.0: User experience and Admin operations](docs/releases/v2.2.0.md)
 
 Hướng dẫn chạy web app cho đồng nghiệp: [docs/huong-dan-chay-web-app.md](docs/huong-dan-chay-web-app.md).
 
@@ -255,6 +256,8 @@ Local operations map:
   after a hardware fullness event; the six-second map poll remains a connection fallback.
 
 Public Admin hardware bridge:
+
+- Windows reboot/startup guide: [docs/huong-dan-chay-web-app.md](docs/huong-dan-chay-web-app.md#11-chạy-tunnel-ổn-định-sau-khi-bật-máy-windows).
 
 - Use this only for Admin camera/live/training from another device. User role remains blocked from camera, dataset capture, training, settings, model, logs, and hardware test APIs.
 - Install Cloudflare Tunnel (`cloudflared`) on the hardware machine, then run:

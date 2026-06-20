@@ -142,16 +142,22 @@ function buildUserReport(analytics: UserAnalytics, rangeDays: AnalyticsRangeDays
 }
 
 export async function cloudUserExperience(identity: CloudAuthIdentity, rangeDays: AnalyticsRangeDays): Promise<UserExperience> {
-  const analytics = await cloudUserAnalytics(identity, rangeDays);
-  return buildUserExperience(analytics, rangeDays);
+  const [analytics, binMap] = await Promise.all([cloudUserAnalytics(identity, rangeDays), cloudBinMap(identity, false)]);
+  return buildUserExperience(analytics, rangeDays, binMap);
 }
 
-function buildUserExperience(analytics: UserAnalytics, rangeDays: AnalyticsRangeDays): UserExperience {
+function buildUserExperience(analytics: UserAnalytics, rangeDays: AnalyticsRangeDays, binMap?: Awaited<ReturnType<typeof cloudBinMap>>): UserExperience {
   const generatedAt = new Date().toISOString();
   const notifications: UserExperience["notifications"] = [];
   if (!analytics.total) notifications.push({ id: "empty-history", title: "Chưa có dữ liệu trong khoảng này", message: "Hãy bỏ rác qua máy để dashboard tạo biểu đồ và lời khuyên chính xác hơn.", severity: "info", created_at: generatedAt, route: "/user/dashboard", action_label: "Xem tổng quan" });
   if (analytics.device_status.status !== "online") notifications.push({ id: "device-status", title: "Thiết bị cần kiểm tra", message: analytics.device_status.message, severity: "warning", created_at: generatedAt, route: "/user/device", action_label: "Xem thiết bị" });
   analytics.bins.filter((item) => item.percent >= 75).forEach((item) => notifications.push({ id: `bin-${item.bin_index}`, title: `Thùng ${item.bin_index} đang đầy ${item.percent}%`, message: `${item.label} cần được xử lý sớm để tránh tràn thùng.`, severity: item.percent >= 95 ? "danger" : "warning", created_at: generatedAt, route: "/user/device", action_label: "Xem thùng" }));
+  if (binMap) {
+    const nonBinNotifications = notifications.filter((item) => !item.id.startsWith("bin-"));
+    const binNotifications: UserExperience["notifications"] = [];
+    binMap.stations.forEach((station) => station.bins.filter((bin) => Number(bin.fill_percent) >= 75).forEach((bin) => binNotifications.push({ id: `bin-${station.station_id}-${bin.bin_id}`, title: `${bin.label} đang đầy ${Math.round(Number(bin.fill_percent))}%`, message: `${station.name} cần được xử lý sớm để tránh tràn thùng.`, severity: Number(bin.fill_percent) >= 95 ? "danger" : "warning", created_at: generatedAt, route: `/user/map?station=${encodeURIComponent(station.station_id)}&bin=${encodeURIComponent(bin.bin_id)}`, action_label: "Xem thùng" })));
+    notifications.splice(0, notifications.length, ...nonBinNotifications, ...binNotifications);
+  }
   const recyclable = routeCount(analytics, "I");
   const activeDays = analytics.daily.filter((item) => item.total > 0).length;
   return {
@@ -192,7 +198,7 @@ export async function cloudUserDashboardSummary(identity: CloudAuthIdentity, ran
     history,
     device,
     report: buildUserReport(analytics, rangeDays),
-    experience: buildUserExperience(analytics, rangeDays),
+    experience: buildUserExperience(analytics, rangeDays, binMap),
     bin_map: binMap,
     alerts,
     schedules
@@ -242,7 +248,7 @@ export function buildAnalytics(rows: HistoryRow[], deviceStatus: DeviceStatus, b
   const current = rows.filter((row) => inDateRange(row.ts, currentStart, now));
   const previous = rows.filter((row) => inDateRange(row.ts, previousStart, addDays(currentStart, -1)));
   const routeTotals = routeSummary(current);
-  const averageConfidence = current.length ? round1(current.reduce((sum, row) => sum + Number(row.confidence || 0) * 100, 0) / current.length) : 0;
+  const averageConfidence = current.length ? round3(current.reduce((sum, row) => sum + Number(row.confidence || 0), 0) / current.length) : 0;
   const daily = dailySeries(current, currentStart, now);
   const activeDays = daily.filter((item) => item.total > 0).length;
   const rates = Object.fromEntries(routeTotals.map((item) => [item.command, item.percent]));

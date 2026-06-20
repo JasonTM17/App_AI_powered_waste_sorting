@@ -1436,6 +1436,20 @@ input[type="file"] {
   padding: 5px 8px;
 }
 
+.password-input-control { display:flex; align-items:center; position:relative; }
+.password-input-control input { width:100%; padding-right:44px; }
+.password-input-control button { background:transparent; border:0; color:var(--muted); height:36px; position:absolute; right:4px; width:36px; }
+.account-chip { border:1px solid var(--border); cursor:pointer; text-align:left; }
+.account-avatar-frame img, .account-avatar img { border-radius:inherit; height:100%; object-fit:cover; width:100%; }
+.avatar-upload-button { background:var(--surface-muted); border:1px solid var(--border); border-radius:8px; cursor:pointer; padding:8px 12px; }
+.avatar-upload-button input { display:none; }
+.text-link-button { background:transparent; border:0; color:#047857; cursor:pointer; padding:0; text-decoration:underline; }
+.social-post-actions button.active { background:rgba(5,150,105,.12); color:#047857; }
+.social-comment-thread { border-top:1px solid var(--border); display:grid; gap:8px; margin-top:10px; padding-top:10px; }
+.social-comment-thread p { margin:0; }
+.social-comment-thread > div { display:flex; gap:8px; }
+.social-comment-thread input { flex:1; }
+
 .popup-bin-row > span,
 .popup-bin-row > strong {
   font-size: 12px;

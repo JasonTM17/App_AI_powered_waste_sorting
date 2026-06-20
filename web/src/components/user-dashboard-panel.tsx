@@ -210,7 +210,7 @@ export function UserDashboardPanel(props: UserDashboardPanelProps) {
           <div className="stitch-user-search" aria-label="Trạng thái dữ liệu người dùng">
             <span>Dữ liệu đồng bộ từ EcoSort Cloud</span>
           </div>
-          <AccountControl auth={auth} busy={busy} onLogout={props.onLogout} />
+          <AccountControl auth={auth} busy={busy} onLogout={props.onLogout} onOpenAccount={() => props.onViewChange("account")} />
         </header>
 
         {isMapView ? null : <UserHeroSummary analytics={analytics} auth={auth} busy={busy} />}

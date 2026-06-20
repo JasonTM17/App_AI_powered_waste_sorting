@@ -9,9 +9,10 @@ type AccountControlProps = {
   auth: AuthMe | null;
   busy: boolean;
   onLogout: () => void;
+  onOpenAccount?: () => void;
 };
 
-export function AccountControl({ auth, busy, onLogout }: AccountControlProps) {
+export function AccountControl({ auth, busy, onLogout, onOpenAccount }: AccountControlProps) {
   const roleLabel = auth?.role === "admin" ? "Quản trị viên" : "Tài khoản người dùng";
   const displayName = accountDisplayName(auth);
   const initials = accountInitials(displayName);
@@ -19,15 +20,15 @@ export function AccountControl({ auth, busy, onLogout }: AccountControlProps) {
 
   return (
     <div className="account-control" aria-label={`Tài khoản đăng nhập: ${displayName}`}>
-      <div className="account-chip" title={auth?.username ? `Username: ${auth.username}` : roleLabel}>
+      <button className="account-chip" onClick={onOpenAccount} title={auth?.username ? `Mở tài khoản ${auth.username}` : roleLabel} type="button">
         <span className="account-avatar-frame generated-avatar" data-tone={tone} aria-hidden="true">
-          <span>{initials}</span>
+          {auth?.avatar_url ? <img alt="" src={auth.avatar_url}/> : <span>{initials}</span>}
         </span>
         <div>
           <strong>{displayName}</strong>
           <span>{roleLabel}</span>
         </div>
-      </div>
+      </button>
       {auth?.password_default ? (
         <div className="account-warning" title="Đổi mật khẩu mặc định trước khi dùng production">
           <AlertTriangle size={15} />

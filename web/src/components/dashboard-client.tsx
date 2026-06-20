@@ -418,7 +418,7 @@ export function DashboardClient() {
     async function refreshVoicePackStatus() {
       try {
         const gender = config?.speaker.voice_gender ?? "female";
-        const statusRes = await fetchAgent<AudioVoicePackStatusResponse>(
+        const statusRes = await (USE_CLOUD_HARDWARE_BRIDGE ? fetchHardware : fetchAgent)<AudioVoicePackStatusResponse>(
           `/api/audio/voice-pack-status?gender=${encodeURIComponent(gender)}`
         );
         if (!cancelled) {
@@ -631,6 +631,7 @@ export function DashboardClient() {
         account_id: data.account_id,
         username: data.username,
         display_name: data.display_name,
+        avatar_url: data.avatar_url,
         token_source: "session",
         session_expires_at: data.expires_at,
         password_default: data.password_default
@@ -1546,7 +1547,7 @@ export function DashboardClient() {
       }
 
       if (scope === "logs") {
-        const logsRes = await scopedFetch<LogsResponse>("/api/logs?limit=120");
+        const logsRes = await (USE_CLOUD_HARDWARE_BRIDGE ? scopedHardwareFetch : scopedFetch)<LogsResponse>("/api/logs?limit=120");
         setLogs(logsRes.lines);
       }
 
@@ -1586,13 +1587,14 @@ export function DashboardClient() {
       }
 
       if (settingsLike) {
+        const settingsFetch = USE_CLOUD_HARDWARE_BRIDGE ? scopedHardwareFetch : scopedFetch;
         const [settingsRes, classesRes, commonWasteRes, hardwareRes, hardwareDiagnosticsRes, actuationRes] = await Promise.all([
-          scopedFetch<SettingsResponse>("/api/settings"),
-          scopedFetch<ModelClassesResponse>("/api/model/classes"),
-          scopedFetch<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
-          scopedFetch<HardwareProfile>("/api/hardware/profile"),
-          scopedFetch<HardwareDiagnostics>("/api/hardware/diagnostics"),
-          scopedFetch<ActuationTestMode>("/api/actuation/test-mode")
+          settingsFetch<SettingsResponse>("/api/settings"),
+          settingsFetch<ModelClassesResponse>("/api/model/classes"),
+          settingsFetch<CommonWasteCatalogResponse>("/api/common-waste/catalog"),
+          settingsFetch<HardwareProfile>("/api/hardware/profile"),
+          settingsFetch<HardwareDiagnostics>("/api/hardware/diagnostics"),
+          USE_CLOUD_HARDWARE_BRIDGE ? Promise.resolve(null) : scopedFetch<ActuationTestMode>("/api/actuation/test-mode")
         ]);
         setConfig(settingsRes.config);
         setModelClasses(classesRes.classes);
@@ -1601,7 +1603,7 @@ export function DashboardClient() {
         setHardwareDiagnostics(hardwareDiagnosticsRes);
         setActuationMode(actuationRes);
         setVoicePackStatus(
-          await scopedFetch<AudioVoicePackStatusResponse>(
+          await settingsFetch<AudioVoicePackStatusResponse>(
             `/api/audio/voice-pack-status?gender=${encodeURIComponent(settingsRes.config.speaker.voice_gender ?? "female")}`
           )
         );
@@ -2470,13 +2472,9 @@ export function DashboardClient() {
   }
 
   async function saveSettings(nextConfig: AppConfig) {
-    if (USE_CLOUD_HARDWARE_BRIDGE) {
-      setNotice("Public hardware bridge chi ho tro xem camera va training; luu settings can thao tac tren may local.");
-      return;
-    }
     setBusy(true);
     try {
-      const result = await fetchAgent<SettingsResponse>("/api/settings", {
+      const result = await (USE_CLOUD_HARDWARE_BRIDGE ? fetchHardware : fetchAgent)<SettingsResponse>("/api/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(nextConfig)
@@ -2556,7 +2554,7 @@ export function DashboardClient() {
   async function testAudioTrack(track: number) {
     setBusy(true);
     try {
-      const result = await fetchAgent<HardwareTestResponse>("/api/hardware/audio-test", {
+      const result = await (USE_CLOUD_HARDWARE_BRIDGE ? fetchHardware : fetchAgent)<HardwareTestResponse>("/api/hardware/audio-test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ track })
@@ -2572,7 +2570,7 @@ export function DashboardClient() {
   async function testMp3(command: Mp3TestCommand, value?: number) {
     setBusy(true);
     try {
-      const result = await fetchAgent<HardwareTestResponse>("/api/hardware/mp3-test", {
+      const result = await (USE_CLOUD_HARDWARE_BRIDGE ? fetchHardware : fetchAgent)<HardwareTestResponse>("/api/hardware/mp3-test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ command, value })
@@ -2743,6 +2741,7 @@ export function DashboardClient() {
         view={userView}
         onAdvisorQuestionChange={setUserAdvisorQuestion}
         onAdvisorRequest={() => void requestUserAdvisor()}
+        onAvatarChanged={(avatar_url) => setAuth((current) => current ? { ...current, avatar_url } : current)}
         onChangePassword={() => void changePassword()}
         onChatQuestionChange={setUserChatQuestion}
         onCancelChat={cancelChatRequest}
@@ -2836,7 +2835,7 @@ export function DashboardClient() {
             />
           </label>
           <div className="topbar-actions">
-            <AccountControl auth={auth} busy={busy} onLogout={() => void logoutFromAgent()} />
+            <AccountControl auth={auth} busy={busy} onLogout={() => void logoutFromAgent()} onOpenAccount={() => setActive("accounts")} />
             <TopbarStatusControls
               agentError={agentError}
               auth={auth}
@@ -3033,6 +3032,8 @@ export function DashboardClient() {
         ) : null}
         {active === "settings" || active === "model" || active === "audio" ? (
           <SettingsPanel
+            allowHardwareActuation={!USE_CLOUD_HARDWARE_BRIDGE}
+            mode={active === "audio" ? "audio" : active === "model" ? "model" : "settings"}
             actuationMode={actuationMode}
             busy={busy}
             config={config}

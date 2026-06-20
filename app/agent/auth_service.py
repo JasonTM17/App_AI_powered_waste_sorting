@@ -508,6 +508,8 @@ class AuthService:
                 conn.execute(
                     text("ALTER TABLE accounts ADD COLUMN display_name VARCHAR DEFAULT ''")
                 )
+            if "avatar_path" not in cols:
+                conn.execute(text("ALTER TABLE accounts ADD COLUMN avatar_path VARCHAR DEFAULT ''"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sessions_account ON sessions(account_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_chat_usage_account_period ON chat_usage(account_id, period)"))

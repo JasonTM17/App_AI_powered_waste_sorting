@@ -12,6 +12,7 @@ accounts = Table(
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("username", String, nullable=False, unique=True),
     Column("display_name", String, nullable=False, default=""),
+    Column("avatar_path", String, nullable=False, default=""),
     Column("role", String, nullable=False),
     Column("password_hash", String, nullable=False),
     Column("salt", String, nullable=False),

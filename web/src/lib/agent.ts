@@ -504,6 +504,7 @@ export type AuthMe = {
   account_id?: number | null;
   username?: string | null;
   display_name?: string;
+  avatar_url?: string;
   token_source: "session" | "env" | "dev" | string;
   session_expires_at?: string | null;
   password_default: boolean;
@@ -515,6 +516,7 @@ export type AuthLoginResponse = {
   account_id?: number | null;
   username: string;
   display_name?: string;
+  avatar_url?: string;
   capabilities: string[];
   expires_at: string;
   password_default: boolean;

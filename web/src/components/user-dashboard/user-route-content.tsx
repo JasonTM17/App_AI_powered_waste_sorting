@@ -14,7 +14,6 @@ import type { UserDashboardPanelProps } from "./user-dashboard-types";
 import { UserDeviceScreen } from "./user-device-screen";
 import {
   ExperienceChallenges,
-  UserCommunityScreen,
   UserEcoPetScreen,
   UserLeaderboardScreen,
   UserNotificationScreen
@@ -23,6 +22,7 @@ import { UserHistoryPanel } from "./user-history-panel";
 import { UserReportScreen } from "./user-report-screen";
 import { UserStatusPanels } from "./user-status-panels";
 import { StitchUserOverview } from "./stitch-user-overview";
+import { CloudCommunityScreen } from "./cloud-community-screen";
 
 export function UserRouteContent(props: UserDashboardPanelProps) {
   const { analytics, device, experience, history, imageToken, report, view } = props;
@@ -93,7 +93,7 @@ export function UserRouteContent(props: UserDashboardPanelProps) {
     return <UserNotificationScreen experience={experience} />;
   }
   if (view === "community") {
-    return <UserCommunityScreen experience={experience} />;
+    return <CloudCommunityScreen experience={experience} token={props.imageToken} />;
   }
   if (view === "leaderboard") {
     return <UserLeaderboardScreen experience={experience} />;

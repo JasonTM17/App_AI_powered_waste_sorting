@@ -11,6 +11,7 @@ export type CloudAuthIdentity = {
   display_name: string;
   expires_at: string;
   password_default: boolean;
+  avatar_path: string;
 };
 
 type AccountRow = QueryResultRow & {
@@ -23,6 +24,7 @@ type AccountRow = QueryResultRow & {
   iterations: number;
   is_active: number | boolean;
   password_default: number | boolean;
+  avatar_path: string | null;
 };
 
 type SessionRow = QueryResultRow & {
@@ -32,6 +34,7 @@ type SessionRow = QueryResultRow & {
   role: string;
   is_active: number | boolean;
   password_default: number | boolean;
+  avatar_path: string | null;
   expires_at: string;
   revoked_at: string | null;
 };
@@ -154,6 +157,7 @@ export async function authenticateSession(token: string) {
        accounts.role,
        accounts.is_active,
        accounts.password_default,
+       accounts.avatar_path,
        sessions.expires_at,
        sessions.revoked_at
      from sessions
@@ -258,6 +262,7 @@ function identityFromAccount(account: AccountRow, expiresAt: string): CloudAuthI
     display_name: account.display_name ?? "",
     expires_at: expiresAt,
     password_default: isTruthy(account.password_default)
+    ,avatar_path: account.avatar_path ?? ""
   };
 }
 
@@ -269,6 +274,7 @@ function identityFromSession(row: SessionRow): CloudAuthIdentity {
     display_name: row.display_name ?? "",
     expires_at: String(row.expires_at),
     password_default: isTruthy(row.password_default)
+    ,avatar_path: row.avatar_path ?? ""
   };
 }
 
