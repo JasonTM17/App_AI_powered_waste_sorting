@@ -11,7 +11,7 @@ vi.mock("@/lib/server/cloud-auth", () => ({
   CloudAuthConfigError: class CloudAuthConfigError extends Error {}
 }));
 
-import { getAdminConnectionCardPresentation, hardwareBridgePath } from "@/lib/agent";
+import { getAdminConnectionCardPresentation, hardwareBridgePath, isCloudDashboardApiPath } from "@/lib/agent";
 import { proxyHardwareBridge } from "@/lib/server/hardware-bridge";
 
 describe("hardware bridge proxy", () => {
@@ -114,6 +114,21 @@ describe("Admin connection card", () => {
 
     expect(presentation.eyebrow).toBe("Local Agent");
     expect(presentation.endpoint).toMatch(/^http:\/\/(localhost|127\.0\.0\.1):/);
+  });
+});
+
+describe("dashboard cloud routing", () => {
+  it("allows existing Admin cloud API routes while keeping local-only agent routes out of production", () => {
+    expect(isCloudDashboardApiPath("/api/admin/devices")).toBe(true);
+    expect(isCloudDashboardApiPath("/api/admin/bin-map/station-1")).toBe(true);
+    expect(isCloudDashboardApiPath("/api/admin/alerts?include_resolved=false")).toBe(true);
+    expect(isCloudDashboardApiPath("/api/admin/chat")).toBe(true);
+    expect(isCloudDashboardApiPath("/api/user/dashboard-summary?range_days=30")).toBe(true);
+
+    expect(isCloudDashboardApiPath("/api/status")).toBe(false);
+    expect(isCloudDashboardApiPath("/api/settings")).toBe(false);
+    expect(isCloudDashboardApiPath("/api/admin/accounts")).toBe(false);
+    expect(isCloudDashboardApiPath("/api/admin/knowledge")).toBe(false);
   });
 });
 

@@ -1041,6 +1041,25 @@ export const CLOUD_API_URL =
 
 export type HardwareBridgeConnectionState = "idle" | "online" | "offline";
 
+const CLOUD_DASHBOARD_API_PREFIXES = [
+  "/api/admin/alerts",
+  "/api/admin/bin-map",
+  "/api/admin/chat",
+  "/api/admin/collection-schedules",
+  "/api/admin/demo-bin-target",
+  "/api/admin/devices",
+  "/api/admin/operations/health",
+  "/api/admin/roles",
+  "/api/user/"
+];
+
+export function isCloudDashboardApiPath(path: string) {
+  const cleanPath = path.split("?")[0] ?? path;
+  return cleanPath === "/api/me" ||
+    cleanPath.startsWith("/api/auth/") ||
+    CLOUD_DASHBOARD_API_PREFIXES.some((prefix) => cleanPath.startsWith(prefix));
+}
+
 export function getAdminConnectionCardPresentation(
   useCloudHardwareBridge: boolean,
   hardwareBridgeState: HardwareBridgeConnectionState,

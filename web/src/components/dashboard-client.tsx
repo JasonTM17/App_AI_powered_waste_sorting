@@ -103,6 +103,7 @@ import {
   datasetImageUrl,
   hardwareBridgePath,
   getAdminConnectionCardPresentation,
+  isCloudDashboardApiPath,
   streamUrl,
   websocketUrl
 } from "@/lib/agent";
@@ -547,7 +548,13 @@ export function DashboardClient() {
 
   async function fetchAgent<T>(path: string, init?: AgentFetchInit) {
     if (USE_CLOUD_HARDWARE_BRIDGE) {
-      throw new AgentApiError("Chức năng local này không được gọi trực tiếp từ production.", 503);
+      if (isCloudDashboardApiPath(path)) {
+        return cloudFetch<T>(path, init, agentToken);
+      }
+      throw new AgentApiError(
+        "Chức năng này chỉ chạy qua local/hardware agent. Production không gọi trực tiếp localhost; hãy dùng tab cloud hoặc mở dashboard local trên máy phần cứng.",
+        503
+      );
     }
     try {
       return await agentFetch<T>(path, init, agentToken);
@@ -1288,7 +1295,7 @@ export function DashboardClient() {
       setAgentError("");
     } catch (error) {
       if (controller.signal.aborted || requestId !== chatRequestRef.current) return;
-      const fallback = localChatFailure("admin", error);
+      const fallback = localChatFailure("admin", error, USE_CLOUD_HARDWARE_BRIDGE);
       setAdminChat(fallback);
       setNotice(fallback.message);
     } finally {
@@ -3089,11 +3096,13 @@ function adminHistoryExportUrl(token: string) {
   return url.toString();
 }
 
-function localChatFailure(role: AuthRole, error: unknown): AiChatResponse {
+function localChatFailure(role: AuthRole, error: unknown, cloudMode = false): AiChatResponse {
   const detail = error instanceof Error ? sanitizeLocalChatError(error.message) : "";
   const base =
     role === "admin"
-      ? "Trợ lý vận hành chưa trả lời được lúc này. Kiểm tra local agent hoặc thử lại sau vài giây."
+      ? cloudMode
+        ? "Trợ lý vận hành cloud chưa trả lời được lúc này. Kiểm tra Vercel API, DeepSeek và Supabase rồi thử lại sau vài giây."
+        : "Trợ lý vận hành chưa trả lời được lúc này. Kiểm tra local agent hoặc thử lại sau vài giây."
       : "EcoPet chưa trả lời được lúc này. Bạn vẫn có thể xem biểu đồ, lịch sử rác và thử hỏi lại sau vài giây.";
   return {
     generated_at: new Date().toISOString(),
@@ -3107,10 +3116,14 @@ function localChatFailure(role: AuthRole, error: unknown): AiChatResponse {
     message: detail ? `${base}\n• Chi tiết: ${detail}` : base,
     quick_prompts:
       role === "admin"
-        ? ["Tóm tắt trạng thái local", "Kiểm tra camera", "Kiểm tra cấu hình trợ lý"]
+        ? cloudMode
+          ? ["Tóm tắt trạng thái cloud", "Kiểm tra bridge", "Kiểm tra cấu hình AI"]
+          : ["Tóm tắt trạng thái local", "Kiểm tra camera", "Kiểm tra cấu hình trợ lý"]
         : ["Xem Eco Score", "Xem lịch sử rác", "Thử hỏi lại EcoPet"],
     knowledge_used: [],
-    safety_notice: "Phản hồi local fallback, không gửi dữ liệu mới ra ngoài."
+    safety_notice: cloudMode
+      ? "Phản hồi fallback cloud, không suy đoán trạng thái phần cứng mới."
+      : "Phản hồi local fallback, không gửi dữ liệu mới ra ngoài."
   };
 }
 
