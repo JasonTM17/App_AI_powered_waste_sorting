@@ -1459,6 +1459,8 @@ class Pipeline:
         return not bool(fallback.dispatch_enabled)
 
     def _low_confidence_dispatch_blocked(self, detection: Detection) -> bool:
+        if detection.conf < float(self.cfg.dispatch_guard.min_dispatch_confidence):
+            return True
         if detection.source != "visual_correction:metal_utensil":
             return False
         threshold = max(0.30, min(float(self.cfg.model.conf_threshold), 0.45) * 0.75)

@@ -76,6 +76,13 @@ class _LowConfidencePenInfer:
         return [Detection(42, "Pen", 0.12, (20, 20, 130, 80))]
 
 
+class _LowConfidencePlasticBottleDispatchInfer:
+    class_names: ClassVar[dict[int, str]] = {1: "Plastic bottle"}
+
+    def predict(self, frame):
+        return [Detection(1, "Plastic bottle", 0.44, (20, 20, 150, 150))]
+
+
 class _SpecialistPenInfer:
     class_names: ClassVar[dict[int, str]] = {42: "Pen"}
 
@@ -384,6 +391,7 @@ def _dispatch_ready_config(*, mappings=None) -> AppConfig:
     cfg.dispatch_guard.min_stable_frames = 1
     cfg.dispatch_guard.max_dispatch_bbox_area_ratio = 1.0
     cfg.dispatch_guard.min_dispatch_sharpness = 0
+    cfg.dispatch_guard.min_dispatch_confidence = 0.0
     return cfg
 
 
@@ -1805,6 +1813,7 @@ def test_pipeline_routes_low_conf_paper_like_spoon_as_inorganic_utensil(
 def test_pipeline_blocks_low_conf_visual_metal_utensil_dispatch(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config()
+    cfg.dispatch_guard.min_dispatch_confidence = 0.55
     cfg.model.conf_threshold = 0.4
     cfg.unknown_fallback.stable_frames = 1
     uart = _StubUart()
@@ -1816,6 +1825,25 @@ def test_pipeline_blocks_low_conf_visual_metal_utensil_dispatch(tmp_path, monkey
     assert [(item.cls_name, item.source) for item in detections] == [
         ("Iron utensils", "visual_correction:metal_utensil")
     ]
+    assert p.dispatch_status == "low confidence review required"
+    assert uart.sent == []
+    assert p.history.query(limit=10) == []
+    p.close()
+
+
+def test_pipeline_blocks_low_conf_known_class_dispatch(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Plastic bottle", command="I", bin_index=3)]
+    )
+    cfg.dispatch_guard.min_dispatch_confidence = 0.55
+    uart = _StubUart()
+    p = Pipeline(cfg, _LowConfidencePlasticBottleDispatchInfer(), uart, tmp_path / "h.db")
+
+    _arm_dispatch(p)
+    detections = p.process_frame(np.full((240, 320, 3), 245, dtype=np.uint8), ts=datetime.now(UTC))
+
+    assert [(item.cls_name, item.conf) for item in detections] == [("Plastic bottle", 0.44)]
     assert p.dispatch_status == "low confidence review required"
     assert uart.sent == []
     assert p.history.query(limit=10) == []

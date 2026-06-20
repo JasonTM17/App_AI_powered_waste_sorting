@@ -53,13 +53,17 @@ from app.core.waste_categories import (
     canonical_class_name,
     category_for_bin_index,
 )
-from app.utils import serial_enum
+from app.utils import camera_enum, serial_enum
 from app.utils.camera_frame_quality import evaluate_frame_quality
 from app.utils.camera_source import backend_hint, normalize_camera_source
 from app.utils.logging import logger
 from app.utils.paths import dataset_db_path, resolve_data_path
 from app.utils.runtime_lock import RuntimeLock, RuntimeLockError, acquire_runtime_lock
-from app.utils.shared_camera_stream import SharedFramePublisher
+from app.utils.shared_camera_stream import (
+    SharedFramePublisher,
+    read_shared_frame,
+    shared_frame_diagnostics,
+)
 
 MIN_TRAINING_BBOX_AREA_RATIO = 0.01
 BIN_WARNING_THRESHOLD_PERCENT = 80
@@ -740,26 +744,28 @@ class AppController(QObject):
             self.camera_error.emit(msg)
             logger.info("camera start deferred: model still loading")
             return
-        from app.utils.camera_enum import find_readable_usb_camera, has_external_camera
-
-        configured_source = str(self.cfg.camera.source or "").strip()
-        usb_source = configured_source if configured_source and has_external_camera() else ""
+        usb_source = camera_enum.find_readable_usb_camera() or ""
         if not usb_source:
-            usb_source = find_readable_usb_camera() or ""
-        if not usb_source:
-            msg = (
-                "Chưa mở được camera USB. "
-                "Vui lòng cắm camera USB, đóng app khác đang dùng camera, rồi thử lại."
-            )
-            logger.info("camera USB unavailable, using shared stream if available: {}", msg)
-            self._start_shared_camera()
+            msg = camera_enum.camera_unavailable_message()
+            shared = read_shared_frame()
+            if shared is None:
+                logger.info(
+                    "camera USB unavailable and no fresh shared stream: {} diagnostics={}",
+                    msg,
+                    shared_frame_diagnostics(),
+                )
+                self.camera_status.emit(False)
+                self.camera_error.emit(msg)
+                return
+            logger.info("camera USB unavailable, using fresh shared stream: {}", msg)
+            self._start_shared_camera(msg)
             return
         try:
             self._camera_lock = acquire_runtime_lock("camera")
         except RuntimeLockError as e:
             msg = f"Camera USB đang được runtime khác sử dụng: {e}"
             logger.info("camera lock held by another runtime, using shared stream: {}", msg)
-            self._start_shared_camera()
+            self._start_shared_camera(msg)
             return
         if self.cfg.camera.source != usb_source:
             logger.info("auto-selected USB camera source={}", usb_source)
@@ -778,14 +784,17 @@ class AppController(QObject):
         self._camera.start()
         logger.info("camera start requested source={}", self.cfg.camera.source)
 
-    def _start_shared_camera(self) -> None:
+    def _start_shared_camera(self, reason: str = "") -> None:
         self._camera_shared_mode = True
         self._camera = SharedCameraWorker()
         self._camera.connected.connect(self.camera_status.emit)
         self._camera.error.connect(self.camera_error.emit)
         self._camera.frame_ready.connect(self._on_frame)
         self._camera.start()
-        self.camera_error.emit("Camera đang chạy qua shared stream từ runtime khác.")
+        message = "Camera đang chạy qua shared stream từ runtime khác."
+        if reason:
+            message = f"{message} USB chính chưa sẵn sàng: {reason}"
+        self.camera_error.emit(message)
         logger.info("shared camera start requested")
 
     def stop_camera(self) -> None:

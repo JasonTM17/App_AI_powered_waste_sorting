@@ -68,6 +68,7 @@ def _default_dict():
             "require_roi_for_dispatch": True,
             "max_objects_per_dispatch": 1,
             "max_classes_per_dispatch": 1,
+            "min_dispatch_confidence": 0.55,
             "max_dispatch_bbox_area_ratio": 0.82,
             "min_dispatch_sharpness": 24.0,
             "multi_class_warning_cooldown_seconds": 5.0,
@@ -114,6 +115,7 @@ def test_app_config_parses_default_dict():
     assert c.dispatch_guard.require_roi_for_dispatch is True
     assert c.dispatch_guard.max_objects_per_dispatch == 1
     assert c.dispatch_guard.max_classes_per_dispatch == 1
+    assert c.dispatch_guard.min_dispatch_confidence == 0.55
     assert c.dispatch_guard.max_dispatch_bbox_area_ratio == 0.82
     assert c.dispatch_guard.min_dispatch_sharpness == 24.0
     assert c.dispatch_guard.multi_class_warning_cooldown_seconds == 5.0
@@ -192,6 +194,7 @@ def test_default_dispatch_guard_filters_post_sort_vibration() -> None:
     assert AppConfig().dispatch_guard.empty_rearm_frames == 12
     assert AppConfig().dispatch_guard.max_dispatch_bbox_area_ratio == 0.82
     assert AppConfig().dispatch_guard.min_dispatch_sharpness == 24.0
+    assert AppConfig().dispatch_guard.min_dispatch_confidence == 0.55
 
 
 def test_load_config_hardens_legacy_dispatch_guard_against_scale_vibration(
@@ -202,6 +205,7 @@ def test_load_config_hardens_legacy_dispatch_guard_against_scale_vibration(
     data["dispatch_guard"]["min_sort_interval_seconds"] = 0.0
     data["dispatch_guard"]["busy_settle_seconds"] = 0.35
     data["dispatch_guard"]["min_stable_frames"] = 1
+    data["dispatch_guard"]["min_dispatch_confidence"] = 0.30
     data["dispatch_guard"]["empty_rearm_seconds"] = 0.8
     data["dispatch_guard"]["empty_rearm_frames"] = 3
     cfg_path.write_text(json.dumps(data), encoding="utf-8")
@@ -211,12 +215,14 @@ def test_load_config_hardens_legacy_dispatch_guard_against_scale_vibration(
     assert cfg.dispatch_guard.min_sort_interval_seconds == 2.0
     assert cfg.dispatch_guard.busy_settle_seconds == 2.0
     assert cfg.dispatch_guard.min_stable_frames == 2
+    assert cfg.dispatch_guard.min_dispatch_confidence == 0.55
     assert cfg.dispatch_guard.empty_rearm_seconds == 2.5
     assert cfg.dispatch_guard.empty_rearm_frames == 12
     raw = json.loads(cfg_path.read_text(encoding="utf-8"))
     assert raw["dispatch_guard"]["min_sort_interval_seconds"] == 2.0
     assert raw["dispatch_guard"]["busy_settle_seconds"] == 2.0
     assert raw["dispatch_guard"]["min_stable_frames"] == 2
+    assert raw["dispatch_guard"]["min_dispatch_confidence"] == 0.55
     assert raw["dispatch_guard"]["empty_rearm_seconds"] == 2.5
     assert raw["dispatch_guard"]["empty_rearm_frames"] == 12
 

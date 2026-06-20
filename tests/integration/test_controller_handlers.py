@@ -486,6 +486,33 @@ def test_start_camera_defers_until_model_ready(tmp_path):
     controller.stop()
 
 
+def test_start_camera_reports_missing_usb_without_stale_config_source(tmp_path, monkeypatch):
+    cfg = AppConfig()
+    cfg.camera.source = "1 (DSHOW)"
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    controller._pipeline = _PipelineSpy()
+    controller._inference_worker = object()  # type: ignore[assignment]
+    errors: list[str] = []
+    statuses: list[bool] = []
+    controller.camera_error.connect(errors.append)
+    controller.camera_status.connect(statuses.append)
+    monkeypatch.setattr(controller_module.camera_enum, "find_readable_usb_camera", lambda: "")
+    monkeypatch.setattr(
+        controller_module.camera_enum,
+        "camera_unavailable_message",
+        lambda: "Chưa thấy camera USB thật. DirectShow hiện chỉ thấy: OBS Virtual Camera.",
+    )
+    monkeypatch.setattr(controller_module, "read_shared_frame", lambda: None)
+    monkeypatch.setattr(controller_module, "shared_frame_diagnostics", lambda: {"exists": False})
+
+    controller.start_camera()
+
+    assert controller._camera is None
+    assert statuses == [False]
+    assert errors == ["Chưa thấy camera USB thật. DirectShow hiện chỉ thấy: OBS Virtual Camera."]
+    assert controller.cfg.camera.source == "1 (DSHOW)"
+
+
 def test_stop_camera_defers_delete_when_worker_does_not_exit(tmp_path):
     cfg = AppConfig()
     controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")

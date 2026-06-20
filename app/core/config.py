@@ -196,6 +196,7 @@ class DispatchGuardConfig(BaseModel):
     require_roi_for_dispatch: bool = True
     max_objects_per_dispatch: int = Field(1, ge=1, le=5)
     max_classes_per_dispatch: int = Field(1, ge=1, le=5)
+    min_dispatch_confidence: float = Field(0.55, ge=0.0, le=1.0)
     max_dispatch_bbox_area_ratio: float = Field(0.82, ge=0.1, le=1.0)
     min_dispatch_sharpness: float = Field(24.0, ge=0.0, le=1000.0)
     multi_class_warning_cooldown_seconds: float = Field(5.0, ge=0.0, le=120.0)
@@ -273,6 +274,7 @@ def default_dispatch_guard_config() -> DispatchGuardConfig:
         require_roi_for_dispatch=True,
         max_objects_per_dispatch=1,
         max_classes_per_dispatch=1,
+        min_dispatch_confidence=0.55,
         max_dispatch_bbox_area_ratio=0.82,
         min_dispatch_sharpness=24.0,
         multi_class_warning_cooldown_seconds=5.0,
@@ -430,6 +432,9 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     if cfg.dispatch_guard.min_stable_frames < 2:
         cfg.dispatch_guard.min_stable_frames = 2
         changed = True
+    if cfg.dispatch_guard.min_dispatch_confidence < 0.55:
+        cfg.dispatch_guard.min_dispatch_confidence = 0.55
+        changed = True
     if not cfg.manual_reference_recognition.allow_unknown_matches:
         cfg.manual_reference_recognition.allow_unknown_matches = True
         changed = True
@@ -528,6 +533,7 @@ def _missing_default_config_fields(raw: object) -> bool:
         ("speaker", "voice_gender"),
         ("unknown_fallback", "dispatch_enabled"),
         ("dispatch_guard", "max_objects_per_dispatch"),
+        ("dispatch_guard", "min_dispatch_confidence"),
         ("manual_reference_recognition", "allow_unknown_matches"),
         ("manual_reference_recognition", "correction_targets_by_yolo_class"),
         ("three_bin_classifier", "mode"),

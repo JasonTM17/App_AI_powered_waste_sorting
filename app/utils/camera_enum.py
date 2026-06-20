@@ -29,11 +29,27 @@ _BUILTIN_NAME_HINTS = (
     "hp wide vision",
     "ealsia",
 )
+_VIRTUAL_CAMERA_HINTS = (
+    "obs virtual",
+    "virtual camera",
+    "snap camera",
+    "xsplit",
+    "manycam",
+)
 
 
 def _is_builtin(name: str) -> bool:
     n = name.lower()
     return any(h in n for h in _BUILTIN_NAME_HINTS)
+
+
+def _is_virtual_camera(name: str) -> bool:
+    n = name.lower()
+    return any(h in n for h in _VIRTUAL_CAMERA_HINTS)
+
+
+def _is_external_directshow_name(name: str) -> bool:
+    return bool(name.strip()) and not _is_builtin(name) and not _is_virtual_camera(name)
 
 
 def list_pnp_cameras() -> list[dict]:
@@ -139,8 +155,6 @@ def probe_usb_cameras(max_idx: int = 9) -> list[dict[str, object]]:
         for c in list_pnp_cameras()
         if c.get("is_external")
     }
-    if not external_names:
-        return []
     dshow_names = list_directshow_cameras()
     if not dshow_names:
         return []
@@ -150,7 +164,12 @@ def probe_usb_cameras(max_idx: int = 9) -> list[dict[str, object]]:
         return []
     probes: list[dict[str, object]] = []
     for idx, name in enumerate(dshow_names[: max_idx + 1]):
-        if name.strip().lower() not in external_names:
+        normalized_name = name.strip().lower()
+        if external_names:
+            should_probe = normalized_name in external_names
+        else:
+            should_probe = _is_external_directshow_name(name)
+        if not should_probe:
             continue
         for backend_name, backend in (
             ("DSHOW", cv2.CAP_DSHOW),
@@ -181,6 +200,27 @@ def probe_usb_cameras(max_idx: int = 9) -> list[dict[str, object]]:
     return probes
 
 
+def camera_unavailable_message() -> str:
+    """Human-readable USB camera diagnostic for the desktop UI."""
+    dshow_names = list_directshow_cameras()
+    if not dshow_names:
+        return (
+            "Chưa thấy camera USB đọc được frame. Windows/DirectShow chưa liệt kê camera nào; "
+            "hãy cắm lại USB camera, đóng app khác đang dùng camera, rồi bật lại."
+        )
+    visible = ", ".join(dshow_names[:4])
+    suffix = "" if len(dshow_names) <= 4 else ", ..."
+    if not any(_is_external_directshow_name(name) for name in dshow_names):
+        return (
+            "Chưa thấy camera USB thật đọc được frame. DirectShow hiện chỉ thấy: "
+            f"{visible}{suffix}. Hãy cắm lại USB camera thật hoặc kiểm tra quyền camera."
+        )
+    return (
+        "Camera USB có xuất hiện nhưng chưa đọc được frame usable. DirectShow thấy: "
+        f"{visible}{suffix}. Hãy kiểm tra dây USB, app đang chiếm camera, ánh sáng và focus."
+    )
+
+
 def _sample_capture_quality(cap, *, frames: int = 5):
     qualities = []
     for _ in range(max(1, frames)):
@@ -192,8 +232,10 @@ def _sample_capture_quality(cap, *, frames: int = 5):
 
 
 __all__ = [
+    "camera_unavailable_message",
     "find_readable_usb_camera",
     "has_external_camera",
+    "_is_external_directshow_name",
     "list_directshow_cameras",
     "list_pnp_cameras",
     "probe_usb_cameras",
