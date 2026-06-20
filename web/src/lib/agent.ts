@@ -1039,6 +1039,35 @@ export const CLOUD_API_URL =
   configuredCloudApiUrl ||
   (process.env.NODE_ENV === "production" && typeof window !== "undefined" ? window.location.origin : AGENT_URL);
 
+export type HardwareBridgeConnectionState = "idle" | "online" | "offline";
+
+export function getAdminConnectionCardPresentation(
+  useCloudHardwareBridge: boolean,
+  hardwareBridgeState: HardwareBridgeConnectionState,
+  localAgentError = ""
+) {
+  if (useCloudHardwareBridge) {
+    return {
+      eyebrow: "Kết nối phần cứng",
+      endpoint: "Vercel Hardware Bridge",
+      statusText:
+        hardwareBridgeState === "online"
+          ? "Bridge đang hoạt động"
+          : hardwareBridgeState === "offline"
+            ? "Bridge chưa sẵn sàng"
+            : "Sẵn sàng kết nối",
+      offline: hardwareBridgeState === "offline"
+    };
+  }
+
+  return {
+    eyebrow: "Local Agent",
+    endpoint: AGENT_URL,
+    statusText: localAgentError ? "Agent offline" : "Hệ thống đang chạy",
+    offline: Boolean(localAgentError)
+  };
+}
+
 export const DEFAULT_AGENT_TOKEN = process.env.NEXT_PUBLIC_AGENT_TOKEN || "";
 const AGENT_FETCH_TIMEOUT_MS = 20000;
 

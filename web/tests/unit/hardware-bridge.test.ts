@@ -11,7 +11,7 @@ vi.mock("@/lib/server/cloud-auth", () => ({
   CloudAuthConfigError: class CloudAuthConfigError extends Error {}
 }));
 
-import { hardwareBridgePath } from "@/lib/agent";
+import { getAdminConnectionCardPresentation, hardwareBridgePath } from "@/lib/agent";
 import { proxyHardwareBridge } from "@/lib/server/hardware-bridge";
 
 describe("hardware bridge proxy", () => {
@@ -85,6 +85,35 @@ describe("hardware bridge proxy", () => {
     expect(headers.get("X-Hardware-Bridge-Secret")).toBe("bridge-secret");
     expect(payload.stream_url).toBe("https://hardware.example.com/api/camera/stream?stream_token=stream-ticket");
     expect(payload.stream_url).not.toContain("bridge-secret");
+  });
+});
+
+describe("Admin connection card", () => {
+  it("never exposes the local agent URL when production uses the cloud bridge", () => {
+    const presentation = getAdminConnectionCardPresentation(true, "idle", "local API unavailable");
+
+    expect(presentation).toEqual({
+      eyebrow: "Kết nối phần cứng",
+      endpoint: "Vercel Hardware Bridge",
+      statusText: "Sẵn sàng kết nối",
+      offline: false
+    });
+    expect(presentation.endpoint).not.toContain("localhost");
+  });
+
+  it("reports the real cloud bridge health after a connection attempt", () => {
+    expect(getAdminConnectionCardPresentation(true, "online").statusText).toBe("Bridge đang hoạt động");
+    expect(getAdminConnectionCardPresentation(true, "offline")).toMatchObject({
+      statusText: "Bridge chưa sẵn sàng",
+      offline: true
+    });
+  });
+
+  it("keeps the local endpoint visible during local development", () => {
+    const presentation = getAdminConnectionCardPresentation(false, "idle");
+
+    expect(presentation.eyebrow).toBe("Local Agent");
+    expect(presentation.endpoint).toMatch(/^http:\/\/(localhost|127\.0\.0\.1):/);
   });
 });
 

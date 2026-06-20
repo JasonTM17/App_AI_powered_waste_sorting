@@ -71,6 +71,7 @@ import {
   DeviceIssueCreatePayload,
   DeviceIssueResponse,
   HardwareDiagnostics,
+  HardwareBridgeConnectionState,
   HardwareProfile,
   HardwareTestResponse,
   HistoryRow,
@@ -101,6 +102,7 @@ import {
   cloudFetch,
   datasetImageUrl,
   hardwareBridgePath,
+  getAdminConnectionCardPresentation,
   streamUrl,
   websocketUrl
 } from "@/lib/agent";
@@ -319,6 +321,7 @@ export function DashboardClient() {
   const [modelClasses, setModelClasses] = useState<ModelClass[]>([]);
   const [commonWasteItems, setCommonWasteItems] = useState<CommonWasteItem[]>([]);
   const [agentError, setAgentError] = useState("");
+  const [hardwareBridgeState, setHardwareBridgeState] = useState<HardwareBridgeConnectionState>("idle");
   const [notice, setNotice] = useState("");
   const [binFullPopup, setBinFullPopup] = useState<BinFullPopupState | null>(null);
   const [manualFiles, setManualFiles] = useState<FileList | null>(null);
@@ -558,7 +561,14 @@ export function DashboardClient() {
 
   async function fetchHardware<T>(path: string, init?: AgentFetchInit) {
     if (USE_CLOUD_HARDWARE_BRIDGE) {
-      return cloudFetch<T>(hardwareBridgePath(path), init, agentToken);
+      try {
+        const result = await cloudFetch<T>(hardwareBridgePath(path), init, agentToken);
+        setHardwareBridgeState("online");
+        return result;
+      } catch (error) {
+        setHardwareBridgeState("offline");
+        throw error;
+      }
     }
     return fetchAgent<T>(path, init);
   }
@@ -1334,6 +1344,7 @@ export function DashboardClient() {
     setPasswordError("");
     setSessionMessage(message);
     setAgentError("");
+    setHardwareBridgeState("idle");
     setIsRestoringSession(false);
   }
 
@@ -2568,6 +2579,12 @@ export function DashboardClient() {
     );
   }
 
+  const adminConnection = getAdminConnectionCardPresentation(
+    USE_CLOUD_HARDWARE_BRIDGE,
+    hardwareBridgeState,
+    agentError
+  );
+
   return (
     <div className={`app-shell ${isSidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
@@ -2599,11 +2616,11 @@ export function DashboardClient() {
           })}
         </nav>
         <div className="agent-card">
-          <span className="eyebrow">Local Agent</span>
-          <strong>{AGENT_URL}</strong>
-          <div className={agentError ? "system-pill offline" : "system-pill"}>
+          <span className="eyebrow">{adminConnection.eyebrow}</span>
+          <strong>{adminConnection.endpoint}</strong>
+          <div className={adminConnection.offline ? "system-pill offline" : "system-pill"}>
             <span className="pulse-dot" />
-            <span>{agentError ? "Agent offline" : "Hệ thống đang chạy"}</span>
+            <span>{adminConnection.statusText}</span>
           </div>
         </div>
         <button
