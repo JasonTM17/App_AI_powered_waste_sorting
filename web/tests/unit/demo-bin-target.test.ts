@@ -19,9 +19,7 @@ describe("demo hardware target hot path", () => {
     vi.stubEnv("TRASH_SORTER_DEMO_HARDWARE_TARGET", "1");
     vi.stubEnv("TRASH_SORTER_AUTH_DATABASE_URL", "postgresql://test:test@localhost/test");
     query.mockReset();
-    query
-      .mockResolvedValueOnce({ rows: [{ assigned_owner_username: "alice", bin_id: "station-a-I", bin_index: 3 }] })
-      .mockResolvedValueOnce({ rows: [{
+    query.mockResolvedValueOnce({ rows: [{
         owner_username: "alice",
         station_id: "station-a",
         bin_id: "station-a-I",
@@ -38,7 +36,7 @@ describe("demo hardware target hot path", () => {
     delete globalThis.trashSorterCloudOperationsPool;
   });
 
-  it("uses two scoped queries and ignores a forged User owner", async () => {
+  it("uses one scoped upsert and ignores a forged User owner", async () => {
     const result = await cloudSetDemoHardwareTarget(USER, {
       station_id: "station-a",
       bin_id: "station-a-I",
@@ -47,8 +45,8 @@ describe("demo hardware target hot path", () => {
     });
 
     expect(result).toMatchObject({ ok: true, target: { owner_username: "alice", bin_index: 3 } });
-    expect(query).toHaveBeenCalledTimes(2);
+    expect(query).toHaveBeenCalledTimes(1);
     expect(query.mock.calls.map(([sql]) => String(sql)).join("\n")).not.toMatch(/create table|create index/i);
-    expect(query.mock.calls[0][1]).toEqual(["station-a", 3, "station-a-I", "alice"]);
+    expect(query.mock.calls[0][1]).toEqual(["station-a", 3, "station-a-I", "alice", "alice"]);
   });
 });

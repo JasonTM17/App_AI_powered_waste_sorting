@@ -752,7 +752,7 @@ function BinFillRow({
           onClick={onSelectDemoBin}
           type="button"
         >
-          {pending ? "Đang chọn..." : selected ? "Đã chọn" : "Chọn"}
+          {selected ? (pending ? "Đã chọn · Đang lưu" : "Đã chọn") : pending ? "Đang lưu" : "Chọn"}
         </button>
       ) : null}
     </div>

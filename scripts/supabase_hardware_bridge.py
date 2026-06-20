@@ -41,13 +41,22 @@ def main() -> int:
     if not database_url:
         raise SystemExit(f"Set {SUPABASE_DB_ENV} to the Supabase pooled/direct Postgres URL.")
 
+    retry_delay = max(1.0, args.interval)
     while True:
-        with psycopg.connect(database_url, autocommit=False, prepare_threshold=None) as conn:
-            sync_once(conn, args.operations_db, args.history_db, args.history_limit)
-            conn.commit()
-        if args.once:
-            return 0
-        time.sleep(max(1.0, args.interval))
+        try:
+            with psycopg.connect(database_url, autocommit=False, prepare_threshold=None) as conn:
+                sync_once(conn, args.operations_db, args.history_db, args.history_limit)
+                conn.commit()
+            retry_delay = max(1.0, args.interval)
+            if args.once:
+                return 0
+            time.sleep(retry_delay)
+        except psycopg.Error as exc:
+            if args.once:
+                raise
+            LOGGER.warning("Supabase sync failed; retrying in %.1fs: %s", retry_delay, exc)
+            time.sleep(retry_delay)
+            retry_delay = min(30.0, retry_delay * 2)
 
 
 def sync_once(conn: psycopg.Connection[Any], operations_db: Path, history_db: Path, history_limit: int) -> None:

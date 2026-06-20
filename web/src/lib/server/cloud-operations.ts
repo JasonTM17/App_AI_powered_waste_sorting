@@ -90,6 +90,7 @@ type BinRow = QueryResultRow & {
   status: string | null;
   active: boolean | number;
   updated_at: Date | string | null;
+  station_name?: string | null;
 };
 
 type AlertRow = QueryResultRow & {
@@ -421,33 +422,22 @@ export async function cloudSetDemoHardwareTarget(
   }
 
   const ownerFilter = identity.role === "admin" ? text(payload.owner_username) : identity.username;
-  const targetScope = await pool().query<{
-    assigned_owner_username: string;
-    bin_id: string;
-    bin_index: number | string;
-  }>(
-    `select station.assigned_owner_username, bin.bin_id, bin.bin_index
+  const result = await pool().query<DemoHardwareTargetRow>(
+    `insert into public.demo_hardware_targets
+       (owner_username, station_id, bin_id, bin_index, selected_by, selected_at, active)
+     select station.assigned_owner_username, station.station_id, bin.bin_id, bin.bin_index,
+            $5, now(), true
        from public.bin_stations station
        join public.bins bin on bin.station_id = station.station_id
       where station.station_id = $1
         and bin.bin_index = $2
         and ($3::text = '' or bin.bin_id = $3)
         and ($4::text = '' or station.assigned_owner_username = $4)
+        and nullif(station.assigned_owner_username, '') is not null
         and coalesce(station.active::text, '') not in ('0', 'false', 'f', 'no', '')
         and coalesce(bin.active::text, '') not in ('0', 'false', 'f', 'no', '')
       order by bin.bin_id
-      limit 1`,
-    [stationId, binIndex, requestedBinId, ownerFilter]
-  );
-  const scopedTarget = targetScope.rows[0];
-  if (!scopedTarget?.assigned_owner_username) {
-    return null;
-  }
-
-  const result = await pool().query<DemoHardwareTargetRow>(
-    `insert into public.demo_hardware_targets
-       (owner_username, station_id, bin_id, bin_index, selected_by, selected_at, active)
-     values ($1, $2, $3, $4, $5, now(), true)
+      limit 1
      on conflict (owner_username) do update set
        station_id = excluded.station_id,
        bin_id = excluded.bin_id,
@@ -456,10 +446,13 @@ export async function cloudSetDemoHardwareTarget(
        selected_at = excluded.selected_at,
        active = true
      returning owner_username, station_id, bin_id, bin_index, selected_by, selected_at, active`,
-    [scopedTarget.assigned_owner_username, stationId, scopedTarget.bin_id, binIndex, identity.username]
+    [stationId, binIndex, requestedBinId, ownerFilter, identity.username]
   );
 
   const target = result.rows[0];
+  if (!target) {
+    return null;
+  }
   return {
     ok: true,
     target: {
@@ -636,8 +629,10 @@ async function derivedFullnessAlerts(ownerUsername: string, stationIds: string[]
   const result = await pool().query<BinRow>(
     `select (row_number() over (order by b.station_id, b.bin_index))::int as id,
             b.bin_id, b.station_id, b.command, b.bin_index, b.label,
-            ${fillExpr} as fill_percent, b.status, b.active, b.updated_at
+            ${fillExpr} as fill_percent, b.status, b.active, b.updated_at,
+            station.name as station_name
        from public.bins b
+       join public.bin_stations station on station.station_id = b.station_id
       where ${where.join(" and ")}
       order by ${fillExpr} desc, b.updated_at desc`,
     values
@@ -655,7 +650,7 @@ async function derivedFullnessAlerts(ownerUsername: string, stationIds: string[]
       device_id: "",
       severity: danger ? "danger" : "warning",
       title: danger ? "\u0054\u0068\u00f9\u006e\u0067\u0020\u0072\u00e1\u0063\u0020\u0111\u00e3\u0020\u0111\u1ea7\u0079" : "\u0054\u0068\u00f9\u006e\u0067\u0020\u0072\u00e1\u0063\u0020\u0067\u1ea7\u006e\u0020\u0111\u1ea7\u0079",
-      message: `\u0054\u0068\u00f9\u006e\u0067 ${label} ${danger ? "\u0111\u00e3\u0020\u0111\u1ea7\u0079" : "\u0067\u1ea7\u006e\u0020\u0111\u1ea7\u0079"} ${Math.round(fill)}%.`,
+      message: `${row.station_name || row.station_id}: \u0054\u0068\u00f9\u006e\u0067 ${label} ${danger ? "\u0111\u00e3\u0020\u0111\u1ea7\u0079" : "\u0067\u1ea7\u006e\u0020\u0111\u1ea7\u0079"} ${Math.round(fill)}%.`,
       status: "open",
       source: "derived_fullness",
       created_at: iso(row.updated_at) || now,

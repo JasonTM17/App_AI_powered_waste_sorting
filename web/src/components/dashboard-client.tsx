@@ -689,10 +689,15 @@ export function DashboardClient() {
       return;
     }
     const hasDanger = freshAlerts.some((alert) => alert.severity === "danger");
+    const uniqueMessages = [...new Set(freshAlerts.map((alert) => alert.message || alert.title))];
+    const visibleMessages = uniqueMessages.slice(0, 5);
+    if (uniqueMessages.length > visibleMessages.length) {
+      visibleMessages.push(`Còn ${uniqueMessages.length - visibleMessages.length} cảnh báo khác trên bản đồ.`);
+    }
     setBinFullPopup({
       title: hasDanger ? "Có thùng rác đã đầy" : "Có thùng rác gần đầy",
       severity: hasDanger ? "danger" : "warning",
-      messages: freshAlerts.map((alert) => alert.message || alert.title)
+      messages: visibleMessages
     });
     setNotice(freshAlerts[0].message || freshAlerts[0].title);
   }
@@ -1630,6 +1635,31 @@ export function DashboardClient() {
     trainingManualClass,
     normalizedSearch
   ]);
+
+  useEffect(() => {
+    if (auth?.role !== "admin" || auth.password_default || !agentToken || !USE_CLOUD_HARDWARE_BRIDGE) {
+      return;
+    }
+    let cancelled = false;
+    let checking = false;
+    const checkBridge = async () => {
+      if (cancelled || checking || document.visibilityState === "hidden") return;
+      checking = true;
+      try {
+        await fetchHardware<RuntimeStatus>("/api/status?include_devices=false", { timeoutMs: 6000 });
+      } catch {
+        // fetchHardware updates the connection card state.
+      } finally {
+        checking = false;
+      }
+    };
+    void checkBridge();
+    const timer = window.setInterval(() => void checkBridge(), 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [agentToken, auth?.role, auth?.password_default]);
 
   useEffect(() => {
     const savedToken = window.localStorage.getItem(SESSION_TOKEN_KEY) ?? "";

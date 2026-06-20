@@ -77,6 +77,46 @@ function Test-PortBusy {
   return $null -ne (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1)
 }
 
+function Resolve-CloudflaredExecutable {
+  param([string]$Candidate)
+  $command = Get-Command $Candidate -ErrorAction SilentlyContinue
+  if ($null -ne $command) {
+    return $command.Source
+  }
+  $knownPaths = @(
+    (Join-Path ${env:ProgramFiles(x86)} "cloudflared\cloudflared.exe"),
+    (Join-Path $env:ProgramFiles "cloudflared\cloudflared.exe"),
+    (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\cloudflared.exe")
+  )
+  $installed = $knownPaths | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+  if ($installed) {
+    return $installed
+  }
+  throw "cloudflared was not found. Install Cloudflare Tunnel, then rerun this script."
+}
+
+function Save-CurrentTunnelUrl {
+  param([int]$WaitSeconds = 15)
+  $deadline = (Get-Date).AddSeconds($WaitSeconds)
+  $pattern = "https://[-a-z0-9]+\.trycloudflare\.com"
+  while ((Get-Date) -lt $deadline) {
+    if (Test-Path -LiteralPath $err) {
+      $match = Select-String -Path $err -Pattern $pattern | Select-Object -Last 1
+      if ($match) {
+        $urlMatch = [Regex]::Match($match.Line, $pattern)
+        if ($urlMatch.Success) {
+          $currentUrl = $urlMatch.Value
+          Set-Content -LiteralPath (Join-Path $LogDir "current-hardware-bridge-url.txt") -Value $currentUrl -Encoding UTF8
+          Write-Host "Hardware bridge URL: $currentUrl"
+          return
+        }
+      }
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  Write-Warning "Tunnel started but its public URL was not found within $WaitSeconds seconds. Check $err."
+}
+
 function Get-PortOwnerPid {
   param([int]$Port)
   $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -93,7 +133,14 @@ function Test-RepoAgentProcess {
     return $false
   }
   $rootPattern = [Regex]::Escape([string]$Root)
-  return $proc.CommandLine -match "scripts[/\\]run_agent\.py" -and $proc.CommandLine -match $rootPattern
+  if ($proc.CommandLine -notmatch "scripts[/\\]run_agent\.py") {
+    return $false
+  }
+  if ($proc.CommandLine -match $rootPattern -or $proc.ExecutablePath -match $rootPattern) {
+    return $true
+  }
+  $parent = Get-CimInstance Win32_Process -Filter "ProcessId = $($proc.ParentProcessId)" -ErrorAction SilentlyContinue
+  return $null -ne $parent -and $parent.CommandLine -match $rootPattern
 }
 
 function Start-Agent {
@@ -156,9 +203,7 @@ if (-not $NoAgentStart) {
   $ownerPid = Get-PortOwnerPid $AgentPort
   if ($null -ne $ownerPid) {
     if (Test-RepoAgentProcess $ownerPid) {
-      Stop-Process -Id $ownerPid -Force
-      Start-Sleep -Seconds 2
-      Start-Agent
+      Write-Host "Repo agent already running on port $AgentPort (PID $ownerPid)."
     } else {
       throw "Port $AgentPort is busy by PID $ownerPid and is not this repo agent."
     }
@@ -171,18 +216,23 @@ if (-not (Test-PortBusy $AgentPort)) {
   throw "Local agent is not listening on port $AgentPort."
 }
 
-$cloudflared = Get-Command $CloudflaredPath -ErrorAction SilentlyContinue
-if ($null -eq $cloudflared) {
-  throw "cloudflared was not found. Install Cloudflare Tunnel, then rerun this script."
-}
+$cloudflared = Resolve-CloudflaredExecutable $CloudflaredPath
 
 Start-SupabaseStateBridge
 
 $out = Join-Path $LogDir "public-hardware-bridge.out.log"
 $err = Join-Path $LogDir "public-hardware-bridge.err.log"
 $url = "http://127.0.0.1:$AgentPort"
+$existingTunnel = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+  Where-Object { $_.Name -eq "cloudflared.exe" -and $_.CommandLine -match [Regex]::Escape($url) } |
+  Select-Object -First 1
+if ($null -ne $existingTunnel) {
+  Write-Host "Cloudflare Tunnel already running (PID $($existingTunnel.ProcessId))."
+  Save-CurrentTunnelUrl -WaitSeconds 2
+  exit 0
+}
 Start-Process `
-  -FilePath $cloudflared.Source `
+  -FilePath $cloudflared `
   -ArgumentList @("tunnel", "--url", $url) `
   -WorkingDirectory $Root `
   -RedirectStandardOutput $out `
@@ -190,5 +240,5 @@ Start-Process `
   -WindowStyle Hidden
 
 Write-Host "Started Cloudflare Tunnel for $url"
-Write-Host "Watch $err for the generated https://*.trycloudflare.com URL."
+Save-CurrentTunnelUrl
 Write-Host "Set that URL as TRASH_SORTER_HARDWARE_BRIDGE_URL in Vercel production."
