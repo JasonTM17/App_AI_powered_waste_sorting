@@ -1755,7 +1755,7 @@ def test_pipeline_blocks_two_foreground_objects_when_yolo_sees_one(tmp_path, mon
     detections = p.process_frame(frame, ts=datetime.now(UTC))
 
     assert len(detections) == 2
-    assert {item.cls_name for item in detections} == {"Unknown object"}
+    assert {item.cls_name for item in detections} == {"Pen", "Unknown object"}
     assert p.dispatch_status == "multiple waste types"
     assert uart.sent == []
     assert p.history.query(limit=10) == []

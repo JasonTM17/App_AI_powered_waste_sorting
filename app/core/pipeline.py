@@ -841,7 +841,10 @@ class Pipeline:
                 return self._ambiguous_foreground_split_markers(clusters[0])
             return []
 
-        if len(self._multi_object_display_hold) == len(clusters):
+        if len(self._multi_object_display_hold) == len(clusters) and all(
+            detection.cls_name != self.cfg.unknown_fallback.class_name
+            for detection in self._multi_object_display_hold
+        ):
             ordered_hold = sorted(
                 self._multi_object_display_hold,
                 key=lambda item: (
@@ -864,7 +867,7 @@ class Pipeline:
 
         matches: list[Detection] = []
         for index, box in enumerate(clusters, start=1):
-            source = self._model_detection_for_cluster(raw, box) if len(raw) >= len(clusters) else None
+            source = self._model_detection_for_cluster(raw, box)
             match = None
             if recognizer is not None and ref_cfg.enabled:
                 match = recognizer.classify(
@@ -913,11 +916,40 @@ class Pipeline:
                 )
             )
         matches = self._merge_split_same_label_multi_object_matches(matches)
+        matches = self._preserve_known_multi_object_labels(matches)
         logger.info(
             "foreground split multi-object frame into {}",
             [match.cls_name for match in matches],
         )
         return matches
+
+    def _preserve_known_multi_object_labels(
+        self,
+        detections: list[Detection],
+    ) -> list[Detection]:
+        if len(self._multi_object_display_hold) != len(detections):
+            return detections
+        unknown_name = self.cfg.unknown_fallback.class_name
+        previous = sorted(
+            self._multi_object_display_hold,
+            key=lambda item: (
+                (item.xyxy[1] + item.xyxy[3]) / 2.0,
+                (item.xyxy[0] + item.xyxy[2]) / 2.0,
+            ),
+        )
+        current = sorted(
+            detections,
+            key=lambda item: (
+                (item.xyxy[1] + item.xyxy[3]) / 2.0,
+                (item.xyxy[0] + item.xyxy[2]) / 2.0,
+            ),
+        )
+        return [
+            replace(old, xyxy=new.xyxy)
+            if new.cls_name == unknown_name and old.cls_name != unknown_name
+            else new
+            for old, new in zip(previous, current, strict=True)
+        ]
 
     def _ambiguous_foreground_split_markers(
         self,
