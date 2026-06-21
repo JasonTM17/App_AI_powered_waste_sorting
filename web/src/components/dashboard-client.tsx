@@ -108,6 +108,7 @@ import {
   isCloudDashboardApiPath,
   openAgentBlob,
   openAuthenticatedBlob,
+  shouldUseCloudHardwareBridge,
   streamUrl,
   websocketUrl
 } from "@/lib/agent";
@@ -215,8 +216,7 @@ type DemoHardwareTargetResponse = {
 };
 
 const DATASET_LIMIT = 60;
-const USE_CLOUD_HARDWARE_BRIDGE =
-  process.env.NODE_ENV === "production" && process.env.NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE !== "0";
+const USE_CLOUD_HARDWARE_BRIDGE = shouldUseCloudHardwareBridge();
 
 const BIN_LABELS: Record<string, string> = {
   O: "Hữu cơ",

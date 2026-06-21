@@ -1092,6 +1092,11 @@ export function isCloudDashboardApiPath(path: string) {
     CLOUD_DASHBOARD_API_PREFIXES.some((prefix) => cleanPath.startsWith(prefix));
 }
 
+export function shouldUseCloudHardwareBridge(raw = process.env.NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE) {
+  const value = raw?.trim().toLowerCase() ?? "";
+  return value === "1" || value === "true" || value === "yes" || value === "on" || value === "cloud";
+}
+
 export function getAdminConnectionCardPresentation(
   useCloudHardwareBridge: boolean,
   hardwareBridgeState: HardwareBridgeConnectionState,

@@ -268,6 +268,7 @@ powershell -ExecutionPolicy Bypass -File scripts/start_public_hardware_bridge.ps
 
 - The script ensures `TRASH_SORTER_HARDWARE_BRIDGE_SECRET` exists in `.env.local`, starts the local agent if needed, and starts a tunnel to `http://127.0.0.1:8765`.
 - Copy the generated `https://*.trycloudflare.com` URL from `logs/public-hardware-bridge.err.log` into Vercel production as `TRASH_SORTER_HARDWARE_BRIDGE_URL`, and set the same secret in Vercel as `TRASH_SORTER_HARDWARE_BRIDGE_SECRET`.
+- Set `NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE=1` only for that Vercel bridge deployment. Local/operator web builds keep this unset or `0` so Admin camera/live calls the same local agent as the desktop app.
 - When the bridge secret is enabled, use the Vercel Admin UI for public camera/live/training. Direct browser calls from a local dev UI to protected agent admin APIs will be rejected unless you remove the secret and restart the agent.
 - Vercel proxies only an allowlist: status, camera start/stop/stream-token, model class catalog, camera sample capture, capture-session, learn-now status/refresh/unknown capture, and micro-train start. Settings writes, logs, model/audio config, servo/UART tests, and generic proxying are intentionally not exposed through this public bridge.
 - Admin Live/Camera reads the same local `Pipeline` detection snapshot as the desktop app. Production polls the protected hardware snapshot once per second while the camera screen is open; camera frames and AI results remain Admin-only.

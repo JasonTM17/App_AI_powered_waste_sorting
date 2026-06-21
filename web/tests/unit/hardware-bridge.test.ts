@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
 
+import { shouldUseCloudHardwareBridge } from "@/lib/agent";
 import { isAllowedHardwareBridgeRoute } from "@/lib/server/hardware-bridge";
 
 describe("hardware bridge history allowlist", () => {
+  it("uses the local agent by default unless the cloud bridge is explicitly enabled", () => {
+    expect(shouldUseCloudHardwareBridge()).toBe(false);
+    expect(shouldUseCloudHardwareBridge("")).toBe(false);
+    expect(shouldUseCloudHardwareBridge("0")).toBe(false);
+    expect(shouldUseCloudHardwareBridge("false")).toBe(false);
+    expect(shouldUseCloudHardwareBridge("1")).toBe(true);
+    expect(shouldUseCloudHardwareBridge("true")).toBe(true);
+    expect(shouldUseCloudHardwareBridge("cloud")).toBe(true);
+  });
+
   it("allows USB device refresh through the hardware bridge", () => {
     expect(isAllowedHardwareBridgeRoute("/api/devices/refresh", "POST")).toBe(true);
     expect(isAllowedHardwareBridgeRoute("/api/devices/refresh", "GET")).toBe(false);
