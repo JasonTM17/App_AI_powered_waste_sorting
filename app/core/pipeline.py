@@ -29,6 +29,7 @@ from app.core.detection_filtering import (
     is_uniform_empty_tray_artifact,
     is_verified_empty_tray,
     merge_fragmented_same_label_detections,
+    suppress_camera_edge_artifacts,
     suppress_overlapping_detections,
 )
 from app.core.dispatch_guard import DispatchGuard
@@ -1542,6 +1543,7 @@ class Pipeline:
             split_candidates = self._multi_object_split_candidates(frame_bgr, raw)
             if split_candidates:
                 raw = split_candidates
+            raw = suppress_camera_edge_artifacts(frame_bgr, raw)
         threshold_for_detection = getattr(self.engine, "threshold_for_detection", None)
         filtered = [
             detection
@@ -1589,6 +1591,7 @@ class Pipeline:
             filtered,
             unknown_class_name=self.cfg.unknown_fallback.class_name,
         )
+        filtered = suppress_camera_edge_artifacts(frame_bgr, filtered)
         filtered = self._apply_three_bin_classifier(frame_bgr, filtered)
         filtered = suppress_overlapping_detections(filtered, iou_threshold=0.55)
         filtered = collapse_duplicate_physical_detections(filtered)

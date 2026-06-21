@@ -26,6 +26,48 @@ UNKNOWN_CLASS_NAMES = {"Unknown object"}
 BOTTLE_LIKE_CLASSES = {"Plastic bottle", "Glass bottle", "Milk bottle"}
 
 
+def suppress_camera_edge_artifacts(
+    frame_bgr: np.ndarray,
+    detections: list[Detection],
+) -> list[Detection]:
+    """Drop thin frame-edge strips caused by blur, tray rails, or glare.
+
+    A real waste item needs to be fully inside the tray. A box that is only a
+    tiny strip along an image edge but spans most of the other axis is camera
+    structure, not a sortable pen, shell, or other item.
+    """
+    if frame_bgr.ndim < 2 or not detections:
+        return detections
+    height, width = frame_bgr.shape[:2]
+    if height <= 0 or width <= 0:
+        return detections
+    edge_x = max(2, round(width * 0.025))
+    edge_y = max(2, round(height * 0.025))
+    max_vertical_strip_width = max(18, round(width * 0.06))
+    max_horizontal_strip_height = max(18, round(height * 0.06))
+    out: list[Detection] = []
+    for detection in detections:
+        x1, y1, x2, y2 = _clamp_box(detection.xyxy, width, height)
+        box_width = x2 - x1
+        box_height = y2 - y1
+        touches_left_or_right = x1 <= edge_x or x2 >= width - edge_x
+        touches_top_or_bottom = y1 <= edge_y or y2 >= height - edge_y
+        vertical_strip = (
+            touches_left_or_right
+            and box_width <= max_vertical_strip_width
+            and box_height >= round(height * 0.35)
+        )
+        horizontal_strip = (
+            touches_top_or_bottom
+            and box_height <= max_horizontal_strip_height
+            and box_width >= round(width * 0.35)
+        )
+        if vertical_strip or horizontal_strip:
+            continue
+        out.append(detection)
+    return out
+
+
 def suppress_overlapping_detections(
     detections: list[Detection],
     *,
@@ -607,5 +649,6 @@ __all__ = [
     "is_uniform_empty_tray_artifact",
     "is_verified_empty_tray",
     "merge_fragmented_same_label_detections",
+    "suppress_camera_edge_artifacts",
     "suppress_overlapping_detections",
 ]

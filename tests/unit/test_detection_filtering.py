@@ -6,7 +6,9 @@ from app.core.detection_filtering import (
     find_ambiguous_organic_candidate,
     is_low_detail_empty_tray,
     is_uniform_empty_tray_artifact,
+    is_verified_empty_tray,
     merge_fragmented_same_label_detections,
+    suppress_camera_edge_artifacts,
     suppress_overlapping_detections,
 )
 from app.core.events import Detection
@@ -115,6 +117,20 @@ def test_large_scene_collapse_keeps_two_side_by_side_objects_separate():
     assert [item.cls_name for item in filtered] == ["Plastic bottle", "Aluminum can"]
 
 
+def test_large_scene_collapse_drops_false_pen_label_on_bottle_neck_at_frame_edge():
+    frame = np.full((540, 800, 3), 180, dtype=np.uint8)
+    detections = [
+        Detection(24, "Plastic bottle", 0.79, (100, 140, 460, 520)),
+        Detection(42, "Pen", 0.74, (710, 190, 800, 390)),
+    ]
+
+    filtered = collapse_single_object_scene_detections(frame, detections)
+
+    assert [(item.cls_name, item.conf, item.xyxy) for item in filtered] == [
+        ("Plastic bottle", 0.79, (100, 140, 800, 520))
+    ]
+
+
 def test_fragmented_same_label_merges_even_when_foreground_splits_one_long_object():
     parts = [
         Detection(42, "Pen", 0.72, (20, 90, 210, 128)),
@@ -215,6 +231,20 @@ def test_uniform_empty_tray_rejects_full_frame_false_positive():
     assert is_uniform_empty_tray_artifact(frame, detections)
 
 
+def test_camera_edge_strip_is_not_treated_as_a_pen():
+    frame = np.full((720, 1280, 3), 205, dtype=np.uint8)
+    detections = [Detection(42, "Pen", 0.39, (0, 0, 34, 715))]
+
+    assert suppress_camera_edge_artifacts(frame, detections) == []
+
+
+def test_camera_edge_filter_keeps_compact_object_near_the_edge():
+    frame = np.full((720, 1280, 3), 205, dtype=np.uint8)
+    detections = [Detection(42, "Pen", 0.71, (4, 260, 190, 330))]
+
+    assert suppress_camera_edge_artifacts(frame, detections) == detections
+
+
 def test_uniform_empty_tray_keeps_colored_bagasse_material():
     frame = np.full((240, 320, 3), 175, dtype=np.uint8)
     frame[70:180, 50:270] = (95, 145, 185)
@@ -243,6 +273,23 @@ def test_low_detail_frame_keeps_compact_center_object_detection():
     detections = [Detection(42, "Pen", 0.7, (90, 100, 230, 140))]
 
     assert not is_low_detail_empty_tray(frame, detections)
+
+
+def test_verified_empty_tray_ignores_dark_side_rails_and_full_frame_false_positive():
+    frame = np.full((720, 1280, 3), 210, dtype=np.uint8)
+    frame[:, :80] = 25
+    frame[:, -80:] = 25
+    detections = [Detection(18, "Paper", 0.08, (22, 0, 1250, 719))]
+
+    assert is_verified_empty_tray(frame, detections, roi_xyxy=(0, 0, 1280, 720))
+
+
+def test_verified_empty_tray_keeps_transparent_bottle_with_colored_label():
+    frame = np.full((720, 1280, 3), 210, dtype=np.uint8)
+    frame[170:650, 170:760] = (45, 55, 155)
+    detections = [Detection(24, "Plastic bottle", 0.58, (130, 120, 980, 700))]
+
+    assert not is_verified_empty_tray(frame, detections, roi_xyxy=(0, 0, 1280, 720))
 
 
 def test_ambiguous_paper_and_organic_candidate_requires_close_scores():
