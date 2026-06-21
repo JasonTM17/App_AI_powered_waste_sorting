@@ -25,6 +25,7 @@ def _clear_auth_env(monkeypatch):
         local_web.BOOTSTRAP_ADMIN_PASSWORD_ENV,
         local_web.DESKTOP_WEB_LOCAL_ENV,
         local_web.DESKTOP_WEB_URL_ENV,
+        local_web.NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE_ENV,
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -50,23 +51,39 @@ def _patch_successful_launch(monkeypatch, root: Path):
     return started
 
 
-def test_desktop_launcher_opens_production_web_by_default(tmp_path, monkeypatch):
+def test_desktop_launcher_opens_local_web_by_default(tmp_path, monkeypatch):
     _clear_auth_env(monkeypatch)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     root = _project_root(tmp_path)
     started = _patch_successful_launch(monkeypatch, root)
 
     result = local_web.ensure_local_web_stack()
 
     assert result.ok is True
-    assert result.url == local_web.PRODUCTION_WEB_URL
-    assert "production" in result.message
-    assert started == []
+    assert result.url == local_web.LOCAL_WEB_URL
+    assert started == [
+        {
+            "command": ["python", str(root / "scripts" / "run_agent.py")],
+            "cwd": root,
+            "env_overrides": {local_web.AUTH_DEV_DEFAULTS_ENV: "1"},
+        },
+        {
+            "command": ["npm", "run", "dev"],
+            "cwd": root / "web",
+            "env_overrides": {
+                local_web.NEXT_PUBLIC_AGENT_URL_ENV: local_web.AGENT_URL,
+                local_web.NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE_ENV: "0",
+            },
+        },
+    ]
 
 
-def test_desktop_launcher_allows_custom_production_web_url(tmp_path, monkeypatch):
+def test_desktop_launcher_allows_custom_production_web_url_when_explicitly_requested(tmp_path, monkeypatch):
     _clear_auth_env(monkeypatch)
     root = _project_root(tmp_path)
     started = _patch_successful_launch(monkeypatch, root)
+    monkeypatch.setenv(local_web.DESKTOP_WEB_LOCAL_ENV, "0")
     monkeypatch.setenv(local_web.DESKTOP_WEB_URL_ENV, "https://example.com/admin?tab=live")
 
     result = local_web.ensure_local_web_stack()
@@ -80,7 +97,6 @@ def test_desktop_launcher_injects_dev_auth_defaults_for_unconfigured_local_launc
     tmp_path, monkeypatch
 ):
     _clear_auth_env(monkeypatch)
-    monkeypatch.setenv(local_web.DESKTOP_WEB_LOCAL_ENV, "1")
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
     root = _project_root(tmp_path)
@@ -99,7 +115,10 @@ def test_desktop_launcher_injects_dev_auth_defaults_for_unconfigured_local_launc
         {
             "command": ["npm", "run", "dev"],
             "cwd": root / "web",
-            "env_overrides": {local_web.NEXT_PUBLIC_AGENT_URL_ENV: local_web.AGENT_URL},
+            "env_overrides": {
+                local_web.NEXT_PUBLIC_AGENT_URL_ENV: local_web.AGENT_URL,
+                local_web.NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE_ENV: "0",
+            },
         },
     ]
 

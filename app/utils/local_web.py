@@ -29,6 +29,7 @@ DATABASE_URL_ENV = "DATABASE_URL"
 BOOTSTRAP_ADMIN_USERNAME_ENV = "TRASH_SORTER_BOOTSTRAP_ADMIN_USERNAME"
 BOOTSTRAP_ADMIN_PASSWORD_ENV = "TRASH_SORTER_BOOTSTRAP_ADMIN_PASSWORD"
 NEXT_PUBLIC_AGENT_URL_ENV = "NEXT_PUBLIC_AGENT_URL"
+NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE_ENV = "NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE"
 LOCAL_ENV_FILES = (".env", ".env.local")
 AUTH_ENV_KEYS = (
     AUTH_DEV_DEFAULTS_ENV,
@@ -46,15 +47,15 @@ AUTH_STORE_KEYS = (*AUTH_STORE_URL_KEYS, AUTH_DB_ENV)
 class LocalWebResult:
     ok: bool
     message: str
-    url: str = WEB_URL
+    url: str = LOCAL_WEB_URL
 
 
 def ensure_local_web_stack() -> LocalWebResult:
-    if os.getenv(DESKTOP_WEB_LOCAL_ENV, "").strip() != "1":
+    if not _should_open_local_web():
         url = os.getenv(DESKTOP_WEB_URL_ENV, "").strip() or PRODUCTION_WEB_URL
         return LocalWebResult(
             ok=True,
-            message="Dang mo web production. Vui long dang nhap Admin.",
+            message="Dang mo web production/cloud. Camera USB va model local chi co tren web local.",
             url=url,
         )
 
@@ -82,7 +83,10 @@ def ensure_local_web_stack() -> LocalWebResult:
         _start_hidden(
             [_npm_executable(), "run", "dev"],
             cwd=web_root,
-            env_overrides={NEXT_PUBLIC_AGENT_URL_ENV: AGENT_URL},
+            env_overrides={
+                NEXT_PUBLIC_AGENT_URL_ENV: AGENT_URL,
+                NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE_ENV: "0",
+            },
         )
         logger.info("local web launcher started Next.js web")
 
@@ -90,6 +94,12 @@ def ensure_local_web_stack() -> LocalWebResult:
         return LocalWebResult(ok=False, message="Web chưa sẵn sàng ở cổng 3000.")
 
     return LocalWebResult(ok=True, message="Web dashboard đã sẵn sàng. Vui lòng đăng nhập.", url=LOCAL_WEB_URL)
+
+
+def _should_open_local_web() -> bool:
+    """Desktop opens local hardware dashboard unless cloud is explicitly requested."""
+    value = os.getenv(DESKTOP_WEB_LOCAL_ENV, "").strip().lower()
+    return value not in {"0", "false", "no", "off", "cloud", "production", "vercel"}
 
 
 def apply_local_auth_environment(*, allow_dev_defaults: bool = False) -> dict[str, str]:

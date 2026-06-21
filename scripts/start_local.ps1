@@ -96,6 +96,17 @@ function Import-LocalEnvFile {
 Import-LocalEnvFile (Join-Path $Root ".env")
 Import-LocalEnvFile (Join-Path $Root ".env.local")
 
+$CloudHardwareBridgeMode = "$env:NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE".Trim().ToLowerInvariant()
+$UseCloudHardwareBridge = @("1", "true", "yes", "on", "cloud") -contains $CloudHardwareBridgeMode
+if (-not $UseCloudHardwareBridge -and -not [string]::IsNullOrWhiteSpace($env:TRASH_SORTER_HARDWARE_BRIDGE_SECRET)) {
+  Remove-Item Env:TRASH_SORTER_HARDWARE_BRIDGE_SECRET -ErrorAction SilentlyContinue
+  Write-Host "Local direct agent mode: ignored TRASH_SORTER_HARDWARE_BRIDGE_SECRET from env files."
+}
+if (-not $UseCloudHardwareBridge) {
+  $env:NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE = "0"
+  $env:NEXT_PUBLIC_AGENT_URL = "http://127.0.0.1:$AgentPort"
+}
+
 $AuthExplicitlyConfigured = -not [string]::IsNullOrWhiteSpace($env:TRASH_SORTER_AUTH_DATABASE_URL) -or
   -not [string]::IsNullOrWhiteSpace($env:DATABASE_URL) -or
   -not [string]::IsNullOrWhiteSpace($env:TRASH_SORTER_AUTH_DB) -or
