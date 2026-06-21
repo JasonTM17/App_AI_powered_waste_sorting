@@ -27,6 +27,7 @@ from app.core.detection_filtering import (
     find_ambiguous_organic_candidate,
     is_low_detail_empty_tray,
     is_uniform_empty_tray_artifact,
+    is_verified_empty_tray,
     merge_fragmented_same_label_detections,
     suppress_overlapping_detections,
 )
@@ -212,6 +213,8 @@ class Pipeline:
         )
         self._hazardous_battery_seen_at = 0.0
         self._hazardous_battery_track_id: int | None = None
+        self._hazardous_battery_track: TrackedDetection | None = None
+        self._hazardous_battery_frame: np.ndarray | None = None
         self._hazardous_confirmation_until = 0.0
         self._manual_reference_recognizer = self._build_manual_reference_recognizer()
         self._three_bin_classifier = self._build_three_bin_classifier()
@@ -431,21 +434,135 @@ class Pipeline:
 
     def confirm_hazardous_battery_dispatch(self) -> tuple[bool, str]:
         if not self.hazardous_warning_active() or self._hazardous_battery_track_id is None:
+            logger.warning("battery confirmation rejected: no active stable battery")
             return False, "Chưa có cục pin ổn định đang chờ xác nhận."
         self._hazardous_confirmation_until = (
             time.monotonic() + self.cfg.hazardous_waste.confirmation_window_seconds
         )
         self.dispatch_status = "battery dispatch confirmed"
-        return True, (
-            "Đây là rác thải nguy hại không thuộc 3 loại rác này. "
-            "Nếu muốn đổ thì tôi sẽ đổ vào Vô cơ, nhưng đây là loại rác nguy hiểm nên bạn hãy lưu ý nhé."
+        logger.info(
+            "battery confirmation accepted track={} window_seconds={}",
+            self._hazardous_battery_track_id,
+            self.cfg.hazardous_waste.confirmation_window_seconds,
         )
+        return self._dispatch_confirmed_battery_now()
 
-    def _battery_dispatch_confirmed(self, track_id: int) -> bool:
-        return (
-            self._hazardous_battery_track_id == track_id
-            and time.monotonic() <= self._hazardous_confirmation_until
+    def _dispatch_confirmed_battery_now(self) -> tuple[bool, str]:
+        tracked = self._hazardous_battery_track
+        frame_bgr = self._hazardous_battery_frame
+        if tracked is None or frame_bgr is None:
+            return False, "Không còn frame pin để gửi lệnh. Hãy đặt pin lại trong khay."
+        if not self._hardware_dispatch_enabled:
+            return False, "Phân loại tự động đang tắt. Hãy bật TEST ON trước."
+        if not self._has_uart():
+            return False, "UART/Arduino chưa kết nối nên không thể đổ pin."
+
+        now_mono = time.monotonic()
+        if self._dispatch_guard.state in {"SORTING", "RETURNING"}:
+            return False, "Hệ thống đang xử lý lệnh trước, vui lòng chờ servo về HOME."
+        decision = self._dispatch_guard.evaluate(
+            track_id=tracked.track_id,
+            stable_frames=tracked.stable_frames,
+            in_roi=self._in_roi(tracked.detection.xyxy),
+            roi_ready=True,
+            now=now_mono,
         )
+        if not decision.allowed:
+            if decision.reason != "waiting empty tray":
+                return False, f"Chưa thể gửi pin: {decision.reason}."
+            self._dispatch_guard.reset(arm_immediately=True)
+
+        mapping = self._mapping_for_detection(tracked.detection)
+        use_computer_speaker = computer_speaker_enabled(self.cfg)
+        send_silent = getattr(self.uart, "send_silent", None)
+        if use_computer_speaker and not callable(send_silent):
+            return False, "UART không hỗ trợ gửi lệnh im lặng cho loa laptop."
+
+        owner_username = self.cfg.device.owner_username.strip()
+        category = category_for_command(mapping.command)
+        row_id = self.history.insert(
+            track_id=tracked.track_id,
+            ts=datetime.now(),
+            cls_id=tracked.detection.cls_id,
+            cls_name=tracked.detection.cls_name,
+            conf=tracked.detection.conf,
+            bbox=tracked.detection.xyxy,
+            thumbnail=_make_thumbnail(frame_bgr),
+            route_label=(category.name if category is not None else f"Thùng {mapping.bin_index}"),
+            bin_index=int(mapping.bin_index),
+            uart_command=mapping.command,
+            ack_status="pending",
+            owner_account_id=_owner_account_id(owner_username),
+            owner_username=owner_username or None,
+            device_id=self.cfg.device.device_id.strip() or None,
+            hazardous=True,
+            hazardous_confirmed_by="desktop_admin",
+            hazardous_confirmed_at=datetime.now().isoformat(),
+        )
+        self.tracker.mark_emitted(tracked.track_id)
+        self._track_to_row[tracked.track_id] = row_id
+        self._log_dispatch_evidence(
+            track_id=tracked.track_id,
+            cls_name=tracked.detection.cls_name,
+            command=mapping.command,
+            bin_index=int(mapping.bin_index),
+            confidence=tracked.detection.conf,
+            secondary_route=tracked.detection.secondary_route,
+            secondary_confidence=tracked.detection.secondary_confidence,
+            secondary_margin=tracked.detection.secondary_margin,
+        )
+        self._dispatch_guard.begin_dispatch(
+            track_id=tracked.track_id,
+            now=now_mono,
+            ack_timeout_seconds=self._ack_timeout_seconds(),
+        )
+        self.dispatch_status = self._dispatch_guard.last_reason
+        evidence = {
+            "track_id": tracked.track_id,
+            "history_id": row_id,
+            "predicted_class": tracked.detection.cls_name,
+            "route": mapping.command,
+            "bin_index": int(mapping.bin_index),
+            "confidence": float(tracked.detection.conf),
+            "payload": self._uart_payload_preview(mapping.command, tracked.detection.conf),
+        }
+        callback = self.on_dispatch_started
+        if callable(callback):
+            try:
+                callback(evidence)
+            except Exception as exc:
+                logger.warning("battery dispatch callback failed: {}", exc)
+        if use_computer_speaker:
+            self._speak_dispatch(
+                command=mapping.command,
+                bin_index=int(mapping.bin_index),
+                cls_name=tracked.detection.cls_name,
+                confidence=tracked.detection.conf,
+            )
+            send_silent(
+                track_id=tracked.track_id,
+                command=mapping.command,
+                conf=tracked.detection.conf,
+            )
+        else:
+            self.uart.send(
+                track_id=tracked.track_id,
+                command=mapping.command,
+                conf=tracked.detection.conf,
+            )
+        self._hazardous_confirmation_until = 0.0
+        logger.info(
+            "battery confirmation dispatched immediately track={} command={} bin={}",
+            tracked.track_id,
+            mapping.command,
+            mapping.bin_index,
+        )
+        return True, "Đã gửi lệnh Vô cơ cho Arduino. Đang chờ servo hoàn tất."
+
+    def _battery_dispatch_confirmed(self, _track_id: int) -> bool:
+        # Camera blur can assign a fresh track id between the button click and
+        # the next inference frame. This is only queried for Battery detections.
+        return time.monotonic() <= self._hazardous_confirmation_until
 
     def _save_route_consensus_review(
         self,
@@ -1106,8 +1223,16 @@ class Pipeline:
     ) -> list[Detection]:
         """Hold a confirmed multi-object view through short blur/merge dropouts."""
         if len(detections) > 1:
-            self._multi_object_display_hold = list(detections)
-            self._multi_object_display_hold_frames = self._multi_object_display_hold_limit
+            # Do NOT hold same-class-only splits — these are likely one
+            # elongated object (pen, utensil) that YOLO fragmented.  Holding
+            # them would override a successful merge on the next frame.
+            unique_classes = {d.cls_name for d in detections}
+            if len(unique_classes) > 1:
+                self._multi_object_display_hold = list(detections)
+                self._multi_object_display_hold_frames = self._multi_object_display_hold_limit
+            else:
+                self._multi_object_display_hold.clear()
+                self._multi_object_display_hold_frames = 0
             return detections
         if not self._multi_object_display_hold:
             return detections
@@ -1125,6 +1250,122 @@ class Pipeline:
             return detections
         self._multi_object_display_hold_frames -= 1
         return list(self._multi_object_display_hold)
+
+    def _collapse_blurry_single_object_labels(
+        self,
+        detections: list[Detection],
+        *,
+        foreground_object_count: int,
+    ) -> list[Detection]:
+        """Turn many labels on one blurry object into one sortable detection."""
+        if len(detections) <= 1:
+            return detections
+        in_roi = [detection for detection in detections if self._in_roi(detection.xyxy)]
+        if len(in_roi) <= 1:
+            return detections
+        if any(self._is_foreground_separation_marker(detection) for detection in in_roi):
+            return detections
+        unique_classes = {detection.cls_name for detection in in_roi}
+        if len(unique_classes) > 1 and not self._has_overlapping_detection_pair(in_roi):
+            return detections
+        if foreground_object_count > 1 and not self._soft_single_object_cluster(in_roi):
+            return detections
+
+        merged = self._best_operational_detection(in_roi)
+        outside_roi = [detection for detection in detections if detection not in in_roi]
+        logger.info(
+            "collapsed blurry single-object labels {} -> {} conf={:.2f}",
+            [d.cls_name for d in in_roi],
+            merged.cls_name,
+            merged.conf,
+        )
+        return [merged, *outside_roi]
+
+    def _best_operational_detection(self, detections: list[Detection]) -> Detection:
+        def source_rank(detection: Detection) -> int:
+            if detection.source == "manual_reference":
+                return 4
+            if detection.source.startswith("visual_correction:"):
+                return 3
+            if detection.source == "YOLO":
+                return 2
+            if detection.source == "foreground_multi_object":
+                return 1
+            return 0
+
+        fallback_name = self.cfg.unknown_fallback.class_name
+
+        def rank(detection: Detection) -> tuple[int, int, float, int]:
+            known = 0 if detection.cls_name == fallback_name else 1
+            return (
+                known,
+                source_rank(detection),
+                float(detection.conf),
+                self._bbox_area(detection.xyxy),
+            )
+
+        best = max(detections, key=rank)
+        return Detection(
+            cls_id=best.cls_id,
+            cls_name=best.cls_name,
+            conf=max(float(detection.conf) for detection in detections),
+            xyxy=(
+                min(detection.xyxy[0] for detection in detections),
+                min(detection.xyxy[1] for detection in detections),
+                max(detection.xyxy[2] for detection in detections),
+                max(detection.xyxy[3] for detection in detections),
+            ),
+            source=best.source,
+            operator_label=best.operator_label,
+            secondary_route=best.secondary_route,
+            secondary_confidence=best.secondary_confidence,
+            secondary_margin=best.secondary_margin,
+            route_consensus=best.route_consensus,
+            route_consensus_reason=best.route_consensus_reason,
+        )
+
+    @classmethod
+    def _soft_single_object_cluster(cls, detections: list[Detection]) -> bool:
+        if len(detections) <= 1:
+            return True
+        areas = [cls._bbox_area(detection.xyxy) for detection in detections]
+        largest = max(areas, default=0)
+        if largest <= 0:
+            return False
+        union = (
+            min(detection.xyxy[0] for detection in detections),
+            min(detection.xyxy[1] for detection in detections),
+            max(detection.xyxy[2] for detection in detections),
+            max(detection.xyxy[3] for detection in detections),
+        )
+        union_area = cls._bbox_area(union)
+        if union_area / max(largest, 1) <= 2.8:
+            return True
+        union_width = max(1, union[2] - union[0])
+        union_height = max(1, union[3] - union[1])
+        centers = [
+            (
+                (detection.xyxy[0] + detection.xyxy[2]) / 2.0,
+                (detection.xyxy[1] + detection.xyxy[3]) / 2.0,
+            )
+            for detection in detections
+        ]
+        max_dx = max(x for x, _ in centers) - min(x for x, _ in centers)
+        max_dy = max(y for _, y in centers) - min(y for _, y in centers)
+        return max_dx <= union_width * 0.72 and max_dy <= union_height * 0.72
+
+    @staticmethod
+    def _has_overlapping_detection_pair(detections: list[Detection]) -> bool:
+        for index, first in enumerate(detections):
+            for second in detections[index + 1 :]:
+                if _boxes_overlap(first.xyxy, second.xyxy, iou_threshold=0.05):
+                    return True
+        return False
+
+    @staticmethod
+    def _bbox_area(xyxy: tuple[int, int, int, int]) -> int:
+        x1, y1, x2, y2 = xyxy
+        return max(0, x2 - x1) * max(0, y2 - y1)
 
     def _apply_three_bin_classifier(
         self,
@@ -1280,11 +1521,21 @@ class Pipeline:
             if roi.enabled and roi.width > 0 and roi.height > 0
             else None
         )
-        if low_detail_empty or is_uniform_empty_tray_artifact(
+        verified_empty = is_verified_empty_tray(
             frame_bgr,
             raw,
             roi_xyxy=roi_xyxy,
-        ):
+        )
+        empty_tray = (
+            low_detail_empty
+            or verified_empty
+            or is_uniform_empty_tray_artifact(
+                frame_bgr,
+                raw,
+                roi_xyxy=roi_xyxy,
+            )
+        )
+        if empty_tray:
             raw = []
         else:
             raw = self._correct_ambiguous_organic(frame_bgr, raw)
@@ -1329,7 +1580,7 @@ class Pipeline:
             filtered = collapse_duplicate_physical_detections(filtered)
         filtered_in_roi = [d for d in filtered if self._in_roi(d.xyxy)]
         unknown_candidate = self._unknown_detection(frame_bgr, raw, filtered_in_roi)
-        unknown = None if low_detail_empty else unknown_candidate
+        unknown = None if empty_tray else unknown_candidate
         if unknown is not None:
             filtered.append(unknown)
         filtered = self._apply_manual_references(frame_bgr, filtered)
@@ -1353,6 +1604,10 @@ class Pipeline:
             foreground_object_count=foreground_count,
         )
         filtered = collapse_single_object_scene_detections(frame_bgr, filtered)
+        filtered = self._collapse_blurry_single_object_labels(
+            filtered,
+            foreground_object_count=foreground_count,
+        )
         filtered = self._stabilize_multi_object_display(frame_bgr, filtered)
         self._save_low_conf_frame(frame_bgr, raw, ts)
         tracked = self.tracker.update(filtered)
@@ -1361,8 +1616,11 @@ class Pipeline:
         battery_tracks = [track for track in tracked if self._is_battery(track.detection)]
         if battery_tracks:
             stable_battery = max(battery_tracks, key=lambda track: track.stable_frames)
-            self._hazardous_battery_seen_at = now_mono
-            self._hazardous_battery_track_id = stable_battery.track_id
+            if stable_battery.stable_frames >= self.cfg.dispatch_guard.min_stable_frames:
+                self._hazardous_battery_seen_at = now_mono
+                self._hazardous_battery_track_id = stable_battery.track_id
+                self._hazardous_battery_track = stable_battery
+                self._hazardous_battery_frame = frame_bgr.copy()
             if self.cfg.auto_review_queue.capture_unknown:
                 self._queue_review(
                     frame_bgr,
@@ -1398,25 +1656,32 @@ class Pipeline:
                 foreground_multi = frame_foreground_multi
         visible_in_roi = bool(
             roi_ready
-            and (
-                any(self._in_roi(t.detection.xyxy) for t in tracked)
-                or (foreground_multi is not None and foreground_multi.object_count > 0)
-            )
+            and not verified_empty
+            and any(self._in_roi(t.detection.xyxy) for t in tracked)
         )
         self._dispatch_guard.observe_frame(
             has_visible_object=visible_in_roi,
             roi_ready=roi_ready,
             now=now_mono,
+            verified_empty=verified_empty,
         )
-        if roi_ready and self._dispatch_guard.consume_rearmed():
-            self.tracker.clear_active()
-            self._unknown_fallback.reset()
+        rearmed = roi_ready and self._dispatch_guard.consume_rearmed()
+        if rearmed:
+            if verified_empty or not visible_in_roi:
+                self.tracker.clear_active()
+                self._unknown_fallback.reset()
+            logger.info(
+                "dispatch rearmed verified_empty={} visible={} cleared_tracks={}",
+                verified_empty,
+                visible_in_roi,
+                verified_empty or not visible_in_roi,
+            )
         self.dispatch_status = self._dispatch_guard.last_reason
         if self._hardware_dispatch_enabled and (
             self._dispatch_guard.state in {"SORTING", "RETURNING"}
         ):
             return []
-        if low_detail_empty and not tracked:
+        if empty_tray and not tracked:
             self.dispatch_status = "waiting empty tray"
             return detections_for_render
         if (
@@ -1425,6 +1690,38 @@ class Pipeline:
             and all(self._is_ambiguous_foreground_marker(t.detection) for t in tracked)
         ):
             self.dispatch_status = "TEST OFF"
+            return detections_for_render
+        separation_tracks = [
+            track
+            for track in tracked
+            if self._in_roi(track.detection.xyxy)
+            and self._is_foreground_separation_marker(track.detection)
+        ]
+        if separation_tracks:
+            visible_object_count = max(
+                2,
+                foreground_count,
+                len(separation_tracks),
+                int(foreground_multi.object_count)
+                if foreground_multi is not None and not foreground_multi.allowed
+                else 0,
+            )
+            self.dispatch_status = f"multiple waste types ({visible_object_count} visible objects)"
+            if self.cfg.auto_review_queue.capture_multiple_objects:
+                self._queue_review(
+                    frame_bgr,
+                    detections_for_render,
+                    reason="foreground_multiple_objects",
+                    ts=ts,
+                    extra_meta={"foreground_count": visible_object_count},
+                )
+            self._speak_multi_class_warning((f"{visible_object_count} visible objects",))
+            if (
+                not self._hardware_dispatch_enabled
+                and not self._preserve_tracks_when_dispatch_disabled
+            ):
+                for t in tracked:
+                    self.tracker.mark_emitted(t.track_id)
             return detections_for_render
         multi_class = evaluate_single_class_dispatch(
             tracked,
@@ -1875,25 +2172,25 @@ class Pipeline:
         return True
 
     def _low_confidence_dispatch_blocked(self, detection: Detection) -> bool:
-        class_threshold = float(
-            self.cfg.model.class_thresholds.get(detection.cls_name, 0.0)
-        )
-        required_confidence = max(
-            float(self.cfg.dispatch_guard.min_dispatch_confidence),
-            class_threshold,
-        )
-        if detection.conf < required_confidence:
-            return True
-        if detection.source != "visual_correction:metal_utensil":
-            return False
-        threshold = max(0.30, min(float(self.cfg.model.conf_threshold), 0.45) * 0.75)
-        return detection.conf < threshold
+        # Recognition and mapping are sufficient for dispatch. Unknown objects
+        # and multi-object scenes are rejected by dedicated guards beforehand.
+        return False
 
     @staticmethod
     def _is_ambiguous_foreground_marker(detection: Detection) -> bool:
         return (
             detection.source == "foreground_multi_object"
             and "nhãn YOLO chồng lấn" in detection.operator_label
+        )
+
+    def _is_foreground_separation_marker(self, detection: Detection) -> bool:
+        if detection.source != "foreground_multi_object":
+            return False
+        label = detection.operator_label or ""
+        return (
+            detection.cls_name == self.cfg.unknown_fallback.class_name
+            or "cáº§n tÃ¡ch" in label
+            or "cần tách" in label
         )
 
     def on_ack(self, track_id: int, command: str, status: str, rtt_ms):

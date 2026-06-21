@@ -115,6 +115,7 @@ class _PipelineSpy:
 class _FakeUartWorker(QThread):
     ack_received = Signal(int, str, str, object)
     bin_received = Signal(int, int)
+    proximity_received = Signal(str)
     connected = Signal(bool)
     instances: ClassVar[list] = []
 
@@ -653,6 +654,23 @@ def test_laptop_voice_warning_previews_warning_audio(tmp_path):
     assert speaker.events == [("multi_object_warning", "female")]
     assert speaker.commands == []
     assert results and results[0][0] is True
+
+
+def test_laptop_speaker_plays_proximity_alert_locally(tmp_path):
+    cfg = AppConfig()
+    cfg.speaker.output_mode = "computer_speaker"
+    cfg.speaker.enabled = True
+    cfg.speaker.voice_gender = "male"
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    speaker = _SpeakerSpy()
+    controller._speaker = speaker
+
+    try:
+        controller._on_uart_proximity("R")
+    finally:
+        controller.stop()
+
+    assert speaker.events == [("bin_full_R", "male")]
 
 
 def test_laptop_startup_event_plays_selected_voice_pack(tmp_path):

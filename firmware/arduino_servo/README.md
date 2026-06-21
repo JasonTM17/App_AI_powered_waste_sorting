@@ -61,6 +61,8 @@ Open Serial Monitor at `9600` baud, line ending `Newline`.
 | `AUDIO:6` | play Tai che sensor audio only, no servo, then `ACK:AUDIO:6` |
 | `AUDIO:7` | play Vo co sensor audio only, no servo, then `ACK:AUDIO:7` |
 | `AUDIO:8` | play multi-object warning audio only, no servo, then `ACK:AUDIO:8` |
+| `SENSOR_AUDIO:ON` | enable the hardware speaker for proximity/full alerts, then `ACK:SENSOR_AUDIO:ON` |
+| `SENSOR_AUDIO:OFF` | mute only hardware proximity/full alerts; keep sending `PROX:*` for laptop voice, then `ACK:SENSOR_AUDIO:OFF` |
 | `ANGLE:90:85` | raw wait/upright-position test, then `ACK:ANGLE:90:85` |
 | `HOME:90:85` | set temporary home/upright candidate and return `ACK:HOME:90:85` |
 | `ANGLE:90:180` | raw Huu co angle test, then `ACK:ANGLE:90:180` |
@@ -69,7 +71,7 @@ Open Serial Monitor at `9600` baud, line ending `Newline`.
 | `SORTTEST:R:90:0` | play app Vo co track, test candidate dump angle, return home, then `ACK:SORTTEST:R:90:0` |
 | `HOME` | attach servos, return to wait position, hold HOME, then `ACK:HOME` |
 
-The firmware logs `MP3TX:<hex>` before each MP3 command and best-effort `MP3RX:*` if the red board replies. Proximity sensors must remain active LOW continuously for 2 seconds before they send `PROX:O`, `PROX:I`, or `PROX:R` and play tracks `5/6/7`. A triggered sensor must remain clear for 1 second before it can re-arm, and the same sensor has a 15-second audio cooldown. Brief hand/object passes therefore stay silent. Track `8` is reserved for the app multi-object warning. Sensors do not call sort logic or move D6/D7. If a confirmed sensor event occurs while sorting, its audio is queued until the servo returns home.
+The firmware logs `MP3TX:<hex>` before each MP3 command and best-effort `MP3RX:*` if the red board replies. Proximity sensors must remain active LOW continuously for 2 seconds before they send `PROX:O`, `PROX:I`, or `PROX:R`. In Hardware speaker mode they play tracks `5/6/7`; in Laptop speaker mode the desktop sends `SENSOR_AUDIO:OFF`, so the Arduino stays quiet and the desktop plays the matching voice pack. A triggered sensor must remain clear for 1 second before it can re-arm, and the same sensor has a 15-second audio cooldown. Brief hand/object passes therefore stay silent. Track `8` is reserved for the app multi-object warning. Sensors do not call sort logic or move D6/D7. If a confirmed sensor event occurs while sorting, its audio is queued until the servo returns home.
 
 The firmware keeps `SERVO_DETACH_WHEN_IDLE=false`. Motion uses 2-degree steps
 at 10 ms intervals. On return, D7 first levels the dump axis, then D6 returns

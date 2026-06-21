@@ -122,7 +122,7 @@ def test_plain_group_sends_block_command_and_waits_for_ack(monkeypatch, qtbot):
     _wait(lambda: len(acks) >= 1, 2.0)
     w.stop()
     w.wait(2000)
-    assert instances[0]._tx == [b"PING\n", b"PROFILE\n", b"voco\n"]
+    assert instances[0]._tx == [b"PING\n", b"PROFILE\n", b"HOME\n", b"voco\n"]
     assert acks and acks[0] == (3, "R", "ok")
 
 
@@ -144,7 +144,7 @@ def test_plain_group_silent_sort_sends_audio_free_command(monkeypatch, qtbot):
     _wait(lambda: len(acks) >= 1, 2.0)
     w.stop()
     w.wait(2000)
-    assert instances[0]._tx == [b"PING\n", b"PROFILE\n", b"SORTSILENT:I\n"]
+    assert instances[0]._tx == [b"PING\n", b"PROFILE\n", b"HOME\n", b"SORTSILENT:I\n"]
     assert acks and acks[0] == (4, "I", "ok")
 
 
@@ -172,7 +172,7 @@ def test_idle_uart_emits_bin_fullness(monkeypatch, qtbot):
     worker.stop()
     worker.wait(2000)
 
-    assert instances[0]._tx == [b"PING\n", b"PROFILE\n"]
+    assert instances[0]._tx == [b"PING\n", b"PROFILE\n", b"HOME\n"]
     assert bins == [(2, 96)]
 
 
@@ -211,8 +211,40 @@ def test_audio_only_test_sends_track_and_emits_ack(monkeypatch, qtbot):
     worker.stop()
     worker.wait(2000)
 
-    assert instances[0]._tx == [b"PING\n", b"PROFILE\n", b"AUDIO:4\n"]
+    assert instances[0]._tx == [b"PING\n", b"PROFILE\n", b"HOME\n", b"AUDIO:4\n"]
     assert acks == [(-2, "AUDIO:4", "ok")]
+
+
+def test_laptop_sensor_mode_silences_hardware_and_emits_proximity(monkeypatch, qtbot):
+    class SensorModeSerial(FakeSerial):
+        def write(self, data):
+            self._tx.append(bytes(data))
+            if data == b"SENSOR_AUDIO:OFF\n":
+                self._rx.append(b"ACK:SENSOR_AUDIO:OFF\n")
+            return len(data)
+
+    instances = []
+
+    def factory(port, baud, timeout=0.1):
+        serial_port = SensorModeSerial(port, baud, timeout)
+        instances.append(serial_port)
+        return serial_port
+
+    monkeypatch.setattr("app.core.uart.serial.Serial", factory)
+    proximities = []
+    worker = UartWorker(port="COM_FAKE", baud=9600, ack_timeout_ms=200)
+    worker.proximity_received.connect(proximities.append)
+    worker.start()
+    _wait(lambda: worker.is_connected, 2.0)
+    worker.send_sensor_audio_mode(False)
+    _wait(lambda: b"SENSOR_AUDIO:OFF\n" in instances[0]._tx, 2.0)
+    instances[0]._rx.append(b"PROX:R\n")
+    _wait(lambda: proximities, 2.0)
+    worker.stop()
+    worker.wait(2000)
+
+    assert instances[0]._tx[-1] == b"SENSOR_AUDIO:OFF\n"
+    assert proximities == ["R"]
 
 
 def test_ping_test_reuses_open_uart_connection(fake_serial, qtbot):
@@ -236,5 +268,5 @@ def test_ping_test_reuses_open_uart_connection(fake_serial, qtbot):
     worker.wait(2000)
 
     assert len(fake_serial) == 1
-    assert fake_serial[0]._tx == [b"PING\n", b"PROFILE\n", b"PING\n"]
+    assert fake_serial[0]._tx == [b"PING\n", b"PROFILE\n", b"HOME\n", b"PING\n"]
     assert acks == [(-3, "PING", "ok")]

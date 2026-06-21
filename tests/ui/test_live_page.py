@@ -185,3 +185,23 @@ def test_live_page_shows_only_current_frame_results(qtbot):
     assert page.stream.count() == 2
     assert "Rác hữu cơ" in page.stream.item(0).text()
     assert "Lon nhôm" in page.stream.item(1).text()
+
+
+def test_live_page_battery_confirmation_gives_immediate_feedback(qtbot):
+    page = LivePage()
+    qtbot.addWidget(page)
+    page.set_actuation_test_mode(True)
+    page.set_uart_status(True, protocol="plain_group")
+    page.set_hazardous_battery_warning(True)
+
+    with qtbot.waitSignal(page.hazardous_battery_confirmation_requested, timeout=500):
+        page.btn_confirm_battery.click()
+
+    assert page.btn_confirm_battery.isEnabled() is False
+    assert "Đang xác nhận" in page.btn_confirm_battery.text()
+    assert "giữ pin" in page.battery_warning_text.text()
+
+    page.set_hazardous_confirmation_result(True, "accepted")
+
+    assert "Đã xác nhận" in page.btn_confirm_battery.text()
+    assert "đang gửi pin" in page.battery_warning_text.text()

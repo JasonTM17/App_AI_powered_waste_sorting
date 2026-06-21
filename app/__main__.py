@@ -315,7 +315,7 @@ def main(*, require_admin_login: bool = True) -> int:
 
     def _on_frame(frame, detections, fps, latency):
         display_detections = window.live_page.stabilize_detections(detections)
-        window.live_page.update_frame(frame, display_detections)
+        window.live_page.update_frame(frame, display_detections, controller.cfg.roi)
         window.live_page.set_fps(fps)
         window.live_page.set_latency(latency)
         window.set_fps(fps)
@@ -408,6 +408,7 @@ def main(*, require_admin_login: bool = True) -> int:
                         uart_connected=controller.is_uart_connected(),
                         multi_class_warning_text=controller.cfg.dispatch_guard.multi_class_warning_text,
                     )
+                    ack = controller.latest_ack_status_text(command, ack)
                     mode = "TEST ON" if test_mode_enabled else "TEST OFF"
                     detail = (
                         f"{mode}; {category.name}; bin {bin_index}; payload {payload}; ACK {ack}"
@@ -420,7 +421,11 @@ def main(*, require_admin_login: bool = True) -> int:
             window.live_page.set_current_detections([])
 
     controller.frame_processed.connect(_on_frame)
-    controller.hazardous_confirmation_result.connect(_on_test_result)
+    def _on_hazardous_confirmation_result(ok: bool, message: str) -> None:
+        window.live_page.set_hazardous_confirmation_result(ok, message)
+        _on_test_result(ok, message)
+
+    controller.hazardous_confirmation_result.connect(_on_hazardous_confirmation_result)
     window.live_page.hazardous_battery_confirmation_requested.connect(
         controller.confirm_hazardous_battery_dispatch
     )
@@ -567,7 +572,9 @@ def main(*, require_admin_login: bool = True) -> int:
 
     controller.start()
     _log_startup("controller_started")
-    if os.environ.get("TRASH_SORTER_AUTOSTART_CAMERA") == "1":
+    # Live detection is the primary desktop workflow, so open its camera by
+    # default. Set this variable to 0 for tests or camera-free maintenance.
+    if os.environ.get("TRASH_SORTER_AUTOSTART_CAMERA", "1") != "0":
         QTimer.singleShot(700, controller.start_camera)
 
     splash.finish(window)

@@ -15,6 +15,7 @@ PREFERRED_DUPLICATE_SOURCES = {
     "visual_correction:ceramic_dish": 1,
     "visual_correction:wooden_utensil": 1,
     "visual_correction:metal_utensil": 1,
+    "visual_correction:battery": 1,
     "visual_correction:pen": 1,
     "visual_correction:plastic_bottle": 1,
     "visual_correction:leafy_organic": 1,
@@ -22,6 +23,7 @@ PREFERRED_DUPLICATE_SOURCES = {
     "kaggle_three_bin_classifier": 3,
 }
 UNKNOWN_CLASS_NAMES = {"Unknown object"}
+BOTTLE_LIKE_CLASSES = {"Plastic bottle", "Glass bottle", "Milk bottle"}
 
 
 def suppress_overlapping_detections(
@@ -101,13 +103,25 @@ def collapse_single_object_scene_detections(
                     frame_area=frame_area,
                     min_large_area_ratio=min_large_area_ratio,
                 )
+                or _same_large_bottle_edge_fragment(
+                    detection,
+                    item,
+                    frame_width=width,
+                )
                 for item in cluster
             ):
                 cluster.append(detection)
                 break
         else:
             clusters.append([detection])
-    return sorted((_best_duplicate_candidate(cluster) for cluster in clusters), key=lambda item: item.conf, reverse=True)
+    return sorted(
+        (
+            _collapse_single_object_scene_cluster(cluster, frame_width=width)
+            for cluster in clusters
+        ),
+        key=lambda item: item.conf,
+        reverse=True,
+    )
 
 
 def merge_fragmented_same_label_detections(
@@ -171,8 +185,8 @@ def _fragmented_parts_of_one_object(
     if union_width <= 0 or union_height <= 0:
         return False
     aspect = union_width / union_height
-    horizontal = aspect >= 3.0
-    vertical = aspect <= 1 / 3.0
+    horizontal = aspect >= 2.0
+    vertical = aspect <= 1 / 2.0
     if not horizontal and not vertical:
         return False
     gap_x = max(ax1 - bx2, bx1 - ax2, 0)
@@ -186,26 +200,26 @@ def _fragmented_parts_of_one_object(
         first_center_y = (ay1 + ay2) / 2.0
         second_center_y = (by1 + by2) / 2.0
         # A glossy/transparent object can disappear in the middle of the camera
-        # frame, leaving only two ends as boxes. Allow a wider gap only for very
+        # frame, leaving only two ends as boxes. Allow a wider gap for
         # elongated, aligned parts; keep it proportional to detected material so
         # two separate objects placed far apart remain blocked as multi-object.
-        close_gap = max(20, round(union_width * 0.18))
-        if aspect >= 4.5:
-            close_gap = max(close_gap, min(320, round((first_width + second_width) * 0.65)))
+        close_gap = max(40, round(union_width * 0.45))
+        if aspect >= 3.0:
+            close_gap = max(close_gap, min(640, round((first_width + second_width) * 1.2)))
         aligned_long_parts = (
-            aspect >= 4.5
-            and abs(first_center_y - second_center_y) <= union_height * 0.50
+            aspect >= 3.0
+            and abs(first_center_y - second_center_y) <= union_height * 0.75
         )
         return gap_x <= close_gap and (
-            overlap_y / min_height >= 0.58 or aligned_long_parts
+            overlap_y / min_height >= 0.30 or aligned_long_parts
         )
     min_width = max(1, min(ax2 - ax1, bx2 - bx1))
     first_height = max(1, ay2 - ay1)
     second_height = max(1, by2 - by1)
-    close_gap = max(20, round(union_height * 0.18))
-    if aspect <= 1 / 7.0:
-        close_gap = max(close_gap, min(320, round((first_height + second_height) * 0.65)))
-    return gap_y <= close_gap and overlap_x / min_width >= 0.58
+    close_gap = max(40, round(union_height * 0.45))
+    if aspect <= 1 / 3.0:
+        close_gap = max(close_gap, min(640, round((first_height + second_height) * 1.2)))
+    return gap_y <= close_gap and overlap_x / min_width >= 0.30
 
 
 def find_ambiguous_organic_candidate(
@@ -305,6 +319,50 @@ def is_low_detail_empty_tray(
         if coverage >= 0.65 or (coverage <= 0.08 and touches_border):
             return True
     return False
+
+
+def is_verified_empty_tray(
+    frame_bgr: np.ndarray,
+    detections: list[Detection] | None = None,
+    *,
+    roi_xyxy: tuple[int, int, int, int] | None = None,
+) -> bool:
+    """Confirm a visibly empty tray despite dark rails or full-frame false boxes."""
+    if frame_bgr.ndim != 3 or frame_bgr.shape[2] < 3 or frame_bgr.size == 0:
+        return False
+    height, width = frame_bgr.shape[:2]
+    x1, y1, x2, y2 = _clamp_box(roi_xyxy or (0, 0, width, height), width, height)
+    roi_width = x2 - x1
+    roi_height = y2 - y1
+    inset_x = max(1, round(roi_width * 0.08))
+    inset_y = max(1, round(roi_height * 0.08))
+    if roi_width <= inset_x * 2 or roi_height <= inset_y * 2:
+        return False
+    crop = frame_bgr[y1 + inset_y : y2 - inset_y, x1 + inset_x : x2 - inset_x, :3]
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    edges = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 30, 90)
+    median = float(np.median(gray))
+    saturation_ratio = float(np.mean(hsv[:, :, 1] > 20))
+    edge_ratio = float(np.count_nonzero(edges)) / float(max(1, edges.size))
+    strong_deviation = float(np.mean(np.abs(gray.astype(np.float32) - median) > 30.0))
+    visually_empty = (
+        float(np.mean(gray)) > 165.0
+        and float(np.std(gray)) < 22.0
+        and saturation_ratio < 0.015
+        and edge_ratio < 0.0015
+        and strong_deviation < 0.05
+    )
+    if not visually_empty or not detections:
+        return visually_empty
+
+    roi_area = float(max(1, roi_width * roi_height))
+    for detection in detections:
+        box = _clamp_box(detection.xyxy, width, height)
+        coverage = _intersection_area(box, (x1, y1, x2, y2)) / roi_area
+        if coverage < 0.65:
+            return False
+    return True
 
 
 def _clamp_box(
@@ -411,6 +469,90 @@ def _same_large_scene_object(
     return contained_union or substantial_overlap
 
 
+def _same_large_bottle_edge_fragment(
+    first: Detection,
+    second: Detection,
+    *,
+    frame_width: int,
+) -> bool:
+    """Fold a cap/neck false label at a close-up bottle's frame edge.
+
+    Transparent PET bottles often yield a confident label on their printed body
+    plus a smaller, unrelated label on the clear neck. The second label is only
+    treated as a fragment when it hugs a frame edge, is much smaller, and stays
+    aligned with a bottle-sized primary box. Separate objects are still caught
+    by the foreground multi-object gate later in the pipeline.
+    """
+    first_area = _box_area(first.xyxy)
+    second_area = _box_area(second.xyxy)
+    if first_area <= 0 or second_area <= 0:
+        return False
+    primary, fragment = (first, second) if first_area >= second_area else (second, first)
+    if primary.cls_name not in BOTTLE_LIKE_CLASSES or primary.conf < fragment.conf:
+        return False
+
+    primary_area = max(first_area, second_area)
+    fragment_area = min(first_area, second_area)
+    if fragment_area / primary_area > 0.22:
+        return False
+
+    px1, py1, px2, py2 = primary.xyxy
+    fx1, fy1, fx2, fy2 = fragment.xyxy
+    primary_width = max(1, px2 - px1)
+    primary_height = max(1, py2 - py1)
+    fragment_height = max(1, fy2 - fy1)
+    union_width = max(px2, fx2) - min(px1, fx1)
+    union_height = max(py2, fy2) - min(py1, fy1)
+    if union_width <= union_height or union_width < frame_width * 0.55:
+        return False
+
+    edge_margin = max(6, round(frame_width * 0.01))
+    at_horizontal_edge = fx1 <= edge_margin or fx2 >= frame_width - edge_margin
+    vertical_overlap = max(0, min(py2, fy2) - max(py1, fy1))
+    aligned = vertical_overlap / fragment_height >= 0.65
+    gap_x = max(px1 - fx2, fx1 - px2, 0)
+    close_enough = gap_x <= max(80, round(primary_width * 0.82))
+    compact_fragment = fragment_height <= primary_height * 0.72
+    return at_horizontal_edge and aligned and close_enough and compact_fragment
+
+
+def _collapse_single_object_scene_cluster(
+    cluster: list[Detection],
+    *,
+    frame_width: int,
+) -> Detection:
+    for primary in sorted(cluster, key=_box_area_from_detection, reverse=True):
+        edge_fragments = [
+            item
+            for item in cluster
+            if item is not primary
+            and _same_large_bottle_edge_fragment(
+                primary,
+                item,
+                frame_width=frame_width,
+            )
+        ]
+        if edge_fragments:
+            return Detection(
+                cls_id=primary.cls_id,
+                cls_name=primary.cls_name,
+                conf=primary.conf,
+                xyxy=(
+                    min(item.xyxy[0] for item in [primary, *edge_fragments]),
+                    min(item.xyxy[1] for item in [primary, *edge_fragments]),
+                    max(item.xyxy[2] for item in [primary, *edge_fragments]),
+                    max(item.xyxy[3] for item in [primary, *edge_fragments]),
+                ),
+                source=primary.source,
+                operator_label=primary.operator_label,
+            )
+    return _best_duplicate_candidate(cluster)
+
+
+def _box_area_from_detection(detection: Detection) -> int:
+    return _box_area(detection.xyxy)
+
+
 def _best_duplicate_candidate(cluster: list[Detection]) -> Detection:
     def rank(detection: Detection) -> tuple[int, int, float]:
         source_rank = PREFERRED_DUPLICATE_SOURCES.get(detection.source, 4)
@@ -463,6 +605,7 @@ __all__ = [
     "find_ambiguous_organic_candidate",
     "is_low_detail_empty_tray",
     "is_uniform_empty_tray_artifact",
+    "is_verified_empty_tray",
     "merge_fragmented_same_label_detections",
     "suppress_overlapping_detections",
 ]

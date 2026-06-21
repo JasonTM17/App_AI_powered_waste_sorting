@@ -13,6 +13,7 @@ from PySide6.QtCore import QThread, Signal
 from app.core.uart_protocol import (
     UartProtocol,
     encode_audio_test,
+    encode_home,
     encode_ping,
     encode_profile_request,
     encode_sort,
@@ -33,11 +34,13 @@ class _Cmd:
     enqueued_at: float
     audio_track: int | None = None
     silent: bool = False
+    control: bool = False
 
 
 class UartWorker(QThread):
     ack_received = Signal(int, str, str, object)
     bin_received = Signal(int, int)
+    proximity_received = Signal(str)
     connected = Signal(bool)
     error = Signal(str)
 
@@ -95,6 +98,21 @@ class UartWorker(QThread):
                 self._queue.get_nowait()
             self._queue.put_nowait(item)
 
+    def send_sensor_audio_mode(self, enabled: bool) -> None:
+        """Choose whether proximity/full alerts play from the Arduino speaker.
+
+        The firmware always reports ``PROX``.  In laptop mode it must not also
+        play the OPEN-SMART module, otherwise operators hear both outputs.
+        """
+        command = f"SENSOR_AUDIO:{'ON' if enabled else 'OFF'}"
+        item = _Cmd(-1, command, 0.0, time.time(), control=True)
+        try:
+            self._queue.put_nowait(item)
+        except queue.Full:
+            with suppress(queue.Empty):
+                self._queue.get_nowait()
+            self._queue.put_nowait(item)
+
     def send_ping_test(self, track_id: int) -> None:
         """Probe the open serial connection without competing for the COM port."""
         item = _Cmd(int(track_id), "PING", 0.0, time.time())
@@ -114,6 +132,7 @@ class UartWorker(QThread):
                 time.sleep(ARDUINO_SERIAL_RESET_SETTLE_S)
                 self._ser.write(encode_ping())
                 self._ser.write(encode_profile_request())
+                self._ser.write(encode_home())
             logger.info("uart connected port={} protocol={}", self._port, self._protocol)
             self._last_open_warn = 0.0
             return True
@@ -202,6 +221,7 @@ class UartWorker(QThread):
             return
         if kind == "proximity":
             logger.info("uart proximity: {}", cmd)
+            self.proximity_received.emit(str(cmd))
             return
         if kind == "audio":
             logger.info("uart audio: command={} payload={}", cmd, payload)
@@ -226,6 +246,9 @@ class UartWorker(QThread):
             if is_ping:
                 payload = encode_ping()
                 expected_ack = "PONG"
+            elif cmd.control:
+                payload = f"{cmd.command}\n".encode()
+                expected_ack = cmd.command
             elif cmd.audio_track is None:
                 payload = encode_sort(
                     cmd.command,
@@ -281,6 +304,14 @@ class UartWorker(QThread):
                 elif cmd.track_id != -1:
                     status, _ = outcome
                     self.ack_received.emit(cmd.track_id, cmd.command, status, rtt)
+                continue
+            if cmd.control:
+                logger.info(
+                    "uart sensor audio control command={} status={} rtt_ms={}",
+                    cmd.command,
+                    outcome[0] if outcome is not None else "no_ack",
+                    rtt,
+                )
                 continue
             if outcome is None:
                 logger.warning(

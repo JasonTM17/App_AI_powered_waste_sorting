@@ -75,6 +75,7 @@ class _Track:
     track_id: int
     cls_id: int
     label_signature: str
+    route_signature: str
     xyxy: tuple
     age: int = 0
     stable_frames: int = 1
@@ -115,6 +116,7 @@ class Tracker:
                     track_id=tid,
                     cls_id=det.cls_id,
                     label_signature=_label_signature(det),
+                    route_signature=_route_family(det.cls_name),
                     xyxy=det.xyxy,
                 )
                 t = self._tracks[tid]
@@ -122,11 +124,17 @@ class Tracker:
                 t = self._tracks[best_id]
                 t.age = 0
                 label_signature = _label_signature(det)
+                route_signature = _route_family(det.cls_name)
+                if route_signature != t.route_signature:
+                    # A different three-bin route at the same tray position is
+                    # a new sortable object, not the already-emitted object.
+                    self._emitted.discard(t.track_id)
                 if label_signature == t.label_signature:
                     t.stable_frames += 1
                 else:
                     t.stable_frames = 1
                     t.label_signature = label_signature
+                t.route_signature = route_signature
                 t.cls_id = det.cls_id
                 t.xyxy = det.xyxy
             matched_ids.add(t.track_id)
@@ -161,8 +169,8 @@ class Tracker:
 
 
 def _label_signature(detection) -> str:
-    label = (detection.operator_label or detection.cls_name or "").strip()
-    return f"{_route_family(detection.cls_name)}|label:{label}"
+    operator_label = str(detection.operator_label or "").strip().casefold()
+    return f"{_route_family(detection.cls_name)}|{detection.cls_name}|{operator_label}"
 
 
 def _route_family(class_name: str) -> str:

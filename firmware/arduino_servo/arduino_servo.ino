@@ -105,6 +105,8 @@ bool mp3ReverseMode = false;
 
 String serialBuffer;
 bool sortInProgress = false;
+// The desktop selects the output. Sensors still report PROX in both modes.
+bool sensorAudioEnabled = true;
 
 void poll_sensors();
 void delay_with_sensor_polling(unsigned long durationMs);
@@ -385,6 +387,12 @@ void servo_position_for_cmd(char cmd, int &servoAValue, int &servoBValue) {
 }
 
 void flush_pending_sensor_audio() {
+  if (!sensorAudioEnabled) {
+    for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
+      sensors[i].pendingAudio = false;
+    }
+    return;
+  }
   for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
     if (!sensors[i].pendingAudio) {
       continue;
@@ -518,6 +526,8 @@ void publish_profile() {
   Serial.println(servoBWait);
   Serial.print(F("SERVO:IDLE:"));
   Serial.println(SERVO_DETACH_WHEN_IDLE ? F("DETACH") : F("HOLD"));
+  Serial.print(F("SENSOR_AUDIO:"));
+  Serial.println(sensorAudioEnabled ? F("ON") : F("OFF"));
 }
 
 void handle_sensor(SensorRuntime &sensor, bool allowAudioNow) {
@@ -538,6 +548,9 @@ void handle_sensor(SensorRuntime &sensor, bool allowAudioNow) {
       sensor.lastAudioAt = now;
       Serial.print(F("PROX:"));
       Serial.println(sensor.cmd);
+      if (!sensorAudioEnabled) {
+        return;
+      }
       if (allowAudioNow && !sortInProgress) {
         play_track_logged(sensor.track, sensor.cmd, "prox");
       } else {
@@ -736,6 +749,18 @@ void handle_line(String line) {
 
   if (line.startsWith("MP3:")) {
     handle_mp3_command(line);
+    return;
+  }
+
+  if (line == "SENSOR_AUDIO:ON" || line == "SENSOR_AUDIO:OFF") {
+    sensorAudioEnabled = line.endsWith(":ON");
+    if (!sensorAudioEnabled) {
+      for (uint8_t i = 0; i < SENSOR_COUNT; i++) {
+        sensors[i].pendingAudio = false;
+      }
+    }
+    Serial.print(F("ACK:SENSOR_AUDIO:"));
+    Serial.println(sensorAudioEnabled ? F("ON") : F("OFF"));
     return;
   }
 

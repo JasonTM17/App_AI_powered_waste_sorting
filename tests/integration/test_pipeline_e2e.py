@@ -560,6 +560,28 @@ def test_pipeline_blocks_near_full_frame_detection_before_uart(tmp_path):
     p.close()
 
 
+def test_pipeline_dispatches_medium_confidence_near_full_frame_object(tmp_path):
+    cfg = _dispatch_ready_config()
+    cfg.dispatch_guard.min_dispatch_confidence = 0.45
+    cfg.dispatch_guard.max_dispatch_bbox_area_ratio = 1.0
+    uart = _StubUart()
+    infer = _ScriptedInfer(
+        [[Detection(1, "Plastic bottle", 0.51, (2, 2, 318, 238))]]
+    )
+    p = Pipeline(cfg, infer, uart, tmp_path / "h.db")
+    frame = np.full((240, 320, 3), 235, dtype=np.uint8)
+    frame[70:170, 45:275] = (35, 85, 170)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(item.cls_name, item.conf) for item in detections] == [
+        ("Plastic bottle", 0.51)
+    ]
+    assert uart.sent == [(1, "I", 0.51)]
+    p.close()
+
+
 def test_pipeline_routes_bagasse_ambiguity_to_organic(tmp_path):
     cfg = _dispatch_ready_config()
     cfg.three_bin_classifier.enabled = True
@@ -761,6 +783,76 @@ def test_pipeline_dispatches_next_new_object_after_ack_and_empty_tray(tmp_path):
     p.process_frame(frame, datetime.now(UTC))
 
     assert [item[1] for item in uart.sent] == ["O", "I"]
+
+
+def test_pipeline_dispatches_new_route_without_repeating_visible_previous_object(tmp_path):
+    cfg = _dispatch_ready_config(
+        mappings=[
+            ClassMapping(class_name="Organic", command="O", bin_index=1),
+            ClassMapping(class_name="Pen", command="R", bin_index=2),
+        ]
+    )
+    uart = _StubUart()
+    same_box = (30, 30, 250, 170)
+    p = Pipeline(
+        cfg,
+        _ScriptedInfer(
+            [
+                [Detection(17, "Organic", 0.91, same_box)],
+                [Detection(17, "Organic", 0.91, same_box)],
+                [Detection(42, "Pen", 0.83, same_box)],
+            ]
+        ),
+        uart,
+        tmp_path / "h.db",
+    )
+    p.reset_dispatch_state(arm_immediately=True)
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+
+    p.process_frame(frame, datetime.now(UTC))
+    first_track, first_command, _ = uart.sent[0]
+    p.on_ack(first_track, first_command, "ok", 3200)
+    p.process_frame(frame, datetime.now(UTC))
+    assert [item[1] for item in uart.sent] == ["O"]
+
+    p.process_frame(frame, datetime.now(UTC))
+
+    assert [item[1] for item in uart.sent] == ["O", "R"]
+    p.close()
+
+
+def test_pipeline_rearms_from_one_verified_empty_frame_before_next_object(tmp_path):
+    cfg = _dispatch_ready_config()
+    cfg.dispatch_guard.empty_rearm_seconds = 60
+    cfg.dispatch_guard.empty_rearm_frames = 60
+    uart = _StubUart()
+    p = Pipeline(
+        cfg,
+        _ScriptedInfer(
+            [
+                [Detection(0, "Organic", 0.92, (180, 160, 700, 620))],
+                [Detection(18, "Paper", 0.08, (22, 0, 1250, 719))],
+                [Detection(1, "Plastic bottle", 0.91, (180, 160, 900, 680))],
+            ]
+        ),
+        uart,
+        tmp_path / "h.db",
+    )
+    p.reset_dispatch_state(arm_immediately=True)
+    object_frame = np.full((720, 1280, 3), 210, dtype=np.uint8)
+    object_frame[160:650, 180:900] = (45, 55, 155)
+    empty_frame = np.full((720, 1280, 3), 210, dtype=np.uint8)
+    empty_frame[:, :80] = 25
+    empty_frame[:, -80:] = 25
+
+    p.process_frame(object_frame, datetime.now(UTC))
+    first_track, first_command, _ = uart.sent[0]
+    p.on_ack(first_track, first_command, "ok", 3200)
+    p.process_frame(empty_frame, datetime.now(UTC))
+    p.process_frame(object_frame, datetime.now(UTC))
+
+    assert [item[1] for item in uart.sent] == ["O", "I"]
+    p.close()
 
 
 def test_pipeline_clears_emitted_track_after_empty_rearm_for_next_object(tmp_path):
@@ -1728,6 +1820,44 @@ def test_pipeline_merges_fragmented_pen_before_multi_object_guard(tmp_path, monk
     p.close()
 
 
+def test_pipeline_keeps_one_pet_bottle_when_neck_is_false_labeled_as_pen(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Plastic bottle", command="I", bin_index=3)]
+    )
+    cfg.model.class_thresholds["Pen"] = 0.15
+    cfg.manual_reference_recognition.enabled = False
+    cfg.three_bin_classifier.enabled = False
+    uart = _WarningUart()
+    p = Pipeline(
+        cfg,
+        _ScriptedInfer(
+            [
+                [
+                    Detection(1, "Plastic bottle", 0.79, (100, 140, 460, 520)),
+                    Detection(42, "Pen", 0.74, (710, 190, 800, 390)),
+                ]
+            ]
+        ),
+        uart,
+        tmp_path / "h.db",
+    )
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.full((540, 800, 3), 245, dtype=np.uint8)
+    frame[200:510, 110:460] = (35, 80, 170)
+    frame[190:390, 420:800] = (80, 80, 80)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert [(item.cls_name, item.xyxy) for item in detections] == [
+        ("Plastic bottle", (100, 140, 800, 520))
+    ]
+    assert p.dispatch_status == "TEST OFF"
+    assert uart.audio_tracks == []
+    p.close()
+
+
 def test_pipeline_warns_on_computer_speaker_when_selected(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config()
@@ -2053,7 +2183,7 @@ def test_pipeline_routes_low_conf_paper_like_spoon_as_inorganic_utensil(
     p.close()
 
 
-def test_pipeline_blocks_low_conf_visual_metal_utensil_dispatch(tmp_path, monkeypatch):
+def test_pipeline_dispatches_low_conf_visual_metal_utensil(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config()
     cfg.dispatch_guard.min_dispatch_confidence = 0.55
@@ -2068,13 +2198,11 @@ def test_pipeline_blocks_low_conf_visual_metal_utensil_dispatch(tmp_path, monkey
     assert [(item.cls_name, item.source) for item in detections] == [
         ("Iron utensils", "visual_correction:metal_utensil")
     ]
-    assert p.dispatch_status == "low confidence review required"
-    assert uart.sent == []
-    assert p.history.query(limit=10) == []
+    assert uart.sent == [(1, "R", detections[0].conf)]
     p.close()
 
 
-def test_pipeline_blocks_low_conf_known_class_dispatch(tmp_path, monkeypatch):
+def test_pipeline_dispatches_low_conf_known_class(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config(
         mappings=[ClassMapping(class_name="Plastic bottle", command="I", bin_index=3)]
@@ -2087,9 +2215,7 @@ def test_pipeline_blocks_low_conf_known_class_dispatch(tmp_path, monkeypatch):
     detections = p.process_frame(np.full((240, 320, 3), 245, dtype=np.uint8), ts=datetime.now(UTC))
 
     assert [(item.cls_name, item.conf) for item in detections] == [("Plastic bottle", 0.44)]
-    assert p.dispatch_status == "low confidence review required"
-    assert uart.sent == []
-    assert p.history.query(limit=10) == []
+    assert uart.sent == [(1, "I", 0.44)]
     p.close()
 
 
@@ -2114,6 +2240,28 @@ def test_pipeline_blocks_full_frame_multi_object_when_roi_misses_one(tmp_path, m
     detections = p.process_frame(frame, ts=datetime.now(UTC))
 
     assert [item.cls_name for item in detections] == ["Pen"]
+    assert p.dispatch_status == "multiple waste types (2 visible objects)"
+    assert uart.sent == []
+    assert p.history.query(limit=10) == []
+    p.close()
+
+
+def test_pipeline_warns_when_one_detector_box_contains_two_visible_objects(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, _WidePenInfer(), uart, tmp_path / "h.db")
+    frame = np.full((240, 320, 3), 245, dtype=np.uint8)
+    frame[34:68, 30:282] = (45, 45, 180)
+    frame[142:214, 72:238] = (35, 95, 35)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert detections
+    assert all(item.source == "foreground_multi_object" for item in detections)
     assert p.dispatch_status == "multiple waste types (2 visible objects)"
     assert uart.sent == []
     assert p.history.query(limit=10) == []
@@ -2231,7 +2379,7 @@ def test_pipeline_unknown_object_does_not_dispatch_while_visible(tmp_path, monke
     p.close()
 
 
-def test_pipeline_does_not_dispatch_subthreshold_pen_from_reference_source(tmp_path):
+def test_pipeline_dispatches_recognized_pen_from_reference_source(tmp_path):
     cfg = _dispatch_ready_config(
         mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
     )
@@ -2260,8 +2408,7 @@ def test_pipeline_does_not_dispatch_subthreshold_pen_from_reference_source(tmp_p
     _arm_dispatch(p)
     p.process_frame(frame, ts=datetime.now(UTC))
 
-    assert uart.sent == []
-    assert p.dispatch_status == "low confidence review required"
+    assert uart.sent == [(1, "R", 0.78)]
     p.close()
 
 
@@ -2283,10 +2430,72 @@ def test_pipeline_battery_requires_explicit_confirmation_before_dispatch(tmp_pat
     assert pipeline.dispatch_status == "pin nguy hại cần xác nhận trước khi đưa vào Vô cơ"
     confirmed, message = pipeline.confirm_hazardous_battery_dispatch()
     assert confirmed is True
-    assert "rác thải nguy hại" in message
+    assert "Đã gửi lệnh Vô cơ" in message
+    assert uart.sent == [(1, "R", 0.91)]
+    pipeline.close()
+
+
+def test_pipeline_battery_confirmation_dispatches_once_immediately(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Battery", command="I", bin_index=3)]
+    )
+    uart = _StubUart()
+    pipeline = Pipeline(
+        cfg,
+        _ScriptedInfer(
+            [
+                [Detection(43, "Battery", 0.91, (30, 30, 150, 100))],
+                [Detection(43, "Battery", 0.91, (220, 180, 340, 250))],
+            ]
+        ),
+        uart,
+        tmp_path / "h.db",
+    )
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+    _arm_dispatch(pipeline)
+    pipeline.process_frame(frame, datetime.now(UTC))
+    confirmed, _message = pipeline.confirm_hazardous_battery_dispatch()
+    assert confirmed is True
+    assert uart.sent == [(1, "R", 0.91)]
 
     pipeline.process_frame(frame, datetime.now(UTC))
+
     assert uart.sent == [(1, "R", 0.91)]
+    pipeline.close()
+
+
+def test_pipeline_visual_battery_unknown_requires_confirmation(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Battery", command="I", bin_index=3)]
+    )
+    cfg.model.class_thresholds["Unknown object"] = 0.05
+    uart = _StubUart()
+    pipeline = Pipeline(
+        cfg,
+        _ScriptedInfer(
+            [[Detection(-1, "Unknown object", 0.14, (112, 38, 196, 310))]]
+        ),
+        uart,
+        tmp_path / "h.db",
+    )
+    frame = np.full((360, 300, 3), 232, dtype=np.uint8)
+    cv2.rectangle(frame, (124, 54), (184, 116), (78, 132, 188), -1)
+    cv2.rectangle(frame, (124, 116), (184, 294), (34, 34, 36), -1)
+    cv2.rectangle(frame, (138, 146), (172, 238), (224, 224, 218), -1)
+    cv2.rectangle(frame, (132, 54), (176, 294), (75, 72, 72), 3)
+
+    _arm_dispatch(pipeline)
+    detections = pipeline.process_frame(frame, datetime.now(UTC))
+
+    assert [(item.cls_name, item.source, item.operator_label) for item in detections] == [
+        ("Battery", "visual_correction:battery", "Pin AA/AAA")
+    ]
+    assert uart.sent == []
+    assert pipeline.hazardous_warning_active() is True
+    assert pipeline.dispatch_status == "pin nguy hại cần xác nhận trước khi đưa vào Vô cơ"
     pipeline.close()
 
 

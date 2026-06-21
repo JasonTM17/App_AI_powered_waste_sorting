@@ -30,6 +30,9 @@ from app.utils.paths import resource_path
 LIVE_CONTROL_SIZE = QSize(176, 56)
 SPEAKER_BUTTON_SIZE = QSize(182, 48)
 DETECTION_STREAM_LIMIT = 50
+BATTERY_WARNING_TEXT = (
+    "Đây là rác thải nguy hại. Nếu muốn đổ, hãy xác nhận để đưa pin vào Vô cơ."
+)
 
 
 def _icon(name: str) -> QIcon:
@@ -79,6 +82,7 @@ class LivePage(QWidget):
         self._auto_sort_state = "WAITING_EMPTY"
         self._speaker_output_mode = "hardware"
         self._speaker_voice_gender = "female"
+        self._battery_confirmation_pending = False
         self._display_stabilizer = DetectionDisplayStabilizer(
             window_size=9,
             acquire_frames=3,
@@ -222,7 +226,9 @@ class LivePage(QWidget):
         self.btn_confirm_battery = QPushButton("Xác nhận đưa vào Vô cơ")
         self.btn_confirm_battery.setObjectName("danger")
         self.btn_confirm_battery.setToolTip("Chỉ gửi pin vào thùng Vô cơ sau khi Admin xác nhận.")
-        self.btn_confirm_battery.clicked.connect(self.hazardous_battery_confirmation_requested.emit)
+        self.btn_confirm_battery.clicked.connect(
+            self._request_hazardous_battery_confirmation
+        )
         battery_layout.addWidget(self.btn_confirm_battery)
         self.battery_warning.setVisible(False)
         root.addWidget(self.battery_warning)
@@ -360,7 +366,43 @@ class LivePage(QWidget):
 
     def set_hazardous_battery_warning(self, active: bool) -> None:
         self.battery_warning.setVisible(bool(active))
-        self.btn_confirm_battery.setEnabled(bool(active and self._actuation_test_mode and self._uart_ok))
+        if not active:
+            self._battery_confirmation_pending = False
+            self.btn_confirm_battery.setText("Xác nhận đưa vào Vô cơ")
+            self.battery_warning_text.setText(BATTERY_WARNING_TEXT)
+        self.btn_confirm_battery.setEnabled(
+            bool(
+                active
+                and self._actuation_test_mode
+                and self._uart_ok
+                and not self._battery_confirmation_pending
+            )
+        )
+
+    def _request_hazardous_battery_confirmation(self) -> None:
+        self._battery_confirmation_pending = True
+        self.btn_confirm_battery.setEnabled(False)
+        self.btn_confirm_battery.setText("Đang xác nhận...")
+        self.battery_warning_text.setText(
+            "Đang xác nhận pin nguy hại. Vui lòng giữ pin trong khay."
+        )
+        self.hazardous_battery_confirmation_requested.emit()
+
+    def set_hazardous_confirmation_result(self, ok: bool, message: str) -> None:
+        if ok:
+            self._battery_confirmation_pending = True
+            self.btn_confirm_battery.setEnabled(False)
+            self.btn_confirm_battery.setText("Đã xác nhận - đang đổ...")
+            self.battery_warning_text.setText(
+                "Đã xác nhận pin nguy hại. Hệ thống đang gửi pin vào Vô cơ."
+            )
+            return
+        self._battery_confirmation_pending = False
+        self.btn_confirm_battery.setText("Thử xác nhận lại")
+        self.battery_warning_text.setText(str(message or "Không thể xác nhận pin."))
+        self.btn_confirm_battery.setEnabled(
+            bool(self.battery_warning.isVisible() and self._actuation_test_mode and self._uart_ok)
+        )
 
     def set_speaker_output_mode(self, mode: str, emit: bool = False) -> None:
         normalized = "computer_speaker" if str(mode or "").strip() == "computer_speaker" else "hardware"
@@ -478,11 +520,12 @@ class LivePage(QWidget):
     def is_paused(self) -> bool:
         return self._paused
 
-    def update_frame(self, frame, detections: list[Detection]) -> None:
+    def update_frame(self, frame, detections: list[Detection], roi=None) -> None:
         if self._paused or not self._cam_on:
             return
         if not self.isVisible():
             return
+        self.video.set_roi(roi)
         self.video.set_frame(frame)
         self.video.set_detections(detections)
 

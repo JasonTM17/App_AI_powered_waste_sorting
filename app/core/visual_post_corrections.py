@@ -89,7 +89,14 @@ def apply_visual_post_corrections(
                     operator_label="Muong kim loai",
                 )
         elif detection.cls_name == unknown_class_name:
-            if _looks_like_pen_like_tool(frame_bgr, detection.xyxy):
+            if _looks_like_battery(frame_bgr, detection.xyxy):
+                corrected = _replace_detection(
+                    detection,
+                    "Battery",
+                    source="visual_correction:battery",
+                    operator_label="Pin AA/AAA",
+                )
+            elif _looks_like_pen_like_tool(frame_bgr, detection.xyxy):
                 corrected = _replace_detection(
                     detection,
                     "Pen",
@@ -302,6 +309,106 @@ def _looks_like_pen_like_tool(
         and max_to_median_width <= 2.80
         and width_variation <= 0.78
         and (blue_ratio >= 0.015 or dark_ratio >= 0.08 or low_saturation_ratio >= 0.55)
+    )
+
+
+def _looks_like_battery(
+    frame_bgr: np.ndarray,
+    xyxy: tuple[int, int, int, int],
+) -> bool:
+    crop = _crop(frame_bgr, xyxy, pad_ratio=0.02)
+    if crop is None:
+        return False
+
+    box_w = max(1, int(xyxy[2]) - int(xyxy[0]))
+    box_h = max(1, int(xyxy[3]) - int(xyxy[1]))
+    box_aspect = box_w / float(box_h)
+    horizontal = box_aspect >= 1.0
+    if not (box_aspect >= 1.55 or box_aspect <= 0.65):
+        return False
+
+    mask = _foreground_mask(crop)
+    stats = _mask_stats(crop, mask)
+    if stats is None:
+        return False
+
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    hue = hsv[:, :, 0]
+    saturation = hsv[:, :, 1]
+    value = hsv[:, :, 2]
+    object_mask = mask > 0
+    if not np.any(object_mask):
+        return False
+
+    warm_metal = (
+        (hue >= 5)
+        & (hue <= 34)
+        & (saturation >= 32)
+        & (value >= 72)
+        & (value <= 235)
+    )
+    dark_body = value <= 118
+    neutral_dark_body = dark_body & (saturation <= 135)
+    bright_print = (value >= 145) & (saturation <= 105)
+
+    axis_length = crop.shape[1] if horizontal else crop.shape[0]
+    if axis_length < 24:
+        return False
+    first_slice = slice(0, max(1, axis_length // 3))
+    last_slice = slice(max(0, axis_length * 2 // 3), axis_length)
+
+    if horizontal:
+        first_mask = object_mask[:, first_slice]
+        last_mask = object_mask[:, last_slice]
+        first_warm = warm_metal[:, first_slice]
+        last_warm = warm_metal[:, last_slice]
+        first_dark = neutral_dark_body[:, first_slice]
+        last_dark = neutral_dark_body[:, last_slice]
+    else:
+        first_mask = object_mask[first_slice, :]
+        last_mask = object_mask[last_slice, :]
+        first_warm = warm_metal[first_slice, :]
+        last_warm = warm_metal[last_slice, :]
+        first_dark = neutral_dark_body[first_slice, :]
+        last_dark = neutral_dark_body[last_slice, :]
+
+    def _ratio(region: np.ndarray, region_mask: np.ndarray) -> float:
+        active = region_mask > 0
+        if not np.any(active):
+            return 0.0
+        return float(np.mean(region[active]))
+
+    warm_at_one_end = max(
+        _ratio(first_warm, first_mask),
+        _ratio(last_warm, last_mask),
+    )
+    dark_at_other_end = max(
+        _ratio(first_dark, first_mask),
+        _ratio(last_dark, last_mask),
+    )
+    object_warm_ratio = float(np.mean(warm_metal[object_mask]))
+    object_dark_ratio = float(np.mean(neutral_dark_body[object_mask]))
+    object_print_ratio = float(np.mean(bright_print[object_mask]))
+    width_variation, max_to_median_width = _silhouette_width_variation(
+        mask,
+        horizontal=horizontal,
+    )
+    contrast = float(np.std(gray))
+
+    return (
+        stats["area_ratio"] >= 0.15
+        and stats["extent"] >= 0.24
+        and stats["oriented_aspect"] >= 2.05
+        and stats["circularity"] <= 0.58
+        and warm_at_one_end >= 0.18
+        and dark_at_other_end >= 0.25
+        and object_warm_ratio >= 0.08
+        and object_dark_ratio >= 0.22
+        and object_print_ratio <= 0.30
+        and width_variation <= 0.82
+        and max_to_median_width <= 2.35
+        and contrast >= 18.0
     )
 
 

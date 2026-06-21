@@ -324,6 +324,7 @@ class AppController(QObject):
         self._last_frame_t = 0.0
         self._fps = 0.0
         self._latency = 0.0
+        self._last_sort_ack: dict[str, object] = {}
         self._last_frame = None
         self._last_detections = []
         self._annotation_frame = None
@@ -571,6 +572,7 @@ class AppController(QObject):
         worker.connected.connect(self._on_uart_connected)
         worker.ack_received.connect(self._on_uart_ack)
         worker.bin_received.connect(self._on_uart_bin_fullness)
+        worker.proximity_received.connect(self._on_uart_proximity)
         if self._pipeline is not None:
             self._pipeline.set_uart(worker)
         self._uart = worker
@@ -627,6 +629,8 @@ class AppController(QObject):
             worker.ack_received.disconnect(self._on_uart_ack)
         with suppress(RuntimeError, TypeError):
             worker.bin_received.disconnect(self._on_uart_bin_fullness)
+        with suppress(RuntimeError, TypeError):
+            worker.proximity_received.disconnect(self._on_uart_proximity)
         if self._pipeline is not None:
             self._pipeline.set_uart(None)
         worker.stop()
@@ -665,8 +669,26 @@ class AppController(QObject):
                 "Phân loại tự động đã tắt vì UART mất kết nối.",
             )
         self.uart_status.emit(ok, self.cfg.uart.protocol)
+        if ok:
+            self._sync_sensor_audio_mode()
+
+    def _sync_sensor_audio_mode(self) -> None:
+        """Keep Arduino proximity alerts on the selected audio output."""
+        if self._uart is None or not self._uart.is_connected:
+            return
+        sender = getattr(self._uart, "send_sensor_audio_mode", None)
+        if not callable(sender):
+            return
+        hardware_audio_enabled = not computer_speaker_enabled(self.cfg)
+        sender(hardware_audio_enabled)
+        logger.info(
+            "synced proximity audio mode={} to uart",
+            "hardware" if hardware_audio_enabled else "laptop",
+        )
 
     def _on_uart_ack(self, track_id: int, command: str, status: str, rtt_ms) -> None:
+        import time
+
         if track_id < 0:
             pending = self._pending_uart_tests.pop(track_id, None)
             payload = pending[1] if pending else command
@@ -677,8 +699,34 @@ class AppController(QObject):
                 f"sent {payload.strip()} on {port}; ACK {status}; {int(rtt_ms or 0)} ms",
             )
             return
+        self._last_sort_ack = {
+            "track_id": int(track_id),
+            "command": str(command or "").strip().upper(),
+            "status": str(status or "").strip(),
+            "rtt_ms": int(rtt_ms or 0),
+            "at": time.monotonic(),
+        }
         if self._pipeline is not None:
             self._pipeline.on_ack(track_id, command, status, rtt_ms)
+
+    def latest_ack_status_text(self, command: str, fallback: str) -> str:
+        import time
+
+        ack = dict(self._last_sort_ack or {})
+        ack_command = str(ack.get("command") or "").strip().upper()
+        wanted = str(command or "").strip().upper()
+        if not ack or ack_command != wanted:
+            return fallback
+        age_s = time.monotonic() - float(ack.get("at") or 0.0)
+        if age_s > 12.0:
+            return fallback
+        status = str(ack.get("status") or "").strip() or "pending"
+        rtt_ms = int(ack.get("rtt_ms") or 0)
+        if status == "ok":
+            return f"OK {rtt_ms} ms"
+        if status == "no_ack":
+            return f"NO ACK {rtt_ms} ms"
+        return f"{status.upper()} {rtt_ms} ms"
 
     def _on_uart_bin_fullness(self, bin_index: int, percent: int) -> None:
         try:
@@ -703,6 +751,19 @@ class AppController(QObject):
         else:
             message = f"Thùng {label} gần đầy {percent}%. Nên chuẩn bị thu gom."
         self.bin_fullness_alert.emit(bin_index, percent, status, message)
+
+    def _on_uart_proximity(self, command: str) -> None:
+        """Play the matching full-bin voice locally when laptop audio is selected."""
+        clean_command = str(command or "").strip().upper()
+        if clean_command not in {"O", "R", "I"}:
+            return
+        if not computer_speaker_enabled(self.cfg):
+            return
+        event_key = f"bin_full_{clean_command}"
+        if self._speaker.preview_event(event_key, voice_gender=self.cfg.speaker.voice_gender):
+            logger.info("played laptop proximity alert event={}", event_key)
+        else:
+            logger.warning("laptop proximity alert audio missing event={}", event_key)
 
     def _persist_bin_fullness(self, bin_index: int, percent: int) -> None:
         try:
@@ -865,14 +926,29 @@ class AppController(QObject):
     def _on_frame(self, frame: np.ndarray) -> None:
         if self._inference_worker is None:
             return
+        import time
+
         self._last_frame = frame
         if not self._camera_shared_mode:
             self._shared_publisher.publish(frame)
         self._inference_worker.submit(frame)
 
-    def _on_inferred(self, frame, detections, latency_ms: float) -> None:
-        import time
+        # Keep the live camera preview tied to the camera cadence, not to the
+        # slower YOLO cadence. The inference worker still updates
+        # _last_detections/_latency in the background; the renderer reuses the
+        # newest available detections so the UI stays fluid even when inference
+        # temporarily drops to a few FPS on a blurry 720p frame.
         now = time.time()
+        min_interval = 1.0 / 24.0
+        if self._last_frame_t and (now - self._last_frame_t) < min_interval:
+            return
+        if self._last_frame_t:
+            inst_fps = 1.0 / max(now - self._last_frame_t, 1e-6)
+            self._fps = 0.85 * self._fps + 0.15 * inst_fps
+        self._last_frame_t = now
+        self.frame_processed.emit(frame, list(self._last_detections), self._fps, self._latency)
+
+    def _on_inferred(self, frame, detections, latency_ms: float) -> None:
         self._last_detections = list(detections)
         if self._recognition_test.active:
             from app.core.multi_object_dispatch import foreground_object_boxes
@@ -890,18 +966,7 @@ class AppController(QObject):
                 dispatch_status=self.dispatch_status(),
                 foreground_count=foreground_count,
             )
-        # Cap UI emit rate to ~30 fps regardless of how fast inference runs.
-        # The pipeline still ran (history + UART), we just skip pushing the
-        # frame to the renderer when the previous emit was very recent.
-        min_interval = 1.0 / 30.0
-        if self._last_frame_t and (now - self._last_frame_t) < min_interval:
-            return
         self._latency = latency_ms
-        if self._last_frame_t:
-            inst_fps = 1.0 / max(now - self._last_frame_t, 1e-6)
-            self._fps = 0.9 * self._fps + 0.1 * inst_fps
-        self._last_frame_t = now
-        self.frame_processed.emit(frame, detections, self._fps, self._latency)
 
     def update_config(self, new_cfg: AppConfig) -> None:
         new_cfg = normalize_speaker_output_config(self._sanitize_uart_config(new_cfg))
@@ -967,6 +1032,8 @@ class AppController(QObject):
                 self._pipeline.update_mappings(new_cfg.mappings)
         if uart_changed:
             self._restart_uart_if_needed()
+        else:
+            self._sync_sensor_audio_mode()
         if (cam_changed or model_changed) and was_running:
             self.start_camera()
         logger.info(
@@ -1157,6 +1224,7 @@ class AppController(QObject):
             self.hazardous_confirmation_result.emit(False, "Recognition pipeline is not ready.")
             return
         ok, message = self._pipeline.confirm_hazardous_battery_dispatch()
+        logger.info("desktop battery confirmation result ok={} message={}", ok, message)
         self.hazardous_confirmation_result.emit(ok, message)
 
     def auto_sort_state(self) -> str:
@@ -1468,6 +1536,15 @@ class AppController(QObject):
     def _on_recognition_dispatch_started(self, evidence: object) -> None:
         if not isinstance(evidence, dict):
             return
+        import time
+
+        self._last_sort_ack = {
+            "track_id": int(evidence.get("track_id") or 0),
+            "command": str(evidence.get("route") or "").strip().upper(),
+            "status": "pending",
+            "rtt_ms": 0,
+            "at": time.monotonic(),
+        }
         self._recognition_test.dispatch_started(evidence)
         self._qa_dispatch_armed = False
         self._configure_camera_dispatch()
