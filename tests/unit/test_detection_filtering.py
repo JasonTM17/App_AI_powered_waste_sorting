@@ -5,6 +5,7 @@ from app.core.detection_filtering import (
     find_ambiguous_organic_candidate,
     is_low_detail_empty_tray,
     is_uniform_empty_tray_artifact,
+    merge_fragmented_same_label_detections,
     suppress_overlapping_detections,
 )
 from app.core.events import Detection
@@ -86,6 +87,30 @@ def test_collapse_duplicate_physical_detections_keeps_nearby_real_objects_separa
     filtered = collapse_duplicate_physical_detections(detections)
 
     assert [item.cls_name for item in filtered] == ["Pen", "Paper"]
+
+
+def test_fragmented_same_label_merges_even_when_foreground_splits_one_long_object():
+    parts = [
+        Detection(42, "Pen", 0.72, (20, 90, 210, 128)),
+        Detection(42, "Pen", 0.84, (235, 92, 510, 130)),
+    ]
+
+    merged = merge_fragmented_same_label_detections(parts, foreground_object_count=1)
+    split_foreground = merge_fragmented_same_label_detections(parts, foreground_object_count=2)
+
+    assert [(item.cls_name, item.xyxy) for item in merged] == [("Pen", (20, 90, 510, 130))]
+    assert [(item.cls_name, item.xyxy) for item in split_foreground] == [("Pen", (20, 90, 510, 130))]
+
+
+def test_fragmented_same_label_keeps_far_same_label_objects_separate():
+    parts = [
+        Detection(42, "Pen", 0.72, (20, 90, 160, 128)),
+        Detection(42, "Pen", 0.84, (360, 92, 510, 130)),
+    ]
+
+    filtered = merge_fragmented_same_label_detections(parts, foreground_object_count=2)
+
+    assert filtered == parts
 
 
 def test_uniform_empty_tray_rejects_full_frame_false_positive():

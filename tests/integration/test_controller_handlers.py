@@ -756,7 +756,9 @@ def test_capture_reviewed_camera_sample_writes_trainable_item(tmp_path, monkeypa
     saved: list[str] = []
     controller.capture_saved.connect(saved.append)
 
-    controller.capture_reviewed_camera_sample("miếng vải", 0, (10, 12, 100, 70), True)
+    controller.capture_reviewed_camera_sample(
+        "miếng vải", 0, "miếng vải", (10, 12, 100, 70), True
+    )
 
     assert saved
     image_path = Path(saved[0])
@@ -765,8 +767,43 @@ def test_capture_reviewed_camera_sample_writes_trainable_item(tmp_path, monkeypa
     assert meta["boxes"][0]["cls_id"] == 37
     assert meta["reviewed"] is True
     assert meta["bbox_reviewed"] is True
+    assert meta["capture_session_id"].startswith("desktop-")
+    assert meta["object_instance_id"]
+    assert meta["viewpoint_id"].startswith("view-")
+    assert meta["split"] == "train"
+    assert meta["recognition_enabled"] is True
+    assert meta["quality_bucket"] in {
+        "blurry_real_camera",
+        "soft_real_camera",
+        "sharp_real_camera",
+    }
     assert is_trainable_meta(meta) is True
     assert refresh.calls == 1
+
+
+def test_capture_reviewed_camera_holdout_is_not_reference_enabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = AppConfig()
+    cfg.capture.output_dir = str(tmp_path / "dataset")
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    controller._annotation_frame = np.full((80, 120, 3), 180, dtype=np.uint8)
+    saved: list[str] = []
+    controller.capture_saved.connect(saved.append)
+
+    controller.capture_reviewed_camera_sample(
+        "Battery",
+        43,
+        "Pin AA/AAA",
+        (10, 12, 100, 70),
+        True,
+        "holdout",
+    )
+
+    meta = json.loads(Path(saved[0]).with_suffix(".json").read_text(encoding="utf-8"))
+    assert meta["split"] == "holdout"
+    assert meta["holdout"] is True
+    assert meta["recognition_enabled"] is False
+    assert meta["hazardous"] is True
 
 
 def test_camera_annotation_snapshot_rejects_empty_tray(tmp_path):
@@ -830,7 +867,9 @@ def test_capture_reviewed_camera_sample_rejects_tiny_bbox(tmp_path, monkeypatch)
     controller.snapshot_saved.connect(lambda ok, msg: messages.append((ok, msg)))
     controller.capture_saved.connect(saved.append)
 
-    controller.capture_reviewed_camera_sample("Plastic bottle", 24, (70, 52, 78, 60), True)
+    controller.capture_reviewed_camera_sample(
+        "Plastic bottle", 24, "Chai nhựa PET", (70, 52, 78, 60), True
+    )
 
     assert not saved
     assert messages

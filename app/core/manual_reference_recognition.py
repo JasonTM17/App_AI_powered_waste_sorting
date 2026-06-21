@@ -7,7 +7,7 @@ import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from threading import RLock
+from threading import Lock, RLock, Thread
 
 import numpy as np
 from PIL import Image
@@ -19,6 +19,7 @@ from app.core.image_embedding import (
     cosine_similarity,
     create_image_embedder,
 )
+from app.core.waste_display import normalize_operator_label
 from app.utils.logging import logger
 
 MANUAL_REFERENCE_SOURCES = {
@@ -69,10 +70,12 @@ class ManualReferenceRecognizer:
         self.queue_dir = queue_dir
         self.embedder = embedder or create_image_embedder()
         self._lock = RLock()
+        self._refresh_lock = Lock()
+        self._prewarm_thread: Thread | None = None
         self._references: list[_Reference] = []
         self._last_refresh = 0.0
         self._last_signature: tuple[int, float] = (0, 0.0)
-        self._query_cache: dict[int, tuple[float, ManualReferenceMatch | None]] = {}
+        self._query_cache: dict[tuple[object, ...], tuple[float, ManualReferenceMatch | None]] = {}
         self.configure(
             enabled=enabled,
             min_similarity=min_similarity,
@@ -125,17 +128,43 @@ class ManualReferenceRecognizer:
             self.refresh()
 
     def refresh(self, *, force: bool = False) -> None:
-        now = time.monotonic()
-        signature = self._signature()
+        with self._refresh_lock:
+            now = time.monotonic()
+            signature = self._signature()
+            with self._lock:
+                self._last_refresh = now
+                if not force and signature == self._last_signature:
+                    return
+                self._last_signature = signature
+            references = self._load_references()
+            with self._lock:
+                self._references = references
+                self._query_cache.clear()
+
+    def prewarm_async(self) -> bool:
+        """Load reviewed camera references before the first unknown frame arrives."""
         with self._lock:
-            self._last_refresh = now
-            if not force and signature == self._last_signature:
-                return
-            self._last_signature = signature
-        references = self._load_references()
-        with self._lock:
-            self._references = references
-            self._query_cache.clear()
+            if not self.enabled or self._references:
+                return False
+            if self._prewarm_thread is not None and self._prewarm_thread.is_alive():
+                return False
+            worker = Thread(
+                target=self._run_prewarm,
+                name="manual-reference-prewarm",
+                daemon=True,
+            )
+            self._prewarm_thread = worker
+        worker.start()
+        return True
+
+    def _run_prewarm(self) -> None:
+        try:
+            self.refresh(force=True)
+        except Exception:
+            logger.exception("manual reference prewarm failed")
+        finally:
+            with self._lock:
+                self._prewarm_thread = None
 
     def classify(
         self,
@@ -144,6 +173,7 @@ class ManualReferenceRecognizer:
         *,
         allowed_classes: set[str] | None = None,
         min_similarity: float | None = None,
+        min_consensus_similarity: float | None = None,
         min_votes: int | None = None,
     ) -> ManualReferenceMatch | None:
         with self._lock:
@@ -170,6 +200,7 @@ class ManualReferenceRecognizer:
                 now,
                 references,
                 min_similarity=min_similarity,
+                min_consensus_similarity=min_consensus_similarity,
                 min_votes=min_votes,
             )
             if match is None:
@@ -185,6 +216,7 @@ class ManualReferenceRecognizer:
         references: tuple[_Reference, ...],
         *,
         min_similarity: float | None = None,
+        min_consensus_similarity: float | None = None,
         min_votes: int | None = None,
     ) -> ManualReferenceMatch | None:
         with self._lock:
@@ -199,16 +231,21 @@ class ManualReferenceRecognizer:
                 if min_similarity is not None
                 else self.min_similarity
             )
-            min_consensus_similarity = self.min_consensus_similarity
+            active_min_consensus_similarity = (
+                float(min_consensus_similarity)
+                if min_consensus_similarity is not None
+                else self.min_consensus_similarity
+            )
             min_margin = self.min_margin
         reference_scope = tuple(sorted({reference.cls_name for reference in references}))
-        cache_key = hash(
-            (
-                _difference_hash(crop),
-                round(active_min_similarity, 3),
-                active_min_votes,
-                reference_scope,
-            )
+        cache_key = (
+            _difference_hash(crop),
+            _color_hash(crop),
+            _shape_bucket(crop),
+            round(active_min_similarity, 3),
+            round(active_min_consensus_similarity, 3),
+            active_min_votes,
+            reference_scope,
         )
         cache_hit, cached = self._cached_match(cache_key, now)
         if cache_hit:
@@ -247,7 +284,7 @@ class ManualReferenceRecognizer:
         margin = winner_score - runner_up if runner_up >= 0 else 1.0
         if (
             best_score < active_min_similarity
-            or consensus_score < min_consensus_similarity
+            or consensus_score < active_min_consensus_similarity
             or margin < min_margin
         ):
             self._store_cached_match(cache_key, None, now)
@@ -273,7 +310,7 @@ class ManualReferenceRecognizer:
 
     def _cached_match(
         self,
-        cache_key: int,
+        cache_key: tuple[object, ...],
         now: float,
     ) -> tuple[bool, ManualReferenceMatch | None]:
         with self._lock:
@@ -287,13 +324,25 @@ class ManualReferenceRecognizer:
             for key in expired:
                 self._query_cache.pop(key, None)
             for key, (_created_at, match) in self._query_cache.items():
-                if (key ^ cache_key).bit_count() <= 4:
+                if key == cache_key:
+                    return True, match
+                if match is None:
+                    continue
+                if (
+                    key[2:] == cache_key[2:]
+                    and isinstance(key[0], int)
+                    and isinstance(cache_key[0], int)
+                    and isinstance(key[1], int)
+                    and isinstance(cache_key[1], int)
+                    and (key[0] ^ cache_key[0]).bit_count() <= 4
+                    and (key[1] ^ cache_key[1]).bit_count() <= 2
+                ):
                     return True, match
         return False, None
 
     def _store_cached_match(
         self,
-        cache_key: int,
+        cache_key: tuple[object, ...],
         match: ManualReferenceMatch | None,
         now: float,
     ) -> None:
@@ -343,7 +392,10 @@ class ManualReferenceRecognizer:
                             _Reference(
                                 cls_id=cls_id,
                                 cls_name=cls_name,
-                                operator_label=str(box.get("operator_label") or "").strip(),
+                                operator_label=normalize_operator_label(
+                                    str(box.get("operator_label") or ""),
+                                    cls_name,
+                                ),
                                 image_path=image_path,
                                 vector=vector,
                             )
@@ -533,6 +585,19 @@ def _difference_hash(rgb: np.ndarray) -> int:
     for bit in bits.flat:
         value = (value << 1) | int(bool(bit))
     return value
+
+
+def _color_hash(rgb: np.ndarray) -> int:
+    if rgb.size == 0:
+        return 0
+    mean_rgb = np.asarray(rgb, dtype=np.float32).reshape(-1, 3).mean(axis=0)
+    r, g, b = (int(max(0, min(15, value // 16))) for value in mean_rgb[:3])
+    return (r << 8) | (g << 4) | b
+
+
+def _shape_bucket(rgb: np.ndarray) -> tuple[int, int]:
+    height, width = rgb.shape[:2]
+    return (height // 16, width // 16)
 
 
 __all__ = ["ManualReferenceMatch", "ManualReferenceRecognizer"]

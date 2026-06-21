@@ -46,6 +46,10 @@ def _exact_label_key(detection: Detection) -> tuple[str, str] | None:
     return detection.cls_name, detection.operator_label
 
 
+def _has_operator_label(key: tuple[str, str] | None) -> bool:
+    return bool(key is not None and str(key[1] or "").strip())
+
+
 def _generic_route_detection(
     family: str,
     samples: list[Detection],
@@ -187,6 +191,7 @@ class DetectionDisplayStabilizer:
         exact_counts = Counter(_exact_label_key(sample) for sample in exact_samples)
         if exact_counts:
             candidate, candidate_count = exact_counts.most_common(1)[0]
+            trusted_exact_keys = {key for key in exact_counts if _has_operator_label(key)}
             exact_keys = [_exact_label_key(sample) for sample in exact_samples]
             required = (
                 self.exact_acquire_frames
@@ -194,12 +199,20 @@ class DetectionDisplayStabilizer:
                 else self.exact_switch_frames
             )
             consecutive = exact_keys[-self.exact_switch_consecutive_frames :]
-            can_select = candidate_count >= required and (
+            can_acquire_trusted_label = (
                 self._stable_exact_key is None
-                or candidate == self._stable_exact_key
-                or (
-                    len(consecutive) == self.exact_switch_consecutive_frames
-                    and all(key == candidate for key in consecutive)
+                and len(trusted_exact_keys) == 1
+                and candidate in trusted_exact_keys
+            )
+            can_select = can_acquire_trusted_label or (
+                candidate_count >= required
+                and (
+                    self._stable_exact_key is None
+                    or candidate == self._stable_exact_key
+                    or (
+                        len(consecutive) == self.exact_switch_consecutive_frames
+                        and all(key == candidate for key in consecutive)
+                    )
                 )
             )
             if can_select:
@@ -215,13 +228,12 @@ class DetectionDisplayStabilizer:
             if _exact_label_key(sample) == self._stable_exact_key
         ]
         if not matching:
-            return self._stable_detection or _generic_route_detection(
-                self._stable_family,
-                samples,
-            )
-        latest = matching[-1]
+            self._stable_exact_key = None
+            self._stable_detection = _generic_route_detection(self._stable_family, samples)
+            return self._stable_detection
+        latest = samples[-1]
         confidence = sum(sample.conf for sample in matching) / len(matching)
-        self._stable_detection = replace(latest, conf=confidence)
+        self._stable_detection = replace(matching[-1], conf=confidence, xyxy=latest.xyxy)
         return self._stable_detection
 
     def _handle_empty_frame(self) -> list[Detection]:

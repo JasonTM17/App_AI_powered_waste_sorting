@@ -267,3 +267,128 @@ def test_catalog_handles_parallel_open_read_and_index_queue(tmp_path: Path):
         assert catalog.count_boxes_total() == 18
     finally:
         catalog.close()
+
+
+def test_catalog_persists_recent_review_capture_signature(tmp_path: Path):
+    db_path = tmp_path / "dataset.db"
+    catalog = DatasetCatalog(db_path)
+    try:
+        catalog.record_review_capture(
+            object_signature="object-1",
+            reason="unknown_object",
+            frame_fingerprint="00" * 32,
+            session_id="session-1",
+            item_id="item-1",
+            captured_at_epoch=1000.0,
+        )
+    finally:
+        catalog.close()
+
+    reopened = DatasetCatalog(db_path)
+    try:
+        assert reopened.has_recent_review_capture(
+            object_signature="object-1",
+            reason="unknown_object",
+            frame_fingerprint="00" * 32,
+            now_epoch=1005.0,
+            cooldown_seconds=12.0,
+            similar_scene_seconds=60.0,
+        )
+        assert not reopened.has_recent_review_capture(
+            object_signature="object-2",
+            reason="unknown_object",
+            frame_fingerprint="ff" * 32,
+            now_epoch=1005.0,
+            cooldown_seconds=12.0,
+            similar_scene_seconds=60.0,
+        )
+    finally:
+        reopened.close()
+
+
+def test_catalog_indexes_campaign_metadata_and_reports_specialist_stats(tmp_path: Path):
+    qdir = tmp_path / "queue"
+    train_image = _make_item(qdir, "comb_train", reviewed=True)
+    holdout_image = _make_item(qdir, "comb_holdout", reviewed=True)
+    for image_path, split, session in (
+        (train_image, "train", "session-a"),
+        (holdout_image, "holdout", "session-b"),
+    ):
+        meta_path = image_path.with_suffix(".json")
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta.update(
+            {
+                "operator_label": "Cái lược",
+                "capture_session_id": session,
+                "quality_bucket": "usable",
+                "review_priority": "high",
+                "split": split,
+                "holdout": split == "holdout",
+                "hazardous": False,
+                "recognition_enabled": split == "train",
+            }
+        )
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+
+    catalog = DatasetCatalog(tmp_path / "dataset.db")
+    try:
+        catalog.index_queue(qdir)
+        assert catalog.specialist_label_stats("Cái lược") == {
+            "train": 1,
+            "holdout": 1,
+            "sessions": 2,
+            "total": 2,
+        }
+        row = catalog.get_item("comb_train")
+        assert row is not None
+        assert row["operator_label"] == "Cái lược"
+        assert row["quality_bucket"] == "usable"
+        assert row["recognition_enabled"] == 1
+    finally:
+        catalog.close()
+
+
+def test_specialist_stats_exclude_untrusted_reviewed_items(tmp_path: Path):
+    qdir = tmp_path / "queue"
+    approved = _make_item(qdir, "comb_approved", reviewed=True)
+    excluded = _make_item(qdir, "comb_excluded", reviewed=True)
+    for image_path, training_excluded in ((approved, False), (excluded, True)):
+        meta_path = image_path.with_suffix(".json")
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta.update(
+            {
+                "operator_label": "Cái lược",
+                "capture_session_id": "session-a",
+                "training_excluded": training_excluded,
+            }
+        )
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+
+    catalog = DatasetCatalog(tmp_path / "dataset.db")
+    try:
+        catalog.index_queue(qdir)
+        assert catalog.specialist_label_stats("Cái lược") == {
+            "train": 1,
+            "holdout": 0,
+            "sessions": 1,
+            "total": 1,
+        }
+    finally:
+        catalog.close()
+
+
+def test_catalog_incremental_index_keeps_older_rows(tmp_path: Path):
+    qdir = tmp_path / "queue"
+    old_image = _make_item(qdir, "old", reviewed=True)
+    catalog = DatasetCatalog(tmp_path / "dataset.db")
+    try:
+        catalog.upsert_item(old_image, json.loads(old_image.with_suffix(".json").read_text()))
+        for index in range(3):
+            image_path = _make_item(qdir, f"new_{index}", reviewed=True)
+            image_path.touch()
+
+        assert catalog.index_queue_incremental(qdir, limit=2) == 2
+        assert catalog.get_item("old") is not None
+        assert catalog.count_total() == 3
+    finally:
+        catalog.close()

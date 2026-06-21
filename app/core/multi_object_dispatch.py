@@ -257,11 +257,37 @@ def _foreground_fragments_same_object(
         return False
     larger = first if first_area >= second_area else second
     smaller = second if first_area >= second_area else first
+    if _touching_foreground_fragments_same_object(first, second):
+        return True
     if _elongated_foreground_fragments_same_object(first, second):
         return True
     if min(first_area, second_area) / max(first_area, second_area) > 0.35:
         return False
     return _small_foreground_fragment_belongs_to_object(smaller, larger)
+
+
+def _touching_foreground_fragments_same_object(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+) -> bool:
+    """Join adjacent halves split by a bright crease on one bulky object."""
+    ax1, ay1, ax2, ay2 = first
+    bx1, by1, bx2, by2 = second
+    first_width = max(1, ax2 - ax1)
+    first_height = max(1, ay2 - ay1)
+    second_width = max(1, bx2 - bx1)
+    second_height = max(1, by2 - by1)
+    gap_x = max(ax1 - bx2, bx1 - ax2, 0)
+    gap_y = max(ay1 - by2, by1 - ay2, 0)
+    horizontal_overlap = max(0, min(ax2, bx2) - max(ax1, bx1))
+    vertical_overlap = max(0, min(ay2, by2) - max(ay1, by1))
+    horizontal_ratio = horizontal_overlap / min(first_width, second_width)
+    vertical_ratio = vertical_overlap / min(first_height, second_height)
+    close_x = max(3, round(max(first_width, second_width) * 0.02))
+    close_y = max(3, round(max(first_height, second_height) * 0.02))
+    return (gap_x <= close_x and vertical_ratio >= 0.72) or (
+        gap_y <= close_y and horizontal_ratio >= 0.72
+    )
 
 
 def _box_area(box: tuple[int, int, int, int]) -> int:

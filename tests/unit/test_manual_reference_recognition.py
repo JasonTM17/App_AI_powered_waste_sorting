@@ -1,10 +1,12 @@
 import json
 from datetime import datetime
 from threading import Thread
+from time import monotonic, sleep
 
 import numpy as np
 from PIL import Image
 
+import app.core.manual_reference_recognition as manual_refs
 from app.core.events import Detection
 from app.core.image_embedding import LegacyImageEmbedder
 from app.core.manual_reference_recognition import (
@@ -282,6 +284,57 @@ def test_manual_reference_caches_stable_query_crop(tmp_path):
     assert first is not None
     assert second == first
     assert embedder.calls == calls_after_first
+
+
+def test_manual_reference_does_not_fuzzy_reuse_negative_cache(monkeypatch, tmp_path):
+    queue_dir = tmp_path / "queue"
+    _write_reference(queue_dir, reviewed=True)
+    embedder = _CountingEmbedder()
+    recognizer = ManualReferenceRecognizer(
+        queue_dir,
+        min_similarity=0.9,
+        refresh_seconds=30,
+        query_cache_seconds=2,
+        embedder=embedder,
+    )
+    detection = Detection(999, "Unknown object", 0.39, (15, 12, 65, 28))
+    hashes = [0b1000, 0b1000, 0b1001, 0b1001]
+
+    def next_hash(_rgb):
+        return hashes.pop(0) if hashes else 0b1001
+
+    monkeypatch.setattr(manual_refs, "_difference_hash", next_hash)
+    monkeypatch.setattr(manual_refs, "_color_hash", lambda _rgb: 0)
+
+    blank = np.zeros((40, 80, 3), dtype=np.uint8)
+    first = recognizer.classify(blank, detection)
+    calls_after_first = embedder.calls
+    second = recognizer.classify(_query_frame(), detection)
+
+    assert first is None
+    assert second is not None
+    assert second.cls_name == "Pen"
+    assert embedder.calls > calls_after_first
+
+
+def test_manual_reference_prewarms_once_in_background(tmp_path):
+    queue_dir = tmp_path / "queue"
+    _write_reference(queue_dir, reviewed=True)
+    recognizer = ManualReferenceRecognizer(
+        queue_dir,
+        min_similarity=0.9,
+        refresh_seconds=30,
+        query_cache_seconds=2,
+        embedder=LegacyImageEmbedder(),
+    )
+
+    assert recognizer.prewarm_async() is True
+    deadline = monotonic() + 2.0
+    while recognizer.reference_count == 0 and monotonic() < deadline:
+        sleep(0.01)
+
+    assert recognizer.reference_count > 0
+    assert recognizer.prewarm_async() is False
 
 
 def test_manual_reference_refresh_and_classify_are_thread_safe(tmp_path):

@@ -129,6 +129,7 @@ from app.agent.schemas import (
     HardwareTestRequest,
     HardwareTestResponse,
     HealthResponse,
+    HistoryLabelReviewRequest,
     HistoryResponse,
     HistoryRowDTO,
     KnowledgeCatalogResponse,
@@ -1085,6 +1086,29 @@ def create_app(
         dto_rows = [_history_row_to_dto(row) for row in rows]
         return HistoryResponse(rows=dto_rows, total=len(dto_rows))
 
+    @router.patch("/history/{row_id}/label", response_model=HistoryRowDTO)
+    def review_history_label(
+        row_id: int,
+        payload: HistoryLabelReviewRequest,
+        context: Annotated[AuthContext, Depends(require_active_admin_token)],
+    ) -> HistoryRowDTO:
+        service = HistoryService(rt.history_file)
+        try:
+            row = service.review_label(
+                row_id,
+                display_label=payload.display_label,
+                reviewed_by=context.username or "admin",
+                review_note=payload.review_note,
+                status=payload.status,
+            )
+        except KeyError:
+            raise HTTPException(status_code=404, detail="History row not found") from None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            service.close()
+        return _history_row_to_dto(row)
+
     @router.get("/history/export.csv")
     def export_history() -> Response:
         service = HistoryService(rt.history_file)
@@ -1100,6 +1124,13 @@ def create_app(
             "ts",
             "cls_id",
             "cls_name",
+            "display_label",
+            "label_status",
+            "label_source",
+            "label_confidence",
+            "reviewed_by",
+            "reviewed_at",
+            "review_note",
             "conf",
             "bbox_x1",
             "bbox_y1",
@@ -2671,6 +2702,16 @@ def _history_row_to_dto(row) -> HistoryRowDTO:
         owner_account_id=getattr(row, "owner_account_id", None),
         owner_username=getattr(row, "owner_username", None),
         device_id=getattr(row, "device_id", None),
+        display_label=str(getattr(row, "display_label", "") or ""),
+        label_status=str(getattr(row, "label_status", "") or "model_inferred"),
+        label_source=str(getattr(row, "label_source", "") or ""),
+        label_confidence=getattr(row, "label_confidence", None),
+        reviewed_by=getattr(row, "reviewed_by", None),
+        reviewed_at=getattr(row, "reviewed_at", None),
+        review_note=getattr(row, "review_note", None),
+        hazardous=bool(getattr(row, "hazardous", 0)),
+        hazardous_confirmed_by=getattr(row, "hazardous_confirmed_by", None),
+        hazardous_confirmed_at=getattr(row, "hazardous_confirmed_at", None),
     )
 
 

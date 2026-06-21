@@ -39,6 +39,22 @@ def test_review_required_source_needs_bbox_review_flag():
     assert "review_required" in decision.reasons
 
 
+def test_auto_review_queue_is_visible_as_needs_review_not_trainable():
+    decision = classify_dataset_item(
+        _meta(
+            "auto_review_queue",
+            "Pen",
+            reviewed=False,
+            bbox_reviewed=False,
+            training_excluded=True,
+            training_exclusion_reason="awaiting_manual_annotation",
+        )
+    )
+
+    assert decision.state is DatasetTrustState.NEEDS_REVIEW
+    assert decision.trainable is False
+
+
 def test_web_import_missing_manifest_is_quarantined():
     decision = classify_dataset_item(_meta("manual_web_import", "Pen", reviewed=True, bbox_reviewed=True))
 

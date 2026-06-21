@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 from datetime import datetime
+from heapq import nlargest
 from pathlib import Path
 from typing import Any, cast
 
@@ -54,6 +55,13 @@ dataset_items = Table(
     Column("reviewed", Integer, nullable=False, default=0),
     Column("trusted", Integer, nullable=False, default=1),
     Column("trust_state", String),
+    Column("operator_label", String),
+    Column("capture_session_id", String),
+    Column("quality_bucket", String),
+    Column("review_priority", String),
+    Column("hazardous", Integer, nullable=False, default=0),
+    Column("holdout", Integer, nullable=False, default=0),
+    Column("recognition_enabled", Integer, nullable=False, default=0),
     Column("updated_at", String, nullable=False),
 )
 
@@ -71,6 +79,18 @@ dataset_boxes = Table(
     Column("x2", Float),
     Column("y2", Float),
     Column("updated_at", String, nullable=False),
+)
+
+review_capture_signatures = Table(
+    "review_capture_signatures",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("object_signature", String, nullable=False),
+    Column("reason", String, nullable=False),
+    Column("frame_fingerprint", String, nullable=False),
+    Column("session_id", String, nullable=False),
+    Column("item_id", String, nullable=False),
+    Column("captured_at_epoch", Float, nullable=False),
 )
 
 
@@ -116,6 +136,22 @@ class DatasetCatalog:
                 self._upsert_values(conn, values, meta)
             self._delete_missing_queue_items(conn, seen_item_ids)
         return indexed
+
+    def index_queue_incremental(self, queue_dir: Path, *, limit: int = 1000) -> int:
+        """Index only the newest queue items without deleting older catalog rows."""
+        if not queue_dir.exists() or limit <= 0:
+            return 0
+        image_paths = nlargest(limit, queue_dir.glob("*.jpg"), key=_safe_mtime_ns)
+        prepared: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        for image_path in image_paths:
+            meta = self._read_meta(image_path)
+            if meta is None:
+                continue
+            prepared.append((self._values_for_item(image_path, meta), meta))
+        with self._write_lock, self._engine.begin() as conn:
+            for values, meta in prepared:
+                self._upsert_values(conn, values, meta)
+        return len(prepared)
 
     def delete_by_image_paths(self, image_paths: list[Path]) -> None:
         item_ids = [p.stem for p in image_paths]
@@ -188,6 +224,44 @@ class DatasetCatalog:
         with self._engine.begin() as conn:
             row = conn.execute(stmt).first()
         return dict(row._mapping) if row is not None else None
+
+    def specialist_label_stats(self, operator_label: str) -> dict[str, int]:
+        """Return reviewed capture counts used by the specialist promotion gate."""
+        label = str(operator_label or "").strip()
+        if not label:
+            return {"train": 0, "holdout": 0, "sessions": 0, "total": 0}
+        condition = (
+            (dataset_items.c.operator_label == label)
+            & (dataset_items.c.reviewed == 1)
+            & ((dataset_items.c.trusted == 1) | (dataset_items.c.holdout == 1))
+        )
+        with self._engine.begin() as conn:
+            total = int(
+                conn.execute(
+                    select(func.count()).select_from(dataset_items).where(condition)
+                ).scalar_one()
+            )
+            holdout = int(
+                conn.execute(
+                    select(func.count())
+                    .select_from(dataset_items)
+                    .where(condition, dataset_items.c.holdout == 1)
+                ).scalar_one()
+            )
+            sessions = int(
+                conn.execute(
+                    select(func.count(func.distinct(dataset_items.c.capture_session_id))).where(
+                        condition,
+                        dataset_items.c.capture_session_id.is_not(None),
+                    )
+                ).scalar_one()
+            )
+        return {
+            "train": max(0, total - holdout),
+            "holdout": holdout,
+            "sessions": sessions,
+            "total": total,
+        }
 
     def list_items_for_box_class(
         self,
@@ -289,6 +363,71 @@ class DatasetCatalog:
         with self._engine.begin() as conn:
             return int(conn.execute(stmt).scalar_one())
 
+    def has_recent_review_capture(
+        self,
+        *,
+        object_signature: str,
+        reason: str,
+        frame_fingerprint: str,
+        now_epoch: float,
+        cooldown_seconds: float,
+        similar_scene_seconds: float,
+        max_hamming_distance: int = 72,
+    ) -> bool:
+        stmt = (
+            select(
+                review_capture_signatures.c.frame_fingerprint,
+                review_capture_signatures.c.captured_at_epoch,
+            )
+            .where(
+                review_capture_signatures.c.object_signature == object_signature,
+                review_capture_signatures.c.reason == reason,
+                review_capture_signatures.c.captured_at_epoch
+                >= float(now_epoch) - max(float(cooldown_seconds), float(similar_scene_seconds)),
+            )
+            .order_by(review_capture_signatures.c.captured_at_epoch.desc())
+            .limit(8)
+        )
+        with self._engine.begin() as conn:
+            rows = conn.execute(stmt).all()
+        for previous_fingerprint, captured_at in rows:
+            age = float(now_epoch) - float(captured_at)
+            if age < float(cooldown_seconds):
+                return True
+            if age <= float(similar_scene_seconds) and _hex_hamming_distance(
+                str(frame_fingerprint),
+                str(previous_fingerprint),
+            ) <= int(max_hamming_distance):
+                return True
+        return False
+
+    def record_review_capture(
+        self,
+        *,
+        object_signature: str,
+        reason: str,
+        frame_fingerprint: str,
+        session_id: str,
+        item_id: str,
+        captured_at_epoch: float,
+    ) -> None:
+        values = {
+            "object_signature": object_signature,
+            "reason": reason,
+            "frame_fingerprint": frame_fingerprint,
+            "session_id": session_id,
+            "item_id": item_id,
+            "captured_at_epoch": float(captured_at_epoch),
+        }
+        with self._write_lock, self._engine.begin() as conn:
+            conn.execute(review_capture_signatures.insert().values(**values))
+            cutoff = float(captured_at_epoch) - 86400.0
+            conn.execute(
+                review_capture_signatures.delete().where(
+                    review_capture_signatures.c.captured_at_epoch < cutoff
+                )
+            )
+
     def _matching_box_class_names(self, cls_name: str) -> list[str]:
         requested = canonical_class_name(cls_name) or str(cls_name).strip()
         stmt = select(dataset_boxes.c.cls_name).distinct()
@@ -329,8 +468,20 @@ class DatasetCatalog:
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_trusted ON dataset_items(trusted)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_trust_state ON dataset_items(trust_state)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_reviewed ON dataset_items(reviewed)"))
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_dataset_operator_label "
+                    "ON dataset_items(operator_label, reviewed, holdout)"
+                )
+            )
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_boxes_item ON dataset_boxes(item_id)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_dataset_boxes_cls ON dataset_boxes(cls_name)"))
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_review_capture_signature "
+                    "ON review_capture_signatures(object_signature, reason, captured_at_epoch)"
+                )
+            )
 
     @staticmethod
     def _configure_sqlite_connection(conn: Connection) -> None:
@@ -402,6 +553,13 @@ class DatasetCatalog:
             "reviewed": 1 if _meta_reviewed(meta) else 0,
             "trusted": 1 if _meta_trusted(meta) else 0,
             "trust_state": _meta_trust_state(meta),
+            "operator_label": str(meta.get("operator_label") or "").strip() or None,
+            "capture_session_id": str(meta.get("capture_session_id") or "").strip() or None,
+            "quality_bucket": str(meta.get("quality_bucket") or "").strip() or None,
+            "review_priority": str(meta.get("review_priority") or "").strip() or None,
+            "hazardous": 1 if bool(meta.get("hazardous")) else 0,
+            "holdout": 1 if bool(meta.get("holdout")) or meta.get("split") == "holdout" else 0,
+            "recognition_enabled": 1 if bool(meta.get("recognition_enabled")) else 0,
             "updated_at": datetime.now().isoformat(),
         }
 
@@ -480,10 +638,45 @@ class DatasetCatalog:
             conn.execute(text("ALTER TABLE dataset_items ADD COLUMN trusted INTEGER NOT NULL DEFAULT 1"))
         if "trust_state" not in existing:
             conn.execute(text("ALTER TABLE dataset_items ADD COLUMN trust_state VARCHAR(255)"))
+        additions = {
+            "operator_label": "VARCHAR(255)",
+            "capture_session_id": "VARCHAR(255)",
+            "quality_bucket": "VARCHAR(255)",
+            "review_priority": "VARCHAR(255)",
+            "hazardous": "INTEGER NOT NULL DEFAULT 0",
+            "holdout": "INTEGER NOT NULL DEFAULT 0",
+            "recognition_enabled": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for column_name, column_type in additions.items():
+            if column_name not in existing:
+                conn.execute(
+                    text(f"ALTER TABLE dataset_items ADD COLUMN {column_name} {column_type}")
+                )
+
+
+def _safe_mtime_ns(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
 
 
 def _chunks(values: list[str], size: int) -> list[list[str]]:
     return [values[i : i + size] for i in range(0, len(values), size)]
+
+
+def _hex_hamming_distance(first: str, second: str) -> int:
+    try:
+        first_bytes = bytes.fromhex(first)
+        second_bytes = bytes.fromhex(second)
+    except ValueError:
+        return 10_000
+    if len(first_bytes) != len(second_bytes):
+        return 10_000
+    return sum(
+        (left ^ right).bit_count()
+        for left, right in zip(first_bytes, second_bytes, strict=True)
+    )
 
 
 def is_sqlite_database_locked(exc: BaseException) -> bool:

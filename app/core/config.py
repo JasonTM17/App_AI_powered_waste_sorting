@@ -10,6 +10,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.utils.paths import resolve_data_path, resource_path
+
 DEFAULT_UART_ACK_TIMEOUT_MS = 4500
 MANUAL_REFERENCE_CORRECTION_CLASSES = (
     "Aerosols",
@@ -73,6 +75,35 @@ class CameraConfig(BaseModel):
     rotation: Literal[0, 90, 180, 270] = 0
 
 
+class SpecialistClassRouteConfig(BaseModel):
+    parent_class: str
+    operator_label: str
+    hazardous: bool = False
+
+
+def default_specialist_class_routes() -> dict[str, SpecialistClassRouteConfig]:
+    rows = {
+        "Comb": ("Unknown plastic", "Cái lược", False),
+        "Marker": ("Pen", "Bút dạ", False),
+        "Lighter": ("Unknown plastic", "Bật lửa", False),
+        "Battery AA AAA": ("Battery", "Pin AA/AAA", True),
+        "Battery 9V": ("Battery", "Pin 9V", True),
+        "Power socket": ("Electronics", "Ổ cắm điện", False),
+        "Wall charger": ("Electronics", "Cục sạc", False),
+        "Charging cable": ("Electronics", "Dây sạc", False),
+        "Plastic bag": ("Plastic bag", "Bì ni lông", False),
+        "Eggshell": ("Organic", "Vỏ trứng gà", False),
+    }
+    return {
+        name: SpecialistClassRouteConfig(
+            parent_class=parent_class,
+            operator_label=operator_label,
+            hazardous=hazardous,
+        )
+        for name, (parent_class, operator_label, hazardous) in rows.items()
+    }
+
+
 class SpecialistModelConfig(BaseModel):
     enabled: bool = True
     path: str = "models/new-class-specialist.pt"
@@ -81,6 +112,15 @@ class SpecialistModelConfig(BaseModel):
             "Pen": 0.45,
             "Battery": 0.30,
             "Toothbrush": 0.25,
+        }
+    )
+    class_routes: dict[str, SpecialistClassRouteConfig] = Field(
+        default_factory=default_specialist_class_routes
+    )
+    min_aspect_ratios: dict[str, float] = Field(
+        default_factory=lambda: {
+            "Pen": 2.2,
+            "Toothbrush": 2.0,
         }
     )
     nms_iou: float = Field(0.7, ge=0.0, le=1.0)
@@ -100,6 +140,20 @@ class SpecialistModelConfig(BaseModel):
             clean[name] = threshold
         return clean
 
+    @field_validator("min_aspect_ratios")
+    @classmethod
+    def validate_min_aspect_ratios(cls, value: dict[str, float]) -> dict[str, float]:
+        clean: dict[str, float] = {}
+        for raw_name, raw_ratio in value.items():
+            name = str(raw_name).strip()
+            ratio = float(raw_ratio)
+            if not name:
+                raise ValueError("specialist shape class names must not be empty")
+            if ratio < 1.0:
+                raise ValueError("specialist minimum aspect ratios must be at least 1")
+            clean[name] = ratio
+        return clean
+
 
 class ModelConfig(BaseModel):
     path: str = "models/best.pt"
@@ -107,6 +161,7 @@ class ModelConfig(BaseModel):
     conf_threshold: float = Field(0.4, ge=0.0, le=1.0)
     class_thresholds: dict[str, float] = Field(
         default_factory=lambda: {
+            "Organic": 0.25,
             "Plastic bottle": 0.30,
             "Glass bottle": 0.45,
             "Milk bottle": 0.30,
@@ -168,6 +223,22 @@ class CaptureConfig(BaseModel):
     output_dir: str = "dataset_v2"
 
 
+class AutoReviewQueueConfig(BaseModel):
+    enabled: bool = True
+    cooldown_seconds: float = Field(12.0, ge=1.0, le=300.0)
+    capture_low_confidence: bool = True
+    capture_unknown: bool = True
+    capture_multiple_objects: bool = True
+    capture_visual_safety: bool = True
+
+
+class HazardousWasteConfig(BaseModel):
+    battery_warning_hold_seconds: float = Field(8.0, ge=1.0, le=120.0)
+    confirmation_window_seconds: float = Field(10.0, ge=1.0, le=120.0)
+    battery_command: str = Field("R", min_length=1, max_length=1)
+    battery_bin_index: int = Field(2, ge=1, le=9)
+
+
 class SpeakerConfig(BaseModel):
     enabled: bool = False
     output_mode: Literal["hardware", "computer_speaker"] = "hardware"
@@ -209,14 +280,16 @@ class ManualReferenceRecognitionConfig(BaseModel):
     allow_unknown_matches: bool = True
     min_similarity: float = Field(0.88, ge=0.0, le=1.0)
     unknown_min_similarity: float = Field(0.92, ge=0.0, le=1.0)
+    organic_unknown_min_similarity: float = Field(0.65, ge=0.0, le=1.0)
     min_consensus_similarity: float = Field(0.72, ge=0.0, le=1.0)
     min_margin: float = Field(0.08, ge=0.0, le=1.0)
     top_k: int = Field(7, ge=1, le=25)
     min_votes: int = Field(4, ge=1, le=25)
     unknown_min_votes: int = Field(1, ge=1, le=25)
-    max_references_per_class: int = Field(30, ge=1, le=500)
+    organic_unknown_min_votes: int = Field(7, ge=1, le=25)
+    max_references_per_class: int = Field(60, ge=1, le=500)
     cache_refresh_seconds: float = Field(30.0, ge=0.0, le=300.0)
-    query_cache_seconds: float = Field(1.0, ge=0.0, le=30.0)
+    query_cache_seconds: float = Field(5.0, ge=0.0, le=30.0)
     correctable_yolo_classes: list[str] = Field(
         default_factory=lambda: list(MANUAL_REFERENCE_CORRECTION_CLASSES)
     )
@@ -227,7 +300,7 @@ class ManualReferenceRecognitionConfig(BaseModel):
         default_factory=lambda: {
             "Cardboard": ["Textile", "Organic"],
             "Glass bottle": ["Iron utensils", "Wood"],
-            "Pen": ["Disposable tableware", "Iron utensils"],
+            "Pen": ["Disposable tableware", "Iron utensils", "Electronics"],
             "Plastic cup": ["Organic", "Iron utensils"],
             "Plastic bottle": ["Organic"],
             "Aluminum can": ["Plastic bottle"],
@@ -289,14 +362,16 @@ def default_manual_reference_recognition_config() -> ManualReferenceRecognitionC
         allow_unknown_matches=True,
         min_similarity=0.88,
         unknown_min_similarity=0.92,
+        organic_unknown_min_similarity=0.65,
         min_consensus_similarity=0.72,
         min_margin=0.08,
         top_k=7,
         min_votes=4,
         unknown_min_votes=1,
-        max_references_per_class=30,
+        organic_unknown_min_votes=7,
+        max_references_per_class=60,
         cache_refresh_seconds=30.0,
-        query_cache_seconds=1.0,
+        query_cache_seconds=5.0,
         correctable_yolo_classes=list(MANUAL_REFERENCE_CORRECTION_CLASSES),
         correction_target_classes=list(MANUAL_REFERENCE_CORRECTION_CLASSES),
         min_correction_area_ratio=0.25,
@@ -330,6 +405,8 @@ class AppConfig(BaseModel):
     mappings: list[ClassMapping] = Field(default_factory=list)
     roi: RoiConfig = Field(default_factory=lambda: RoiConfig())
     capture: CaptureConfig = Field(default_factory=lambda: CaptureConfig(low_conf_threshold=0.6))
+    auto_review_queue: AutoReviewQueueConfig = Field(default_factory=AutoReviewQueueConfig)
+    hazardous_waste: HazardousWasteConfig = Field(default_factory=HazardousWasteConfig)
     speaker: SpeakerConfig = Field(
         default_factory=lambda: SpeakerConfig(
             enabled=False,
@@ -398,6 +475,33 @@ def _load_example_config(current_path: Path) -> AppConfig | None:
 
 def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     changed = False
+    def _runtime_file_exists(value: str) -> bool:
+        candidate = Path(str(value or "")).expanduser()
+        return any(
+            item.exists() and item.is_file()
+            for item in (candidate, resource_path(candidate), resolve_data_path(candidate))
+        )
+
+    if not _runtime_file_exists(cfg.model.path):
+        bundled_primary = resource_path("models/best.pt")
+        if bundled_primary.exists():
+            cfg.model.path = "models/best.pt"
+            changed = True
+    legacy_primary_models = {
+        "models/best.pt",
+        "models/manual-capture-20260612-candidate.pt",
+    }
+    balanced_primary = "models/real-camera-balanced-20260619-candidate.pt"
+    if cfg.model.path.replace("\\", "/") in legacy_primary_models and _runtime_file_exists(
+        balanced_primary
+    ):
+        cfg.model.path = balanced_primary
+        changed = True
+    if cfg.model.specialist.enabled and not _runtime_file_exists(cfg.model.specialist.path):
+        bundled_specialist = resource_path("models/new-class-specialist.pt")
+        if bundled_specialist.exists():
+            cfg.model.specialist.path = "models/new-class-specialist.pt"
+            changed = True
     if cfg.camera.source.strip() == "0":
         cfg.camera.source = ""
         changed = True
@@ -417,6 +521,12 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     if cfg.manual_reference_recognition.cache_refresh_seconds == 3.0:
         cfg.manual_reference_recognition.cache_refresh_seconds = 30.0
         changed = True
+    if cfg.manual_reference_recognition.query_cache_seconds == 1.0:
+        cfg.manual_reference_recognition.query_cache_seconds = 5.0
+        changed = True
+    if cfg.manual_reference_recognition.max_references_per_class == 30:
+        cfg.manual_reference_recognition.max_references_per_class = 60
+        changed = True
     if cfg.dispatch_guard.min_sort_interval_seconds < 2.0:
         cfg.dispatch_guard.min_sort_interval_seconds = 2.0
         changed = True
@@ -431,6 +541,9 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
         changed = True
     if cfg.dispatch_guard.min_stable_frames < 2:
         cfg.dispatch_guard.min_stable_frames = 2
+        changed = True
+    if cfg.auto_review_queue.cooldown_seconds < 12.0:
+        cfg.auto_review_queue.cooldown_seconds = 12.0
         changed = True
     if cfg.dispatch_guard.min_dispatch_confidence < 0.55:
         cfg.dispatch_guard.min_dispatch_confidence = 0.55
@@ -453,6 +566,9 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
         if cfg.model.class_thresholds.get(class_name) == old_threshold:
             cfg.model.class_thresholds[class_name] = 0.30
             changed = True
+    if "Organic" not in cfg.model.class_thresholds:
+        cfg.model.class_thresholds["Organic"] = 0.25
+        changed = True
     if cfg.model.class_thresholds.get("Glass bottle", 1.0) < 0.45:
         cfg.model.class_thresholds["Glass bottle"] = 0.45
         changed = True
@@ -493,7 +609,7 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     required_targets_by_source = {
         "Cardboard": ["Textile", "Organic"],
         "Glass bottle": ["Iron utensils", "Wood"],
-        "Pen": ["Disposable tableware", "Iron utensils"],
+        "Pen": ["Disposable tableware", "Iron utensils", "Electronics"],
         "Plastic cup": ["Organic", "Iron utensils"],
         "Plastic bottle": ["Organic"],
         "Aluminum can": ["Plastic bottle"],

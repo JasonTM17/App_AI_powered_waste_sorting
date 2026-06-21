@@ -1156,6 +1156,7 @@ def _review_status_text(meta: dict) -> str:
 
 def _source_label(source: str) -> str:
     labels = {
+        "auto_review_queue": "Cần gắn nhãn từ lỗi nhận diện",
         "auto_low_conf": "Auto low-conf",
         "manual_import": "Thủ công",
         "manual_camera_capture": "Camera thủ công",

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
 from app.core.config import SpecialistModelConfig
 from app.core.events import Detection
+from app.core.waste_categories import default_class_id_for_name
 from app.utils.logging import logger
 from app.utils.paths import resolve_data_path, resource_path
 
@@ -68,6 +70,9 @@ class InferenceEngine:
         self._specialist_class_names: dict[int, str] = {}
         self._specialist_class_ids: list[int] = []
         self._specialist_thresholds: dict[str, float] = {}
+        self._specialist_min_aspect_ratios: dict[str, float] = {}
+        self._specialist_routes: dict[str, tuple[str, str]] = {}
+        self._specialist_output_thresholds: dict[tuple[str, str], float] = {}
         self._specialist_nms_iou = 0.7
         self._specialist_overlap_iou = 0.5
         self._load_specialist(specialist, YOLO)
@@ -108,6 +113,19 @@ class InferenceEngine:
             for name in wanted
             if name in names.values()
         }
+        self._specialist_min_aspect_ratios = {
+            name: float(ratio)
+            for name, ratio in cfg.min_aspect_ratios.items()
+            if name in names.values()
+        }
+        self._specialist_routes = {
+            raw_name: (route.parent_class, route.operator_label)
+            for raw_name, route in cfg.class_routes.items()
+        }
+        self._specialist_output_thresholds = {
+            self._specialist_routes.get(raw_name, (raw_name, "")): threshold
+            for raw_name, threshold in self._specialist_thresholds.items()
+        }
         self._specialist_nms_iou = float(cfg.nms_iou)
         self._specialist_overlap_iou = float(cfg.overlap_iou)
         logger.info(
@@ -128,7 +146,7 @@ class InferenceEngine:
             conf=self._predict_conf(),
             source="YOLO",
         )
-        if self._specialist_model is None:
+        if self._specialist_model is None or not self._should_run_specialist(primary):
             return primary
         specialist = self._predict_model(
             self._specialist_model,
@@ -143,12 +161,34 @@ class InferenceEngine:
             detection
             for detection in specialist
             if detection.conf >= self._specialist_thresholds.get(detection.cls_name, 1.0)
+            and specialist_shape_allowed(
+                detection,
+                self._specialist_min_aspect_ratios,
+            )
         ]
+        specialist = [self._map_specialist_detection(detection) for detection in specialist]
         return merge_specialist_detections(
             primary,
             specialist,
             primary_conf_threshold=float(self.conf),
             overlap_iou=self._specialist_overlap_iou,
+        )
+
+    def _should_run_specialist(self, primary: list[Detection]) -> bool:
+        """Run the second model only when the primary result is absent or uncertain."""
+        return not any(detection.conf >= float(self.conf) for detection in primary)
+
+    def _map_specialist_detection(self, detection: Detection) -> Detection:
+        parent_class, operator_label = self._specialist_routes.get(
+            detection.cls_name,
+            (detection.cls_name, detection.operator_label),
+        )
+        parent_id = default_class_id_for_name(parent_class)
+        return replace(
+            detection,
+            cls_id=int(parent_id if parent_id is not None else detection.cls_id),
+            cls_name=parent_class,
+            operator_label=operator_label or detection.operator_label,
         )
 
     def _predict_model(
@@ -197,7 +237,10 @@ class InferenceEngine:
 
     def threshold_for_detection(self, detection: Detection) -> float:
         if detection.source == YOLO_SPECIALIST_SOURCE:
-            return self._specialist_thresholds.get(detection.cls_name, 1.0)
+            return self._specialist_output_thresholds.get(
+                (detection.cls_name, detection.operator_label),
+                min(self._specialist_thresholds.values(), default=1.0),
+            )
         return float(self.conf)
 
     def update_thresholds(self, conf=None, iou=None):
@@ -250,3 +293,18 @@ def merge_specialist_detections(
         if not overlaps_primary and not overlaps_specialist:
             accepted.append(detection)
     return [*primary, *accepted]
+
+
+def specialist_shape_allowed(
+    detection: Detection,
+    min_aspect_ratios: dict[str, float],
+) -> bool:
+    """Reject specialist labels whose bounding-box shape contradicts the object class."""
+    minimum = min_aspect_ratios.get(detection.cls_name)
+    if minimum is None:
+        return True
+    x1, y1, x2, y2 = detection.xyxy
+    width = max(1, x2 - x1)
+    height = max(1, y2 - y1)
+    aspect_ratio = max(width, height) / min(width, height)
+    return aspect_ratio >= minimum

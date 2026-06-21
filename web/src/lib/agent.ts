@@ -457,6 +457,13 @@ export type HistoryRow = {
   owner_account_id?: number | null;
   owner_username?: string | null;
   device_id?: string | null;
+  display_label?: string;
+  label_status?: "model_inferred" | "metadata_verified" | "human_verified" | "needs_review" | "no_evidence";
+  label_source?: string;
+  label_confidence?: number | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  review_note?: string | null;
 };
 
 export type TrainingStatus = {
@@ -840,6 +847,10 @@ export type UserHistoryItem = {
   id: number;
   ts: string;
   cls_name: string;
+  display_label?: string;
+  label_status?: "model_inferred" | "metadata_verified" | "human_verified" | "needs_review" | "no_evidence";
+  label_source?: string;
+  label_confidence?: number | null;
   confidence: number;
   route_label?: string | null;
   bin_index?: number | null;
@@ -1248,6 +1259,19 @@ export async function openAgentBlob(path: string, token = DEFAULT_AGENT_TOKEN) {
   if (!opened) {
     window.location.assign(objectUrl);
   }
+  window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
+}
+
+export async function openAuthenticatedBlob(path: string, token: string) {
+  if (typeof window === "undefined") return;
+  const response = await fetch(path, {
+    cache: "no-store",
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined
+  });
+  if (!response.ok) throw new AgentApiError(`Request failed: ${response.status}`, response.status);
+  const objectUrl = window.URL.createObjectURL(await response.blob());
+  const opened = window.open(objectUrl, "_blank", "noopener,noreferrer");
+  if (!opened) window.location.assign(objectUrl);
   window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 60_000);
 }
 

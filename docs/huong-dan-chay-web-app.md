@@ -248,3 +248,35 @@ Trước khi báo đồng nghiệp test:
 - `npm run build` trong thư mục `web` thành công.
 - `scripts/start_local.ps1` mở được agent và web.
 - Không commit `.env.local`, DB local, log, capture ảnh thật, dataset tạm, `dist/`, `.venv/`, `node_modules/`.
+
+## 11. Run the public hardware tunnel after Windows startup
+
+Use a Cloudflare Named Tunnel for stable public Admin access. Do not expose the
+camera or FastAPI port through router port-forwarding.
+
+1. Start the local agent and Supabase synchronizer without a Quick Tunnel:
+
+```powershell
+cd "D:\PHAN LOAI RAC\trash-sorter-v2"
+powershell -ExecutionPolicy Bypass -File scripts/start_public_hardware_bridge.ps1 -NoTunnel
+```
+
+2. Start the installed Named Tunnel service, then verify its state:
+
+```powershell
+Get-Service cloudflared
+Start-Service cloudflared
+cloudflared tunnel info trash-sorter-hardware
+```
+
+3. Confirm the local agent and Vercel bridge are healthy before using remote
+Admin camera or training:
+
+```powershell
+Invoke-WebRequest http://127.0.0.1:8765/api/health -UseBasicParsing
+```
+
+Keep `TRASH_SORTER_HARDWARE_BRIDGE_SECRET` identical in local `.env.local` and
+Vercel. The browser must use `/api/admin/hardware/*`; never send this secret or
+call `localhost:8765` from a remote browser. If the tunnel is offline, keep
+camera/training unavailable and check the local `cloudflared` service log.

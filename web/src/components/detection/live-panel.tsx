@@ -75,6 +75,7 @@ export function LivePanel({
   onStart,
   onStop
 }: LivePanelProps) {
+  const cameraRunning = Boolean(status?.camera.running);
   const trainEpoch =
     training?.completed_epoch && training?.target_epoch
       ? `${training.completed_epoch}/${training.target_epoch}`
@@ -91,7 +92,7 @@ export function LivePanel({
       <div className="stat-row">
         <MetricCard
           label="Camera"
-          value={status?.camera.running ? "ON" : "OFF"}
+          value={cameraRunning ? "ON" : "OFF"}
           detail={cameraHealthDetail(status)}
         />
         <MetricCard label="FPS" value={formatNumber(status?.fps ?? 0)} detail="Stream realtime" />
@@ -116,18 +117,21 @@ export function LivePanel({
               <RefreshCcw size={17} />
               <span>Làm mới USB</span>
             </button>
-            <button className="primary-button" disabled={busy} onClick={onStart} type="button">
-              <Play size={17} />
-              <span>Quét USB</span>
-            </button>
-            <button className="danger-button" disabled={busy} onClick={onStop} type="button">
-              <Square size={16} />
-              <span>Dừng</span>
-            </button>
+            {cameraRunning ? (
+              <button className="danger-button" disabled={busy} onClick={onStop} type="button">
+                <Square size={16} />
+                <span>Dừng camera</span>
+              </button>
+            ) : (
+              <button className="primary-button" disabled={busy} onClick={onStart} type="button">
+                <Play size={17} />
+                <span>Bật camera</span>
+              </button>
+            )}
           </div>
         </div>
         <div className="camera-stage">
-          {status?.camera.running && stream ? (
+          {cameraRunning && stream ? (
             <>
               <img className="camera-stream" src={stream} alt="USB camera stream" />
               <div className="scan-line" />
@@ -137,7 +141,7 @@ export function LivePanel({
               </div>
               <DetectionOverlay detections={detections} />
             </>
-          ) : status?.camera.running ? (
+          ) : cameraRunning ? (
             <div className="black-frame">
               <Camera size={42} />
               <span>Đang cấp quyền stream camera...</span>

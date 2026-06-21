@@ -27,6 +27,14 @@ from app.utils.logging import logger, setup_logging
 from app.utils.paths import config_path, db_path, example_config_path
 from app.utils.runtime_lock import RuntimeLockError, acquire_runtime_lock
 
+UNKNOWN_REVIEW_DETAIL = "Cần gắn nhãn - chưa phân loại; không gửi lệnh xuống phần cứng."
+
+
+def _unknown_review_detail(cls_name: str, fallback_class_name: str) -> str | None:
+    if str(cls_name).strip() != str(fallback_class_name).strip():
+        return None
+    return UNKNOWN_REVIEW_DETAIL
+
 
 def _seed_config_if_missing() -> None:
     """Copy bundled `config.example.json` to user config on first run.
@@ -319,6 +327,9 @@ def main(*, require_admin_login: bool = True) -> int:
             controller.cfg.dispatch_guard.multi_class_warning_text,
         )
         window.live_page.set_warning(warning_text)
+        window.live_page.set_hazardous_battery_warning(
+            controller.hazardous_warning_active()
+        )
         # Push each detection into the side stream so user can see what
         # the model classified (= app cũ's "system log under camera")
         if display_detections:
@@ -331,12 +342,27 @@ def main(*, require_admin_login: bool = True) -> int:
                 category_for_command,
                 normalize_mapping_to_three_bins,
             )
-            from app.core.waste_display import waste_display_name
+            from app.core.waste_display import waste_detection_display_name
 
             ts = datetime.now().strftime("%H:%M:%S")
             current_rows: list[tuple[str, float, str, str]] = []
             for d in display_detections:
-                display_name = d.operator_label or waste_display_name(d.cls_name)
+                display_name = waste_detection_display_name(d.cls_name, d.operator_label)
+                fallback = controller.cfg.unknown_fallback
+                # Unknown is evidence for manual review, never a simulated bin route.
+                # A legacy mapping may still exist in a user's config, so check it
+                # before looking up normal mappings for the Live status panel.
+                unknown_detail = _unknown_review_detail(d.cls_name, fallback.class_name)
+                if unknown_detail is not None:
+                    current_rows.append(
+                        (
+                            display_name,
+                            d.conf,
+                            ts,
+                            unknown_detail,
+                        )
+                    )
+                    continue
                 three_bin_command = parse_three_bin_class_name(d.cls_name)
                 mapping = next(
                     (
@@ -355,14 +381,6 @@ def main(*, require_admin_login: bool = True) -> int:
                             bin_index=category.bin_index,
                             enabled=True,
                         )
-                fallback = controller.cfg.unknown_fallback
-                if mapping is None and d.cls_name == fallback.class_name:
-                    mapping = ClassMapping(
-                        class_name=fallback.class_name,
-                        command=fallback.command,
-                        bin_index=fallback.bin_index,
-                        enabled=True,
-                    )
                 detail = "no mapping"
                 if mapping is not None:
                     mapping = normalize_mapping_to_three_bins(mapping)
@@ -402,9 +420,18 @@ def main(*, require_admin_login: bool = True) -> int:
             window.live_page.set_current_detections([])
 
     controller.frame_processed.connect(_on_frame)
+    controller.hazardous_confirmation_result.connect(_on_test_result)
+    window.live_page.hazardous_battery_confirmation_requested.connect(
+        controller.confirm_hazardous_battery_dispatch
+    )
     window.live_page.snapshot_requested.connect(controller.take_snapshot)
 
-    def _open_camera_annotation_dialog(target_page, cls_name: str, cls_id: int) -> None:
+    def _open_camera_annotation_dialog(
+        target_page,
+        cls_name: str,
+        cls_id: int,
+        operator_label: str,
+    ) -> None:
         from PySide6.QtWidgets import QMessageBox
 
         from app.ui.widgets.camera_annotation_dialog import CameraAnnotationDialog
@@ -415,7 +442,7 @@ def main(*, require_admin_login: bool = True) -> int:
             return
         dialog = CameraAnnotationDialog(
             frame,
-            class_name=cls_name,
+            class_name=operator_label or cls_name,
             initial_bbox=bbox,
             parent=window,
         )
@@ -428,8 +455,10 @@ def main(*, require_admin_login: bool = True) -> int:
         target_page.capture_reviewed_camera_sample_requested.emit(
             cls_name,
             int(cls_id),
+            operator_label,
             box,
             dialog.approve_now(),
+            target_page.selected_capture_split(),
         )
 
     def _on_capture_mode_changed(mode: str):
@@ -488,8 +517,8 @@ def main(*, require_admin_login: bool = True) -> int:
         page.set_actuation_training_locked(controller.is_actuation_test_mode_enabled())
         controller.capture_saved.connect(lambda _p, target=page: target.reload())
         page.camera_annotation_requested.connect(
-            lambda cls_name, cls_id, target=page: _open_camera_annotation_dialog(
-                target, cls_name, cls_id
+            lambda cls_name, cls_id, operator_label, target=page: _open_camera_annotation_dialog(
+                target, cls_name, cls_id, operator_label
             )
         )
 

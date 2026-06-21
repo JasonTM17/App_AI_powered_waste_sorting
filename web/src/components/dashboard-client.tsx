@@ -103,8 +103,11 @@ import {
   cloudFetch,
   datasetImageUrl,
   hardwareBridgePath,
+  historyImagePath,
   getAdminConnectionCardPresentation,
   isCloudDashboardApiPath,
+  openAgentBlob,
+  openAuthenticatedBlob,
   streamUrl,
   websocketUrl
 } from "@/lib/agent";
@@ -476,7 +479,7 @@ export function DashboardClient() {
       return history;
     }
     return history.filter((row) =>
-      [row.id, row.ts, row.cls_name, row.route_label, row.bin_index, row.uart_command, row.ack_status]
+      [row.id, row.ts, row.display_label, row.cls_name, row.route_label, row.bin_index, row.uart_command, row.ack_status]
         .join(" ")
         .toLowerCase()
         .includes(normalizedSearch)
@@ -1399,6 +1402,45 @@ export function DashboardClient() {
     setIsRestoringSession(false);
   }
 
+  async function openHistoryImage(row: HistoryRow) {
+    const path = historyImagePath(row.id, row.annotated_path ? "annotated" : "raw");
+    if (USE_CLOUD_HARDWARE_BRIDGE) {
+      await openAuthenticatedBlob(hardwareBridgePath(path), agentToken);
+      return;
+    }
+    await openAgentBlob(path, agentToken);
+  }
+
+  async function reviewHistoryLabel(
+    row: HistoryRow,
+    label: string,
+    statusValue: "human_verified" | "needs_review" | "no_evidence"
+  ) {
+    setBusy(true);
+    try {
+      const request = USE_CLOUD_HARDWARE_BRIDGE ? fetchHardware : fetchAgent;
+      const updated = await request<HistoryRow>(`/api/history/${row.id}/label`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          display_label: label,
+          status: statusValue,
+          review_note:
+            statusValue === "human_verified"
+              ? "Admin xác nhận tên vật từ ảnh lịch sử."
+              : "Ảnh không đủ bằng chứng để kết luận tên vật."
+        })
+      });
+      setHistory((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setNotice(statusValue === "human_verified" ? "Đã xác nhận nhãn vật thể." : "Đã đánh dấu không đủ bằng chứng.");
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "Không cập nhật được nhãn lịch sử");
+      throw error;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function refreshAll() {
     try {
       const [
@@ -1423,7 +1465,7 @@ export function DashboardClient() {
           fetchAgent<TrainingStatus>("/api/training/status"),
           fetchAgent<DatasetSummary>("/api/dataset/summary"),
           fetchAgent<DatasetItemsResponse>(datasetItemsPath()),
-          fetchAgent<HistoryResponse>("/api/history?limit=20"),
+          (USE_CLOUD_HARDWARE_BRIDGE ? fetchHardware : fetchAgent)<HistoryResponse>("/api/history?limit=20"),
           fetchAgent<LogsResponse>("/api/logs?limit=120"),
           fetchAgent<SettingsResponse>("/api/settings"),
           fetchAgent<MappingsResponse>("/api/mappings"),
@@ -1531,13 +1573,15 @@ export function DashboardClient() {
       }
 
       if (scope === "history") {
-        const historyRes = await scopedFetch<HistoryResponse>("/api/history?limit=20");
+        const historyFetch = USE_CLOUD_HARDWARE_BRIDGE ? scopedHardwareFetch : scopedFetch;
+        const historyRes = await historyFetch<HistoryResponse>("/api/history?limit=20");
         setHistory(historyRes.rows);
       }
 
       if (scope === "reports") {
+        const historyFetch = USE_CLOUD_HARDWARE_BRIDGE ? scopedHardwareFetch : scopedFetch;
         const [historyRes, dataRes, sourceQualityRes] = await Promise.all([
-          scopedFetch<HistoryResponse>("/api/history?limit=20"),
+          historyFetch<HistoryResponse>("/api/history?limit=20"),
           scopedFetch<DatasetSummary>("/api/dataset/summary"),
           scopedFetch<SourceQuality>("/api/dataset/source-quality")
         ]);
@@ -2929,7 +2973,15 @@ export function DashboardClient() {
             onStop={() => void runAction("/api/camera/stop")}
           />
         ) : null}
-        {active === "history" ? <HistoryPanel imageToken={agentToken} rows={filteredHistory} /> : null}
+        {active === "history" ? (
+          <HistoryPanel
+            imageToken={agentToken}
+            labelOptions={commonWasteItems.map((item) => item.label)}
+            rows={filteredHistory}
+            onOpenImage={openHistoryImage}
+            onReviewLabel={reviewHistoryLabel}
+          />
+        ) : null}
         {active === "roles" ? <AdminRolesPanel catalog={roleCatalog} /> : null}
         {active === "devices" ? (
           <AdminDevicesPanel

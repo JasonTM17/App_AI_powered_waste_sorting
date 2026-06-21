@@ -31,7 +31,10 @@ export function UserHistoryPanel({ imageToken, rows }: UserHistoryPanelProps) {
           rows.map((row) => (
             <article className="user-history-row" key={row.id}>
               <div>
-                <strong>{row.cls_name || "Chưa rõ"}</strong>
+                <strong>{row.display_label || row.cls_name || "Chưa xác định vật"}</strong>
+                <small className={`history-label-status ${row.label_status || "model_inferred"}`}>
+                  {labelStatus(row.label_status)}
+                </small>
                 <span>
                   {formatDate(row.ts)} · {categoryLabels[row.category]} · {Math.round(row.confidence * 100)}%
                 </span>
@@ -68,4 +71,12 @@ function formatDate(value: string) {
     minute: "2-digit",
     month: "2-digit"
   }).format(date);
+}
+
+function labelStatus(status: UserHistoryItem["label_status"]) {
+  if (status === "human_verified") return "Đã duyệt";
+  if (status === "metadata_verified") return "Đã xác minh";
+  if (status === "needs_review") return "Cần duyệt";
+  if (status === "no_evidence") return "Không đủ bằng chứng";
+  return "Theo lớp AI";
 }

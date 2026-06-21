@@ -75,7 +75,7 @@ def build_user_dashboard(
     owner_username: str | None = None,
 ) -> UserDashboardResponse:
     rows = _recent_history(runtime, owner_account_id=owner_account_id, owner_username=owner_username)
-    counts = Counter(str(getattr(row, "cls_name", "") or "") for row in rows)
+    counts = Counter(_row_group_label(row) for row in rows)
     counts.pop("", None)
     sample_size = sum(counts.values())
     return UserDashboardResponse(
@@ -116,7 +116,7 @@ def build_user_analytics(
     seven_day_rows = _rows_between(rows, today - timedelta(days=6), today)
     yesterday_date = today - timedelta(days=1)
     yesterday_rows = _rows_between(rows, yesterday_date, yesterday_date)
-    counts = Counter(str(getattr(row, "cls_name", "") or "") for row in current_rows)
+    counts = Counter(_row_group_label(row) for row in current_rows)
     counts.pop("", None)
     total = sum(counts.values())
     previous_total = len(previous_rows)
@@ -150,7 +150,7 @@ def build_user_analytics(
             total=len(yesterday_rows),
             top_classes=_waste_counts(
                 yesterday_rows,
-                Counter(str(getattr(row, "cls_name", "") or "") for row in yesterday_rows),
+                Counter(_row_group_label(row) for row in yesterday_rows),
                 len(yesterday_rows),
                 limit=6,
             ),
@@ -271,7 +271,7 @@ def _waste_counts(
 ) -> list[WasteClassCountDTO]:
     route_by_class: dict[str, tuple[int | None, str | None]] = {}
     for row in rows:
-        cls_name = str(getattr(row, "cls_name", "") or "")
+        cls_name = _row_group_label(row)
         if cls_name and cls_name not in route_by_class:
             route_by_class[cls_name] = (
                 getattr(row, "bin_index", None),
@@ -619,6 +619,10 @@ def _history_items(rows) -> list[UserHistoryItemDTO]:
                 id=int(getattr(row, "id", 0) or 0),
                 ts=str(getattr(row, "ts", "") or ""),
                 cls_name=str(getattr(row, "cls_name", "") or ""),
+                display_label=str(getattr(row, "display_label", "") or ""),
+                label_status=str(getattr(row, "label_status", "") or "model_inferred"),
+                label_source=str(getattr(row, "label_source", "") or ""),
+                label_confidence=getattr(row, "label_confidence", None),
                 confidence=round(float(getattr(row, "conf", 0.0) or 0.0), 3),
                 route_label=getattr(row, "route_label", None),
                 bin_index=getattr(row, "bin_index", None),
@@ -631,6 +635,14 @@ def _history_items(rows) -> list[UserHistoryItemDTO]:
             )
         )
     return items
+
+
+def _row_group_label(row) -> str:
+    status = str(getattr(row, "label_status", "") or "")
+    display_label = str(getattr(row, "display_label", "") or "").strip()
+    if status in {"metadata_verified", "human_verified"} and display_label:
+        return display_label
+    return str(getattr(row, "cls_name", "") or "")
 
 
 def _category_slug(category: WasteCategory) -> str:

@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from app.core.events import Detection
-from app.core.waste_display import waste_display_name
+from app.core.waste_display import waste_detection_display_name
 
 
 def _conf_color(conf: float) -> QColor:
@@ -93,7 +93,7 @@ class VideoView(QWidget):
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
             sx = scaled.width() / self._frame_w
             sy = scaled.height() / self._frame_h
-            font = QFont("Consolas", 10, QFont.Weight.Bold)
+            font = QFont("Segoe UI", 10, QFont.Weight.Bold)
             p.setFont(font)
             for d in self._detections:
                 x1, y1, x2, y2 = d.xyxy
@@ -106,7 +106,7 @@ class VideoView(QWidget):
                 pen.setWidth(2)
                 p.setPen(pen)
                 p.drawRoundedRect(rx, ry, rw, rh, 4, 4)
-                label_name = d.operator_label or waste_display_name(d.cls_name)
+                label_name = waste_detection_display_name(d.cls_name, d.operator_label)
                 label = f"{label_name} {d.conf:.2f}"
                 metrics = p.fontMetrics()
                 tw = metrics.horizontalAdvance(label) + 12

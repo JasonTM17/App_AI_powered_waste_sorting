@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+import uuid
 from contextlib import suppress
 from dataclasses import replace
 from datetime import datetime
@@ -188,8 +189,6 @@ class _UartProbe(QThread):
 
 
 class _ModelLoadWorker(QThread):
-    done = Signal(object, str, float)
-
     def __init__(
         self,
         model_path: str,
@@ -208,11 +207,14 @@ class _ModelLoadWorker(QThread):
         self._imgsz = imgsz
         self._half = half
         self._specialist = specialist
+        self.engine: InferenceEngine | None = None
+        self.error = ""
+        self.elapsed_s = 0.0
 
     def run(self):
         started = time.perf_counter()
         try:
-            engine = InferenceEngine(
+            self.engine = InferenceEngine(
                 self._model_path,
                 device=self._device,
                 conf=self._conf,
@@ -222,9 +224,10 @@ class _ModelLoadWorker(QThread):
                 specialist=self._specialist,
             )
         except Exception as exc:
-            self.done.emit(None, str(exc), time.perf_counter() - started)
-            return
-        self.done.emit(engine, "", time.perf_counter() - started)
+            self.engine = None
+            self.error = str(exc)
+        finally:
+            self.elapsed_s = time.perf_counter() - started
 
 
 class _LearnNowStatusWorker(QThread):
@@ -293,6 +296,7 @@ class AppController(QObject):
     recognition_test_trial_saved = Signal(object)
     recognition_test_action_result = Signal(bool, str)
     bin_fullness_alert = Signal(int, int, str, str)
+    hazardous_confirmation_result = Signal(bool, str)
     _recognition_dispatch_started = Signal(object)
     _recognition_dispatch_completed = Signal(object)
 
@@ -323,6 +327,8 @@ class AppController(QObject):
         self._last_frame = None
         self._last_detections = []
         self._annotation_frame = None
+        self._annotation_capture_session_id = f"desktop-{datetime.now():%Y%m%dT%H%M%S}"
+        self._annotation_capture_counts: dict[tuple[str, str], int] = {}
         self._probes: list[QThread] = []
         self._pending_uart_tests: dict[int, tuple[str, str, str, float]] = {}
         # -1 is reserved by UartWorker for automatic warning audio.
@@ -398,15 +404,21 @@ class AppController(QObject):
             self.cfg.model.half_precision,
             self.cfg.model.specialist,
         )
-        worker.done.connect(self._on_model_loaded)
-        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(self._on_model_loaded)
         self._model_loader = worker
         worker.start()
         logger.info("model load scheduled in background path={}", self.cfg.model.path)
 
-    def _on_model_loaded(self, engine: object, error: str, elapsed_s: float) -> None:
+    def _on_model_loaded(self) -> None:
+        worker = self._model_loader
+        if worker is None:
+            return
+        engine = worker.engine
+        error = worker.error
+        elapsed_s = worker.elapsed_s
         self._model_loading = False
         self._model_loader = None
+        worker.deleteLater()
         if error or engine is None:
             logger.warning("model background load failed after {:.0f} ms: {}", elapsed_s * 1000, error)
             self.model_status.emit(False)
@@ -425,6 +437,7 @@ class AppController(QObject):
         self._pipeline.dispatch_authorizer = self._authorize_recognition_test_dispatch
         self._pipeline.on_dispatch_started = self._recognition_dispatch_started.emit
         self._pipeline.on_dispatch_completed = self._recognition_dispatch_completed.emit
+        self._pipeline.prewarm_manual_references_async()
         self._inference_worker = InferenceWorker(self._pipeline)
         self._inference_worker.processed.connect(self._on_inferred)
         self._inference_worker.start()
@@ -1134,6 +1147,18 @@ class AppController(QObject):
             return ""
         return str(getattr(self._pipeline, "dispatch_status", "") or "")
 
+    def hazardous_warning_active(self) -> bool:
+        return bool(
+            self._pipeline is not None and self._pipeline.hazardous_warning_active()
+        )
+
+    def confirm_hazardous_battery_dispatch(self) -> None:
+        if self._pipeline is None:
+            self.hazardous_confirmation_result.emit(False, "Recognition pipeline is not ready.")
+            return
+        ok, message = self._pipeline.confirm_hazardous_battery_dispatch()
+        self.hazardous_confirmation_result.emit(ok, message)
+
     def auto_sort_state(self) -> str:
         if self._pipeline is None:
             return "WAITING_EMPTY"
@@ -1795,16 +1820,22 @@ class AppController(QObject):
         self,
         cls_name: str,
         cls_id: int,
+        operator_label: str,
         xyxy,
         approve_now: bool,
+        split: str = "train",
     ) -> None:
         from app.core.dataset_queue import (
             import_manual_camera_frame,
             save_reviewed_camera_annotation,
         )
+        from app.core.waste_categories import default_class_id_for_name
         from app.utils.paths import dataset_db_path
 
-        cls_name = str(cls_name or "").strip()
+        cls_name = canonical_class_name(cls_name) or str(cls_name or "").strip()
+        canonical_id = default_class_id_for_name(cls_name)
+        if canonical_id is not None:
+            cls_id = canonical_id
         if not cls_name:
             self.snapshot_saved.emit(False, "missing class label")
             return
@@ -1824,6 +1855,35 @@ class AppController(QObject):
             )
             return
         queue_dir = self._capture_queue_dir()
+        clean_operator_label = str(operator_label or "").strip()
+        clean_split = "holdout" if str(split).strip().lower() == "holdout" else "train"
+        capture_key = (clean_operator_label or cls_name, clean_split)
+        capture_index = self._annotation_capture_counts.get(capture_key, 0) + 1
+        self._annotation_capture_counts[capture_key] = capture_index
+        quality_meta = _camera_training_quality(frame)
+        label_meta = {
+            "operator_label": clean_operator_label,
+            "specialist_label": clean_operator_label,
+            "parent_class": cls_name,
+            "capture_session_id": self._annotation_capture_session_id,
+            "object_instance_id": f"{self._annotation_capture_session_id}:{clean_operator_label or cls_name}",
+            "viewpoint_id": f"view-{capture_index:03d}-{uuid.uuid4().hex[:6]}",
+            "quality_bucket": quality_meta["quality_bucket"],
+            "sharpness": quality_meta["sharpness"],
+            "split": clean_split,
+            "holdout": clean_split == "holdout",
+            "recognition_enabled": clean_split != "holdout",
+            "hazardous": cls_name == "Battery",
+            "boxes": [
+                {
+                    "cls_id": int(cls_id),
+                    "cls_name": cls_name,
+                    "operator_label": clean_operator_label,
+                    "conf": 1.0,
+                    "xyxy": [float(value) for value in xyxy],
+                }
+            ],
+        }
         try:
             if approve_now:
                 img_path = save_reviewed_camera_annotation(
@@ -1833,6 +1893,7 @@ class AppController(QObject):
                     int(cls_id),
                     xyxy,
                     catalog_path=dataset_db_path(),
+                    extra_meta=label_meta,
                 )
             else:
                 img_path = import_manual_camera_frame(
@@ -1842,6 +1903,7 @@ class AppController(QObject):
                     int(cls_id),
                     xyxy=xyxy,
                     catalog_path=dataset_db_path(),
+                    extra_meta=label_meta,
                 )
         except Exception as e:
             self.snapshot_saved.emit(False, str(e))
@@ -1854,7 +1916,6 @@ class AppController(QObject):
         self.snapshot_saved.emit(True, f"Đã lưu mẫu {cls_name} ({state}): {img_path.name}.")
 
         self.refresh_learn_now_status(cls_name)
-
     def capture_hard_negative_sample(self, reason: str) -> None:
         from app.core.hard_negative_dataset import capture_hard_negative_frame
         from app.utils.paths import dataset_db_path
@@ -2078,3 +2139,17 @@ class AppController(QObject):
         self._pending_uart_tests.clear()
         self._clear_runtime_buffers()
         logger.info("controller stopped")
+
+
+def _camera_training_quality(frame: np.ndarray) -> dict[str, object]:
+    import cv2
+
+    gray = cv2.cvtColor(frame[:, :, :3], cv2.COLOR_BGR2GRAY)
+    sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+    if sharpness < 75.0:
+        bucket = "blurry_real_camera"
+    elif sharpness < 160.0:
+        bucket = "soft_real_camera"
+    else:
+        bucket = "sharp_real_camera"
+    return {"sharpness": round(sharpness, 3), "quality_bucket": bucket}

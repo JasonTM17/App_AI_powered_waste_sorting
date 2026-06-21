@@ -7,10 +7,11 @@
     "rotation": 0
   },
   "model": {
-    "path": "models/best.pt",
+    "path": "models/real-camera-balanced-20260619-candidate.pt",
     "device": "auto",
     "conf_threshold": 0.4,
     "class_thresholds": {
+      "Organic": 0.25,
       "Plastic bottle": 0.3,
       "Glass bottle": 0.3,
       "Milk bottle": 0.3
@@ -25,6 +26,10 @@
         "Pen": 0.45,
         "Battery": 0.3,
         "Toothbrush": 0.25
+      },
+      "min_aspect_ratios": {
+        "Pen": 2.2,
+        "Toothbrush": 2.0
       },
       "nms_iou": 0.7,
       "overlap_iou": 0.5
@@ -537,6 +542,20 @@
     "low_conf_threshold": 0.6,
     "output_dir": "dataset_v2"
   },
+  "auto_review_queue": {
+    "enabled": true,
+    "cooldown_seconds": 12.0,
+    "capture_low_confidence": true,
+    "capture_unknown": true,
+    "capture_multiple_objects": true,
+    "capture_visual_safety": true
+  },
+  "hazardous_waste": {
+    "battery_warning_hold_seconds": 8.0,
+    "confirmation_window_seconds": 10.0,
+    "battery_command": "R",
+    "battery_bin_index": 2
+  },
   "speaker": {
     "enabled": false,
     "output_mode": "hardware",
@@ -574,14 +593,16 @@
     "allow_unknown_matches": true,
     "min_similarity": 0.88,
     "unknown_min_similarity": 0.92,
+    "organic_unknown_min_similarity": 0.65,
     "min_consensus_similarity": 0.72,
     "min_margin": 0.08,
     "top_k": 7,
     "min_votes": 4,
     "unknown_min_votes": 1,
-    "max_references_per_class": 30,
+    "organic_unknown_min_votes": 7,
+    "max_references_per_class": 60,
     "cache_refresh_seconds": 30.0,
-    "query_cache_seconds": 1.0,
+    "query_cache_seconds": 5.0,
     "correctable_yolo_classes": [
       "Aerosols",
       "Aluminum can",
@@ -679,7 +700,7 @@
     "correction_targets_by_yolo_class": {
       "Cardboard": ["Textile", "Organic"],
       "Glass bottle": ["Iron utensils", "Wood"],
-      "Pen": ["Disposable tableware", "Iron utensils"],
+      "Pen": ["Disposable tableware", "Iron utensils", "Electronics"],
       "Plastic cup": ["Organic", "Iron utensils"],
       "Plastic bottle": ["Organic"],
       "Aluminum can": ["Plastic bottle"],

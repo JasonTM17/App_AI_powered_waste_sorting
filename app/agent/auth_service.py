@@ -43,8 +43,9 @@ _ENGINE_LOCK = Lock()
 _SCHEMA_READINESS = SchemaReadiness()
 _AUTH_SCHEMA_PROBES = (
     (
-        "SELECT id, username, display_name, role, password_hash, salt, iterations, is_active, "
-        "password_default, created_at, updated_at, last_login_at FROM accounts WHERE 1=0"
+        "SELECT id, username, display_name, avatar_path, role, password_hash, salt, iterations, "
+        "is_active, password_default, created_at, updated_at, last_login_at "
+        "FROM accounts WHERE 1=0"
     ),
     (
         "SELECT id, account_id, token_hash, created_at, expires_at, revoked_at, "

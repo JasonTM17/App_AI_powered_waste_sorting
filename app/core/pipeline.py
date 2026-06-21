@@ -14,6 +14,7 @@ from typing import Any, TypedDict
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from app.core.auto_review_queue import AutoReviewQueue
 from app.core.config import (
     AppConfig,
     ClassMapping,
@@ -25,6 +26,7 @@ from app.core.detection_filtering import (
     find_ambiguous_organic_candidate,
     is_low_detail_empty_tray,
     is_uniform_empty_tray_artifact,
+    merge_fragmented_same_label_detections,
     suppress_overlapping_detections,
 )
 from app.core.dispatch_guard import DispatchGuard
@@ -44,7 +46,6 @@ from app.core.three_bin_classifier import (
     THREE_BIN_SOURCE,
     ThreeBinClassifier,
     parse_three_bin_class_name,
-    three_bin_display_name,
 )
 from app.core.tracker import Tracker
 from app.core.uart_protocol import encode_sort
@@ -57,6 +58,7 @@ from app.core.waste_categories import (
     category_for_known_class,
     normalize_mapping_to_three_bins,
 )
+from app.core.waste_display import waste_detection_display_name
 from app.utils.logging import logger
 from app.utils.paths import detection_captures_dir, resolve_data_path
 
@@ -203,6 +205,13 @@ class Pipeline:
         self._multi_object_display_hold: list[Detection] = []
         self._multi_object_display_hold_frames = 0
         self._multi_object_display_hold_limit = 8
+        self._auto_review_queue = AutoReviewQueue(
+            resolve_data_path(cfg.capture.output_dir) / "low_conf_queue",
+            cooldown_seconds=cfg.auto_review_queue.cooldown_seconds,
+        )
+        self._hazardous_battery_seen_at = 0.0
+        self._hazardous_battery_track_id: int | None = None
+        self._hazardous_confirmation_until = 0.0
         self._manual_reference_recognizer = self._build_manual_reference_recognizer()
         self._three_bin_classifier = self._build_three_bin_classifier()
         self._configure_dispatch_guard()
@@ -219,6 +228,10 @@ class Pipeline:
         self.cfg = cfg
         self.update_mappings(cfg.mappings)
         self._configure_dispatch_guard()
+        self._auto_review_queue = AutoReviewQueue(
+            resolve_data_path(cfg.capture.output_dir) / "low_conf_queue",
+            cooldown_seconds=cfg.auto_review_queue.cooldown_seconds,
+        )
         if self._manual_reference_recognizer is None:
             self._manual_reference_recognizer = self._build_manual_reference_recognizer()
         if self._manual_reference_recognizer is not None:
@@ -268,6 +281,11 @@ class Pipeline:
     def refresh_manual_references(self) -> None:
         if self._manual_reference_recognizer is not None:
             self._manual_reference_recognizer.refresh(force=True)
+
+    def prewarm_manual_references_async(self) -> bool:
+        if self._manual_reference_recognizer is None:
+            return False
+        return self._manual_reference_recognizer.prewarm_async()
 
     def three_bin_classifier_status(self) -> dict[str, object]:
         if self._three_bin_classifier is None:
@@ -362,46 +380,71 @@ class Pipeline:
         return not (callable(is_running) and not bool(is_running()))
 
     def _save_low_conf_frame(self, frame_bgr, detections, ts):
-        if self.cfg.capture.mode != "auto_low_conf":
+        if not self.cfg.auto_review_queue.enabled:
             return
         if not detections:
             return
         if all(d.conf >= self.cfg.capture.low_conf_threshold for d in detections):
             return
+        self._queue_review(frame_bgr, detections, reason="low_confidence", ts=ts)
 
-        import cv2
-
-        out_dir = resolve_data_path(self.cfg.capture.output_dir) / "low_conf_queue"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        uid = uuid.uuid4().hex[:12]
-        img_path = out_dir / f"{uid}.jpg"
-        cv2.imwrite(str(img_path), frame_bgr)
-        meta = {
-            "ts": ts.isoformat(),
-            "source": "auto_low_conf",
-            "boxes": [
-                {"cls_id": d.cls_id, "cls_name": d.cls_name, "conf": d.conf, "xyxy": list(d.xyxy)}
-                for d in detections
-            ],
-        }
-        (out_dir / f"{uid}.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        try:
-            from app.core.dataset_catalog import DatasetCatalog
-            from app.utils.paths import dataset_db_path
-
-            catalog = DatasetCatalog(dataset_db_path())
+    def _queue_review(
+        self,
+        frame_bgr: np.ndarray,
+        detections: list[Detection],
+        *,
+        reason: str,
+        ts: datetime,
+        extra_meta: dict[str, object] | None = None,
+    ) -> str | None:
+        if not self.cfg.auto_review_queue.enabled:
+            return None
+        path = self._auto_review_queue.capture(
+            frame_bgr,
+            detections,
+            reason=reason,
+            ts=ts,
+            extra_meta=extra_meta,
+        )
+        if path is None:
+            return None
+        callback = self.on_capture_saved
+        if callable(callback):
             try:
-                catalog.upsert_item(img_path, meta)
-            finally:
-                catalog.close()
-        except Exception as e:
-            logger.warning("dataset catalog update failed: {}", e)
-        cb = self.on_capture_saved
-        if callable(cb):
-            try:
-                cb(str(img_path))
-            except Exception as e:
-                logger.warning("on_capture_saved callback failed: {}", e)
+                callback(str(path))
+            except Exception as exc:
+                logger.warning("on_capture_saved callback failed: {}", exc)
+        logger.info("queued review reason={} path={}", reason, path)
+        return str(path)
+
+    @staticmethod
+    def _is_battery(detection: Detection) -> bool:
+        return detection.cls_name == "Battery"
+
+    def hazardous_warning_active(self) -> bool:
+        return (
+            self._hazardous_battery_seen_at > 0.0
+            and time.monotonic() - self._hazardous_battery_seen_at
+            <= self.cfg.hazardous_waste.battery_warning_hold_seconds
+        )
+
+    def confirm_hazardous_battery_dispatch(self) -> tuple[bool, str]:
+        if not self.hazardous_warning_active() or self._hazardous_battery_track_id is None:
+            return False, "Chưa có cục pin ổn định đang chờ xác nhận."
+        self._hazardous_confirmation_until = (
+            time.monotonic() + self.cfg.hazardous_waste.confirmation_window_seconds
+        )
+        self.dispatch_status = "battery dispatch confirmed"
+        return True, (
+            "Đây là rác thải nguy hại không thuộc 3 loại rác này. "
+            "Nếu muốn đổ thì tôi sẽ đổ vào Vô cơ, nhưng đây là loại rác nguy hiểm nên bạn hãy lưu ý nhé."
+        )
+
+    def _battery_dispatch_confirmed(self, track_id: int) -> bool:
+        return (
+            self._hazardous_battery_track_id == track_id
+            and time.monotonic() <= self._hazardous_confirmation_until
+        )
 
     def _save_route_consensus_review(
         self,
@@ -533,7 +576,7 @@ class Pipeline:
         category = category_for_command(mapping.command)
         category_name = category.name if category is not None else f"Thùng {mapping.bin_index}"
         generic_three_bin = parse_three_bin_class_name(det.cls_name) is not None
-        object_name = det.operator_label or three_bin_display_name(det.cls_name)
+        object_name = waste_detection_display_name(det.cls_name, det.operator_label)
         now = datetime.now()
         uid = f"{now:%Y%m%d-%H%M%S-%f}-t{tracked.track_id}-{uuid.uuid4().hex[:6]}"
         out_dir = detection_captures_dir() / f"{now:%Y-%m-%d}"
@@ -600,6 +643,13 @@ class Pipeline:
         }
 
     def _mapping_for_detection(self, detection: Detection) -> ClassMapping:
+        if self._is_battery(detection):
+            return ClassMapping(
+                class_name="Battery",
+                command=self.cfg.hazardous_waste.battery_command,
+                bin_index=self.cfg.hazardous_waste.battery_bin_index,
+                enabled=True,
+            )
         three_bin_command = parse_three_bin_class_name(detection.cls_name)
         if three_bin_command is not None:
             category = category_for_command(three_bin_command)
@@ -698,29 +748,59 @@ class Pipeline:
                 and detection.source.startswith("unknown_fallback:")
                 and detection.conf < 0.20
             )
+            general_min_similarity = (
+                min(ref_cfg.unknown_min_similarity, 0.84)
+                if low_confidence_fallback
+                else ref_cfg.unknown_min_similarity
+            )
+            general_min_votes = (
+                max(ref_cfg.unknown_min_votes, 4)
+                if low_confidence_fallback
+                else ref_cfg.unknown_min_votes
+            )
+            organic_consensus_votes = min(
+                ref_cfg.top_k,
+                ref_cfg.organic_unknown_min_votes,
+            )
             match = recognizer.classify(
                 frame_bgr,
                 detection,
                 allowed_classes=allowed_classes or None,
                 min_similarity=(
-                    min(ref_cfg.unknown_min_similarity, 0.84)
-                    if low_confidence_fallback
-                    else ref_cfg.unknown_min_similarity
+                    min(general_min_similarity, ref_cfg.organic_unknown_min_similarity)
                     if mode == "unknown"
                     else max(ref_cfg.min_similarity, 0.92)
                     if strict_correction
                     else None
                 ),
+                min_consensus_similarity=(
+                    min(
+                        ref_cfg.min_consensus_similarity,
+                        ref_cfg.organic_unknown_min_similarity,
+                    )
+                    if mode == "unknown"
+                    else None
+                ),
                 min_votes=(
-                    max(ref_cfg.unknown_min_votes, 4)
-                    if low_confidence_fallback
-                    else ref_cfg.unknown_min_votes
+                    min(general_min_votes, organic_consensus_votes)
                     if mode == "unknown"
                     else max(ref_cfg.min_votes, 4)
                     if strict_correction
                     else None
                 ),
             )
+            if match is not None and mode == "unknown":
+                general_match = (
+                    match.similarity >= general_min_similarity
+                    and match.votes >= general_min_votes
+                )
+                organic_consensus_match = (
+                    match.cls_name == "Organic"
+                    and match.similarity >= ref_cfg.organic_unknown_min_similarity
+                    and match.votes >= organic_consensus_votes
+                )
+                if not general_match and not organic_consensus_match:
+                    match = None
             if match is None:
                 out.append(detection)
                 continue
@@ -1260,11 +1340,35 @@ class Pipeline:
         filtered = self._apply_three_bin_classifier(frame_bgr, filtered)
         filtered = suppress_overlapping_detections(filtered, iou_threshold=0.55)
         filtered = collapse_duplicate_physical_detections(filtered)
+        foreground_count = len(
+            foreground_object_clusters(
+                frame_bgr,
+                roi=self.cfg.roi,
+                min_area_ratio=self.cfg.unknown_fallback.min_area_ratio,
+            )
+        )
+        filtered = merge_fragmented_same_label_detections(
+            filtered,
+            foreground_object_count=foreground_count,
+        )
         filtered = self._stabilize_multi_object_display(frame_bgr, filtered)
         self._save_low_conf_frame(frame_bgr, raw, ts)
         tracked = self.tracker.update(filtered)
         detections_for_render = [t.detection for t in tracked]
         now_mono = time.monotonic()
+        battery_tracks = [track for track in tracked if self._is_battery(track.detection)]
+        if battery_tracks:
+            stable_battery = max(battery_tracks, key=lambda track: track.stable_frames)
+            self._hazardous_battery_seen_at = now_mono
+            self._hazardous_battery_track_id = stable_battery.track_id
+            if self.cfg.auto_review_queue.capture_unknown:
+                self._queue_review(
+                    frame_bgr,
+                    [stable_battery.detection],
+                    reason="hazardous_battery",
+                    ts=ts,
+                    extra_meta={"hazardous": True, "requires_confirmation": True},
+                )
         roi_ready = self._roi_ready_for_dispatch(frame_bgr)
         roi_reference_boxes = tuple(
             t.detection.xyxy for t in tracked if self._in_roi(t.detection.xyxy)
@@ -1333,6 +1437,8 @@ class Pipeline:
         )
         if not multi_class.allowed:
             self.dispatch_status = multi_class.reason
+            if self.cfg.auto_review_queue.capture_multiple_objects:
+                self._queue_review(frame_bgr, detections_for_render, reason="multiple_objects", ts=ts)
             self._speak_multi_class_warning(multi_class.class_names)
             if (
                 not self._hardware_dispatch_enabled
@@ -1350,6 +1456,14 @@ class Pipeline:
                 foreground_multi.unmatched_foreground_count,
             )
             self.dispatch_status = foreground_multi.reason
+            if self.cfg.auto_review_queue.capture_multiple_objects:
+                self._queue_review(
+                    frame_bgr,
+                    detections_for_render,
+                    reason="foreground_multiple_objects",
+                    ts=ts,
+                    extra_meta={"foreground_count": foreground_multi.object_count},
+                )
             self._speak_multi_class_warning(foreground_multi.class_names)
             if (
                 not self._hardware_dispatch_enabled
@@ -1405,8 +1519,13 @@ class Pipeline:
                     self.tracker.mark_emitted(t.track_id)
             return detections_for_render
         for render_index, t in enumerate(tracked):
+            if self._is_battery(t.detection) and not self._battery_dispatch_confirmed(t.track_id):
+                self.dispatch_status = "pin nguy hại cần xác nhận trước khi đưa vào Vô cơ"
+                continue
             if self._low_confidence_dispatch_blocked(t.detection):
                 self.dispatch_status = "low confidence review required"
+                if self.cfg.auto_review_queue.capture_low_confidence:
+                    self._queue_review(frame_bgr, [t.detection], reason="low_confidence", ts=ts)
                 if t.stable_frames == self.cfg.dispatch_guard.min_stable_frames:
                     logger.info(
                         "dispatch blocked low confidence track={} cls={} conf={:.2f} source={}",
@@ -1420,6 +1539,8 @@ class Pipeline:
                 should_log = self.tracker.should_emit(t.track_id)
                 self.tracker.mark_emitted(t.track_id)
                 self.dispatch_status = "unknown object review required"
+                if self.cfg.auto_review_queue.capture_unknown:
+                    self._queue_review(frame_bgr, [t.detection], reason="unknown_object", ts=ts)
                 if should_log:
                     logger.info(
                         "dispatch blocked unknown object track={} conf={:.2f} source={}",
@@ -1469,6 +1590,13 @@ class Pipeline:
                     visual_safety.area_ratio,
                     visual_safety.sharpness,
                 )
+                if self.cfg.auto_review_queue.capture_visual_safety:
+                    self._queue_review(
+                        frame_bgr,
+                        [t.detection],
+                        reason=f"visual_safety:{visual_safety.reason}",
+                        ts=ts,
+                    )
                 continue
             mapping = self._mapping_for_detection(t.detection)
             owner_username = self.cfg.device.owner_username.strip()
@@ -1536,6 +1664,13 @@ class Pipeline:
                 owner_account_id=_owner_account_id(owner_username),
                 owner_username=owner_username or None,
                 device_id=self.cfg.device.device_id.strip() or None,
+                hazardous=self._is_battery(t.detection),
+                hazardous_confirmed_by=(
+                    "desktop_admin" if self._is_battery(t.detection) else None
+                ),
+                hazardous_confirmed_at=(
+                    ts.isoformat() if self._is_battery(t.detection) else None
+                ),
             )
             if not capture_ok:
                 logger.error(
@@ -1614,6 +1749,8 @@ class Pipeline:
                         command=mapping.command,
                         conf=t.detection.conf,
                     )
+                if self._is_battery(t.detection):
+                    self._hazardous_confirmation_until = 0.0
             logger.info(
                 "dispatch track={} cls={} cmd={} bin={} conf={:.2f}",
                 t.track_id,
@@ -1731,14 +1868,14 @@ class Pipeline:
     def _unknown_dispatch_blocked(self, detection: Detection) -> bool:
         if parse_three_bin_class_name(detection.cls_name) is not None:
             return False
-        if detection.cls_name in self._mapping:
-            return False
         fallback = self.cfg.unknown_fallback
         if detection.cls_name != fallback.class_name:
+            if detection.cls_name in self._mapping:
+                return False
             return category_for_known_class(detection.cls_name) is None
-        if detection.cls_name in self._mapping:
-            return False
-        return not bool(fallback.dispatch_enabled)
+        # An explicit legacy mapping must never convert an unresolved object
+        # into a real hardware command. Queue it for review instead.
+        return True
 
     def _low_confidence_dispatch_blocked(self, detection: Detection) -> bool:
         if detection.conf < float(self.cfg.dispatch_guard.min_dispatch_confidence):

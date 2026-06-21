@@ -12,6 +12,7 @@ const ALLOWED_ROUTES: BridgeRoute[] = [
   route("/api/camera/start", ["POST"]),
   route("/api/camera/stop", ["POST"]),
   route("/api/camera/stream-token", ["POST"]),
+  route("/api/devices/refresh", ["POST"]),
   route("/api/live", ["GET"]),
   route("/api/training/status", ["GET"]),
   route("/api/settings", ["GET", "PUT"]),
@@ -31,7 +32,14 @@ const ALLOWED_ROUTES: BridgeRoute[] = [
   route("/api/learn-now/status", ["GET"]),
   route("/api/learn-now/refresh-references", ["POST"]),
   route("/api/learn-now/unknown/capture", ["POST"]),
-  route("/api/learn-now/micro-train/start", ["POST"])
+  route("/api/learn-now/micro-train/start", ["POST"]),
+  route("/api/history", ["GET"]),
+  route("/api/history/export.csv", ["GET"])
+];
+
+const ALLOWED_DYNAMIC_ROUTES = [
+  dynamicRoute(/^\/api\/history\/\d+\/image$/, ["GET"]),
+  dynamicRoute(/^\/api\/history\/\d+\/label$/, ["PATCH"])
 ];
 
 const DEFAULT_TIMEOUT_MS = 45_000;
@@ -47,7 +55,7 @@ export async function proxyHardwareBridge(request: NextRequest, segments: string
     }
 
     const targetPath = `/api/${segments.map(encodeURIComponent).join("/")}`;
-    if (!isAllowed(targetPath, request.method)) {
+    if (!isAllowedHardwareBridgeRoute(targetPath, request.method)) {
       return NextResponse.json({ detail: "Hardware bridge route is not allowed" }, { status: 404 });
     }
 
@@ -63,8 +71,14 @@ export async function proxyHardwareBridge(request: NextRequest, segments: string
     });
 
     const response = await forwardToBridge(request, targetUrl, bridgeSecret);
-    const payload = await response.text();
     const contentType = response.headers.get("content-type") || "application/json";
+    if (!contentType.includes("application/json")) {
+      return new NextResponse(await response.arrayBuffer(), {
+        status: response.status,
+        headers: { "content-type": contentType }
+      });
+    }
+    const payload = await response.text();
 
     if (!response.ok) {
       return responseFromBridge(payload, contentType, response.status);
@@ -90,8 +104,18 @@ function route(path: string, methods: string[]): BridgeRoute {
   return { path, methods: new Set(methods.map((method) => method.toUpperCase())) };
 }
 
-function isAllowed(path: string, method: string) {
-  return ALLOWED_ROUTES.some((item) => item.path === path && item.methods.has(method.toUpperCase()));
+function dynamicRoute(pattern: RegExp, methods: string[]) {
+  return { pattern, methods: new Set(methods.map((method) => method.toUpperCase())) };
+}
+
+export function isAllowedHardwareBridgeRoute(path: string, method: string) {
+  const normalizedMethod = method.toUpperCase();
+  return (
+    ALLOWED_ROUTES.some((item) => item.path === path && item.methods.has(normalizedMethod)) ||
+    ALLOWED_DYNAMIC_ROUTES.some(
+      (item) => item.pattern.test(path) && item.methods.has(normalizedMethod)
+    )
+  );
 }
 
 function hardwareBridgeUrl() {

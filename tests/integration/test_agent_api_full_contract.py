@@ -84,6 +84,7 @@ EXPECTED_AGENT_ROUTES = {
     "POST /api/camera/start",
     "POST /api/camera/stop",
     "POST /api/camera/stream-token",
+    "GET /api/live",
     "GET /api/camera/stream",
     "GET /api/settings",
     "PUT /api/settings",
@@ -100,6 +101,7 @@ EXPECTED_AGENT_ROUTES = {
     "GET /api/history",
     "GET /api/history/export.csv",
     "GET /api/history/{row_id}/image",
+    "PATCH /api/history/{row_id}/label",
     "GET /api/dataset/summary",
     "GET /api/dataset/items",
     "GET /api/dataset/items/{item_id}",
@@ -731,6 +733,24 @@ def test_admin_history_training_dataset_and_logs_contract(tmp_path, monkeypatch)
         assert history.json()["total"] >= 1
         assert client.get("/api/history/export.csv", headers=admin_headers).status_code == 200
         assert client.get(f"/api/history/{owned_id}/image", headers=admin_headers).status_code == 200
+        reviewed = client.patch(
+            f"/api/history/{owned_id}/label",
+            headers=admin_headers,
+            json={
+                "display_label": "Cục sạc",
+                "status": "human_verified",
+                "review_note": "Admin xác nhận từ ảnh.",
+            },
+        )
+        assert reviewed.status_code == 200
+        assert reviewed.json()["display_label"] == "Cục sạc"
+        assert reviewed.json()["label_status"] == "human_verified"
+        user = _login(client, USER_USERNAME, USER_PASSWORD)
+        assert client.patch(
+            f"/api/history/{owned_id}/label",
+            headers=_headers(str(user["token"])),
+            json={"display_label": "Sai", "status": "human_verified"},
+        ).status_code == 403
 
         assert client.get("/api/dataset/summary", headers=admin_headers).status_code == 200
         assert client.post("/api/dataset/sync", headers=admin_headers).status_code == 200

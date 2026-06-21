@@ -616,12 +616,21 @@ class UserHistoryItemDTO(BaseModel):
     id: int
     ts: str
     cls_name: str
+    display_label: str = ""
+    label_status: Literal[
+        "model_inferred", "metadata_verified", "human_verified", "needs_review", "no_evidence"
+    ] = "model_inferred"
+    label_source: str = ""
+    label_confidence: float | None = None
     confidence: float
     route_label: str | None = None
     bin_index: int | None = None
     category: Literal["organic", "inorganic", "recyclable"] = "inorganic"
     ack_status: str | None = None
     device_id: str | None = None
+    hazardous: bool = False
+    hazardous_confirmed_by: str | None = None
+    hazardous_confirmed_at: str | None = None
     image_available: bool = False
 
 
@@ -1179,6 +1188,21 @@ class HistoryRowDTO(BaseModel):
     owner_account_id: int | None = None
     owner_username: str | None = None
     device_id: str | None = None
+    display_label: str = ""
+    label_status: Literal[
+        "model_inferred", "metadata_verified", "human_verified", "needs_review", "no_evidence"
+    ] = "model_inferred"
+    label_source: str = ""
+    label_confidence: float | None = None
+    reviewed_by: str | None = None
+    reviewed_at: str | None = None
+    review_note: str | None = None
+
+
+class HistoryLabelReviewRequest(BaseModel):
+    display_label: str = Field(default="", max_length=120)
+    status: Literal["human_verified", "needs_review", "no_evidence"] = "human_verified"
+    review_note: str = Field(default="", max_length=500)
 
 
 class HistoryResponse(BaseModel):
@@ -1295,6 +1319,7 @@ __all__ = [
     "HardwareTestResponse",
     "HealthResponse",
     "HistoryResponse",
+    "HistoryLabelReviewRequest",
     "HistoryRowDTO",
     "LearnNowClassStatusDTO",
     "LearnNowStatusResponse",

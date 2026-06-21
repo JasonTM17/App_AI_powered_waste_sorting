@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 
 from app.agent import auth_service as auth_service_module
 from app.agent.auth_service import (
@@ -82,3 +82,42 @@ def test_remote_auth_schema_probe_skips_create_all_when_schema_exists(monkeypatc
     monkeypatch.setattr(auth_service_module.metadata, "create_all", fail_create_all)
 
     AuthService(database_url=database_url).ensure_ready()
+
+
+def test_remote_auth_schema_adds_avatar_path_to_legacy_accounts(monkeypatch):
+    engine = create_engine("sqlite:///:memory:", future=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "CREATE TABLE accounts ("
+                "id INTEGER PRIMARY KEY, username VARCHAR NOT NULL UNIQUE, "
+                "display_name VARCHAR DEFAULT '', role VARCHAR NOT NULL, "
+                "password_hash VARCHAR NOT NULL, salt VARCHAR NOT NULL, "
+                "iterations INTEGER NOT NULL, is_active INTEGER DEFAULT 1, "
+                "password_default INTEGER DEFAULT 0, created_at VARCHAR NOT NULL, "
+                "updated_at VARCHAR NOT NULL, last_login_at VARCHAR)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE sessions ("
+                "id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, "
+                "token_hash VARCHAR NOT NULL UNIQUE, created_at VARCHAR NOT NULL, "
+                "expires_at VARCHAR NOT NULL, revoked_at VARCHAR, client_label VARCHAR DEFAULT '')"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE chat_usage ("
+                "id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, period VARCHAR NOT NULL, "
+                "used INTEGER DEFAULT 0, updated_at VARCHAR NOT NULL)"
+            )
+        )
+    database_url = "postgresql+psycopg://user:pass@localhost/auth_legacy_test"
+    monkeypatch.setattr(auth_service_module, "_engine_for_auth_store", lambda *_: engine)
+
+    AuthService(database_url=database_url).ensure_ready()
+
+    with engine.begin() as conn:
+        columns = {str(row["name"]) for row in inspect(conn).get_columns("accounts")}
+    assert "avatar_path" in columns

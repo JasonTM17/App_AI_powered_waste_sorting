@@ -77,6 +77,13 @@ class _LowConfidencePenInfer:
         return [Detection(42, "Pen", 0.12, (20, 20, 130, 80))]
 
 
+class _BatteryInfer:
+    class_names: ClassVar[dict[int, str]] = {43: "Battery"}
+
+    def predict(self, frame):
+        return [Detection(43, "Battery", 0.91, (30, 30, 150, 100))]
+
+
 class _LowConfidencePlasticBottleDispatchInfer:
     class_names: ClassVar[dict[int, str]] = {1: "Plastic bottle"}
 
@@ -673,7 +680,7 @@ def test_pipeline_corrects_high_confidence_plastic_bottle_leaf_reference(tmp_pat
     detections = p.process_frame(frame, datetime.now(UTC))
 
     assert [(d.cls_name, d.source, d.operator_label) for d in detections] == [
-        ("Organic", "manual_reference", "La cay")
+        ("Organic", "manual_reference", "Lá cây")
     ]
     assert uart.sent == [(1, "O", detections[0].conf)]
     rows = p.history.query(limit=1)
@@ -955,6 +962,39 @@ def test_pipeline_corrects_pen_to_disposable_fork(tmp_path, monkeypatch):
     meta = json.loads(Path(rows[0].meta_path).read_text(encoding="utf-8"))
     assert meta["display_name"] == "Nĩa nhựa dùng một lần"
     assert meta["review_required"] is False
+    p.close()
+
+
+def test_pipeline_corrects_wall_charger_mislabeled_as_pen(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
+    cfg = _dispatch_ready_config()
+    cfg.capture.output_dir = str(tmp_path / "dataset_v2")
+    cfg.model.conf_threshold = 0.05
+    cfg.manual_reference_recognition.min_similarity = 0.9
+    cfg.manual_reference_recognition.top_k = 3
+    cfg.manual_reference_recognition.min_votes = 3
+    cfg.manual_reference_recognition.min_correction_area_ratio = 0.2
+    _write_manual_reference(
+        Path(cfg.capture.output_dir) / "low_conf_queue",
+        cls_name="Electronics",
+        cls_id=9,
+        rgb_color=(30, 30, 30),
+        operator_label="Cục sạc",
+        recognition_only=True,
+    )
+    uart = _StubUart()
+    p = Pipeline(cfg, _ForkAsPenInfer(), uart, tmp_path / "h.db")
+    frame = np.full((40, 80, 3), 220, dtype=np.uint8)
+    frame[8:36, 5:75] = (30, 30, 30)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(d.cls_name, d.operator_label, d.source) for d in detections] == [
+        ("Electronics", "Cục sạc", "manual_reference")
+    ]
+    assert uart.sent == [(1, "R", detections[0].conf)]
     p.close()
 
 
@@ -2153,6 +2193,31 @@ def test_pipeline_unknown_object_does_not_dispatch_while_visible(tmp_path, monke
     p.close()
 
 
+def test_pipeline_battery_requires_explicit_confirmation_before_dispatch(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Battery", command="I", bin_index=3)]
+    )
+    uart = _StubUart()
+    pipeline = Pipeline(cfg, _BatteryInfer(), uart, tmp_path / "h.db")
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+    _arm_dispatch(pipeline)
+    pipeline.process_frame(frame, datetime.now(UTC))
+    pipeline.process_frame(frame, datetime.now(UTC))
+
+    assert uart.sent == []
+    assert pipeline.hazardous_warning_active() is True
+    assert pipeline.dispatch_status == "pin nguy hại cần xác nhận trước khi đưa vào Vô cơ"
+    confirmed, message = pipeline.confirm_hazardous_battery_dispatch()
+    assert confirmed is True
+    assert "rác thải nguy hại" in message
+
+    pipeline.process_frame(frame, datetime.now(UTC))
+    assert uart.sent == [(1, "R", 0.91)]
+    pipeline.close()
+
+
 def test_pipeline_blocks_unmapped_out_of_taxonomy_label(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config()
@@ -2246,7 +2311,7 @@ def test_pipeline_uses_consensus_reference_for_low_conf_unknown_fallback(tmp_pat
             return SimpleNamespace(
                 cls_id=17,
                 cls_name="Organic",
-                similarity=0.85,
+                similarity=0.66,
                 operator_label="Vo trung",
                 image_path="manual_live_eggshell.jpg",
                 votes=7,
@@ -2262,11 +2327,18 @@ def test_pipeline_uses_consensus_reference_for_low_conf_unknown_fallback(tmp_pat
     detections = p.process_frame(np.zeros((480, 640, 3), dtype=np.uint8), ts=datetime.now(UTC))
 
     assert [d.cls_name for d in detections] == ["Organic"]
-    assert recognizer.calls == [{"allowed_classes": None, "min_similarity": 0.84, "min_votes": 4}]
+    assert recognizer.calls == [
+        {
+            "allowed_classes": None,
+            "min_similarity": 0.65,
+            "min_consensus_similarity": 0.65,
+            "min_votes": 4,
+        }
+    ]
     p.close()
 
 
-def test_pipeline_dispatches_unknown_only_with_explicit_mapping(tmp_path, monkeypatch):
+def test_pipeline_blocks_unknown_even_when_a_legacy_mapping_exists(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config(
         mappings=[ClassMapping(class_name="Unknown object", command="R", bin_index=2)]
@@ -2282,11 +2354,9 @@ def test_pipeline_dispatches_unknown_only_with_explicit_mapping(tmp_path, monkey
 
     assert len(detections) == 1
     assert detections[0].cls_name == "Unknown object"
-    assert p.uart.sent == [(1, "R", detections[0].conf)]
-    row = p.history.query(limit=1)[0]
-    assert row.cls_name == "Unknown object"
-    assert row.uart_command == "R"
-    assert row.bin_index == 2
+    assert p.uart.sent == []
+    assert p.history.query(limit=1) == []
+    assert p.dispatch_status == "unknown object review required"
     p.close()
 
 

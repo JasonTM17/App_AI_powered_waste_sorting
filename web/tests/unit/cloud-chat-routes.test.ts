@@ -22,6 +22,7 @@ const USER: CloudAuthIdentity = {
   role: "user",
   username: "alice",
   display_name: "Alice",
+  avatar_path: "",
   expires_at: "2026-07-01T00:00:00Z",
   password_default: false
 };

@@ -56,6 +56,28 @@ def test_update_ack(tmp_path: Path):
     svc.close()
 
 
+def test_hazardous_confirmation_audit_is_persisted(tmp_path: Path):
+    svc = HistoryService(tmp_path / "hazard.db")
+    confirmed_at = datetime.now(UTC).isoformat()
+    rid = svc.insert(
+        track_id=9,
+        ts=datetime.now(UTC),
+        cls_id=43,
+        cls_name="Battery",
+        conf=0.91,
+        bbox=(1, 2, 30, 40),
+        hazardous=True,
+        hazardous_confirmed_by="desktop_admin",
+        hazardous_confirmed_at=confirmed_at,
+    )
+
+    row = svc.get(rid)
+    assert row.hazardous == 1
+    assert row.hazardous_confirmed_by == "desktop_admin"
+    assert row.hazardous_confirmed_at == confirmed_at
+    svc.close()
+
+
 def test_query_infers_three_bin_route_for_old_rows(tmp_path: Path):
     db = tmp_path / "h.db"
     svc = HistoryService(db)
@@ -74,6 +96,102 @@ def test_query_infers_three_bin_route_for_old_rows(tmp_path: Path):
     assert row.route_label == "Tái chế"
     assert row.bin_index == 3
     assert row.uart_command == "I"
+    svc.close()
+
+
+def test_backfill_adds_display_label_without_changing_model_class(tmp_path: Path):
+    svc = HistoryService(tmp_path / "labels.db")
+    row_id = svc.insert(
+        track_id=3,
+        ts=datetime.now(UTC),
+        cls_id=42,
+        cls_name="Pen",
+        conf=0.88,
+        bbox=(0, 0, 10, 10),
+    )
+
+    first = svc.backfill_labels()
+    second = svc.backfill_labels()
+    row = svc.get(row_id)
+
+    assert first
+    assert second == []
+    assert row.cls_name == "Pen"
+    assert row.display_label == "Bút bi"
+    assert row.label_status == "model_inferred"
+    svc.close()
+
+
+def test_three_bin_label_never_claims_a_specific_object(tmp_path: Path):
+    svc = HistoryService(tmp_path / "three-bin.db")
+    row_id = svc.insert(
+        track_id=4,
+        ts=datetime.now(UTC),
+        cls_id=-303,
+        cls_name="Kaggle 3-bin I",
+        conf=0.92,
+        bbox=(0, 0, 10, 10),
+        image_path=str(tmp_path / "evidence.jpg"),
+    )
+    svc.backfill_labels()
+    row = svc.get(row_id)
+    assert row.display_label.startswith("Chưa xác định vật")
+    assert row.label_status == "needs_review"
+    assert row.cls_name == "Kaggle 3-bin I"
+    svc.close()
+
+
+def test_admin_review_is_audited_and_preserves_model_class(tmp_path: Path):
+    svc = HistoryService(tmp_path / "review.db")
+    row_id = svc.insert(
+        track_id=5,
+        ts=datetime.now(UTC),
+        cls_id=-1,
+        cls_name="Unknown object",
+        conf=0.39,
+        bbox=(0, 0, 10, 10),
+    )
+    reviewed = svc.review_label(
+        row_id,
+        display_label="But bi",
+        reviewed_by="admin",
+        review_note="Ảnh cho thấy rõ một cây bút.",
+    )
+    audit = svc.label_audit(row_id)
+    assert reviewed.display_label == "Bút bi"
+    assert reviewed.label_status == "human_verified"
+    assert reviewed.cls_name == "Unknown object"
+    assert audit[0].new_label == "Bút bi"
+    assert audit[0].reviewed_by == "admin"
+    svc.close()
+
+
+def test_backfill_preserves_admin_needs_review_decision(tmp_path: Path):
+    svc = HistoryService(tmp_path / "needs-review.db")
+    row_id = svc.insert(
+        track_id=6,
+        ts=datetime.now(UTC),
+        cls_id=42,
+        cls_name="Pen",
+        conf=0.55,
+        bbox=(1, 2, 30, 40),
+        image_path=str(tmp_path / "charger.jpg"),
+    )
+    svc.review_label(
+        row_id,
+        display_label="",
+        reviewed_by="admin",
+        review_note="Nhãn model bị khiếu nại, cần xem lại ảnh.",
+        status="needs_review",
+    )
+
+    first = svc.backfill_labels()
+    second = svc.backfill_labels()
+    assert first
+    assert second == []
+    row = svc.get(row_id)
+    assert row.label_status == "needs_review"
+    assert row.display_label == "Chưa xác định vật"
     svc.close()
 
 

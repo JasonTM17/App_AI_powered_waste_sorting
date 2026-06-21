@@ -66,6 +66,7 @@ class LivePage(QWidget):
     camera_toggled = Signal(bool)
     actuation_test_mode_toggled = Signal(bool)
     speaker_output_mode_changed = Signal(str)
+    hazardous_battery_confirmation_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -207,6 +208,25 @@ class LivePage(QWidget):
         self.warning.setVisible(False)
         root.addWidget(self.warning)
 
+        self.battery_warning = QFrame()
+        self.battery_warning.setObjectName("warning-banner")
+        battery_layout = QHBoxLayout(self.battery_warning)
+        battery_layout.setContentsMargins(14, 10, 14, 10)
+        battery_layout.setSpacing(12)
+        self.battery_warning_text = QLabel(
+            "Đây là rác thải nguy hại không thuộc 3 loại rác này. "
+            "Nếu muốn đổ thì tôi sẽ đổ vào Vô cơ, nhưng đây là loại rác nguy hiểm nên bạn hãy lưu ý nhé."
+        )
+        self.battery_warning_text.setWordWrap(True)
+        battery_layout.addWidget(self.battery_warning_text, 1)
+        self.btn_confirm_battery = QPushButton("Xác nhận đưa vào Vô cơ")
+        self.btn_confirm_battery.setObjectName("danger")
+        self.btn_confirm_battery.setToolTip("Chỉ gửi pin vào thùng Vô cơ sau khi Admin xác nhận.")
+        self.btn_confirm_battery.clicked.connect(self.hazardous_battery_confirmation_requested.emit)
+        battery_layout.addWidget(self.btn_confirm_battery)
+        self.battery_warning.setVisible(False)
+        root.addWidget(self.battery_warning)
+
         body = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self._body_layout = body
         body.setSpacing(16)
@@ -329,6 +349,7 @@ class LivePage(QWidget):
             _set_button_icon(self.btn_pause, "pause")
             self.card_fps.set_value("0")
             self.card_latency.set_value("0")
+            self.set_hazardous_battery_warning(False)
         if emit:
             self.camera_toggled.emit(on)
 
@@ -336,6 +357,10 @@ class LivePage(QWidget):
         message = str(text or "").strip()
         self.warning.setText(message)
         self.warning.setVisible(bool(message))
+
+    def set_hazardous_battery_warning(self, active: bool) -> None:
+        self.battery_warning.setVisible(bool(active))
+        self.btn_confirm_battery.setEnabled(bool(active and self._actuation_test_mode and self._uart_ok))
 
     def set_speaker_output_mode(self, mode: str, emit: bool = False) -> None:
         normalized = "computer_speaker" if str(mode or "").strip() == "computer_speaker" else "hardware"
@@ -386,6 +411,7 @@ class LivePage(QWidget):
         self.btn_actuation.style().polish(self.btn_actuation)
         self.btn_actuation.blockSignals(False)
         self._sync_dispatch_mode_label()
+        self.set_hazardous_battery_warning(self.battery_warning.isVisible())
         if emit:
             self.actuation_test_mode_toggled.emit(self._actuation_test_mode)
 
@@ -512,6 +538,7 @@ class LivePage(QWidget):
         self.card_uart.set_value("OK" if ok else "OFF")
         self.card_uart.set_sub("connected" if ok else "disconnected")
         self._sync_dispatch_mode_label()
+        self.set_hazardous_battery_warning(self.battery_warning.isVisible())
 
     def set_avg_conf(self, conf: float) -> None:
         self.card_acc.set_value(f"{conf:.2f}")

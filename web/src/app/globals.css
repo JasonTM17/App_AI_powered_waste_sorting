@@ -1770,6 +1770,68 @@ table {
   white-space: nowrap;
 }
 
+.history-review-toolbar,
+.history-review-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.history-review-toolbar {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.history-review-toolbar label {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.history-review-panel table {
+  min-width: 1180px;
+}
+
+.history-review-actions {
+  min-width: 360px;
+}
+
+.history-review-actions select {
+  min-width: 170px;
+}
+
+.history-label-status {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.history-label-status-human_verified,
+.history-label-status-metadata_verified {
+  background: var(--green-soft);
+  color: var(--green-dark);
+}
+
+.history-label-status-needs_review {
+  background: #fff3cd;
+  color: #7a5200;
+}
+
+.history-label-status-no_evidence {
+  background: #f2f4f7;
+  color: #475467;
+}
+
+.history-label-status-model_inferred,
+.history-label-status-unknown {
+  background: #e8f1ff;
+  color: #245ea8;
+}
+
 .table-path {
   color: var(--muted);
   font-size: 12px;

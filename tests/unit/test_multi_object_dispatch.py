@@ -342,3 +342,14 @@ def test_spoon_and_three_piece_pen_clusters_as_two_objects():
     assert len(clusters) == 2
     assert (0, 27, 583, 284) in clusters
     assert (34, 349, 635, 459) in clusters
+
+
+def test_touching_halves_of_one_bulky_object_merge_into_one_cluster():
+    boxes = (
+        (120, 80, 245, 270),
+        (247, 82, 365, 268),
+    )
+
+    clusters = _cluster_foreground_boxes(boxes)
+
+    assert clusters == ((120, 80, 365, 270),)

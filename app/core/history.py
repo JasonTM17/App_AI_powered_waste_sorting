@@ -29,6 +29,7 @@ from app.core.waste_categories import (
     category_for_command,
     category_for_known_class,
 )
+from app.core.history_labels import infer_history_label, validate_review_label
 
 metadata = MetaData()
 
@@ -57,6 +58,30 @@ detections = Table(
     Column("owner_account_id", Integer),
     Column("owner_username", String),
     Column("device_id", String),
+    Column("hazardous", Integer, nullable=False, default=0),
+    Column("hazardous_confirmed_by", String),
+    Column("hazardous_confirmed_at", String),
+    Column("display_label", String),
+    Column("label_status", String),
+    Column("label_source", String),
+    Column("label_confidence", Float),
+    Column("reviewed_by", String),
+    Column("reviewed_at", String),
+    Column("review_note", String),
+)
+
+history_label_audit = Table(
+    "history_label_audit",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("history_id", Integer, nullable=False),
+    Column("previous_label", String),
+    Column("new_label", String, nullable=False),
+    Column("previous_status", String),
+    Column("new_status", String, nullable=False),
+    Column("reviewed_by", String, nullable=False),
+    Column("reviewed_at", String, nullable=False),
+    Column("review_note", String),
 )
 
 qa_sessions = Table(
@@ -123,6 +148,16 @@ _OPTIONAL_DETECTION_COLUMNS = {
     "owner_account_id": "owner_account_id INTEGER",
     "owner_username": "owner_username TEXT",
     "device_id": "device_id TEXT",
+    "hazardous": "hazardous INTEGER DEFAULT 0",
+    "hazardous_confirmed_by": "hazardous_confirmed_by TEXT",
+    "hazardous_confirmed_at": "hazardous_confirmed_at TEXT",
+    "display_label": "display_label TEXT",
+    "label_status": "label_status TEXT",
+    "label_source": "label_source TEXT",
+    "label_confidence": "label_confidence REAL",
+    "reviewed_by": "reviewed_by TEXT",
+    "reviewed_at": "reviewed_at TEXT",
+    "review_note": "review_note TEXT",
 }
 
 
@@ -155,6 +190,19 @@ def _with_route_defaults(row: HistoryRow) -> HistoryRow:
         row.route_label = category.name
     if bin_index is None or command_category is None:
         row.bin_index = category.bin_index
+    if not str(getattr(row, "display_label", "") or "").strip():
+        decision = infer_history_label(
+            cls_name=cls_name,
+            confidence=getattr(row, "conf", None),
+            meta_path=getattr(row, "meta_path", None),
+            image_available=bool(
+                getattr(row, "image_path", None) or getattr(row, "annotated_path", None)
+            ),
+        )
+        row.display_label = decision.display_label
+        row.label_status = decision.label_status
+        row.label_source = decision.label_source
+        row.label_confidence = decision.label_confidence
     return row
 
 
@@ -173,6 +221,18 @@ class HistoryService:
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_detections_ts ON detections(ts)"))
             conn.execute(
                 text("CREATE INDEX IF NOT EXISTS idx_detections_cls ON detections(cls_name)")
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_detections_label_status "
+                    "ON detections(label_status)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_history_label_audit_history "
+                    "ON history_label_audit(history_id)"
+                )
             )
             conn.execute(
                 text(
@@ -208,6 +268,16 @@ class HistoryService:
         owner_account_id=None,
         owner_username=None,
         device_id=None,
+        hazardous=False,
+        hazardous_confirmed_by=None,
+        hazardous_confirmed_at=None,
+        display_label=None,
+        label_status=None,
+        label_source=None,
+        label_confidence=None,
+        reviewed_by=None,
+        reviewed_at=None,
+        review_note=None,
     ) -> int:
         x1, y1, x2, y2 = bbox
         with self._engine.begin() as conn:
@@ -234,6 +304,16 @@ class HistoryService:
                     owner_account_id=owner_account_id,
                     owner_username=owner_username,
                     device_id=device_id,
+                    hazardous=1 if hazardous else 0,
+                    hazardous_confirmed_by=hazardous_confirmed_by,
+                    hazardous_confirmed_at=hazardous_confirmed_at,
+                    display_label=display_label,
+                    label_status=label_status,
+                    label_source=label_source,
+                    label_confidence=label_confidence,
+                    reviewed_by=reviewed_by,
+                    reviewed_at=reviewed_at,
+                    review_note=review_note,
                 )
             )
             pk = res.inserted_primary_key
@@ -267,6 +347,7 @@ class HistoryService:
         since: datetime | None = None,
         until: datetime | None = None,
         ack_status: str | None = None,
+        label_status: str | None = None,
         owner_account_id: int | None = None,
         owner_username: str | None = None,
     ):
@@ -279,10 +360,133 @@ class HistoryService:
             stmt = stmt.where(detections.c.ts <= until.isoformat())
         if ack_status:
             stmt = stmt.where(detections.c.ack_status == ack_status)
+        if label_status:
+            stmt = stmt.where(detections.c.label_status == label_status)
         stmt = _owned_stmt(stmt, owner_account_id, owner_username)
         with self._engine.begin() as conn:
             rows = conn.execute(stmt).mappings().all()
         return [_with_route_defaults(HistoryRow(**dict(r))) for r in rows]
+
+    def backfill_labels(self) -> list[dict[str, object]]:
+        """Persist deterministic labels and missing route fields; safe to run repeatedly."""
+        changes: list[dict[str, object]] = []
+        with self._engine.begin() as conn:
+            rows = conn.execute(select(detections).order_by(detections.c.id)).mappings().all()
+            for raw in rows:
+                row = HistoryRow(**dict(raw))
+                routed = _with_route_defaults(row)
+                current_status = str(raw.get("label_status") or "")
+                preserve_review = (
+                    current_status in {"human_verified", "needs_review", "no_evidence"}
+                    and str(raw.get("label_source") or "") == "admin_review"
+                )
+                if preserve_review:
+                    decision_values = {
+                        "display_label": raw.get("display_label"),
+                        "label_status": current_status,
+                        "label_source": raw.get("label_source") or "admin_review",
+                        "label_confidence": raw.get("label_confidence"),
+                    }
+                else:
+                    decision = infer_history_label(
+                        cls_name=str(raw.get("cls_name") or ""),
+                        confidence=raw.get("conf"),
+                        meta_path=raw.get("meta_path"),
+                        image_available=bool(raw.get("image_path") or raw.get("annotated_path")),
+                    )
+                    decision_values = {
+                        "display_label": decision.display_label,
+                        "label_status": decision.label_status,
+                        "label_source": decision.label_source,
+                        "label_confidence": decision.label_confidence,
+                    }
+                values = dict(decision_values)
+                if not str(raw.get("route_label") or "").strip():
+                    values["route_label"] = routed.route_label
+                if raw.get("bin_index") is None:
+                    values["bin_index"] = routed.bin_index
+                if category_for_command(str(raw.get("uart_command") or "")) is None:
+                    values["uart_command"] = routed.uart_command
+                before = {key: raw.get(key) for key in values}
+                if before == values:
+                    continue
+                conn.execute(
+                    detections.update().where(detections.c.id == int(raw["id"])).values(**values)
+                )
+                changes.append(
+                    {
+                        "id": int(raw["id"]),
+                        "cls_name": str(raw.get("cls_name") or ""),
+                        "before": before,
+                        "after": values,
+                    }
+                )
+        return changes
+
+    def review_label(
+        self,
+        row_id: int,
+        *,
+        display_label: str,
+        reviewed_by: str,
+        review_note: str = "",
+        status: str = "human_verified",
+    ) -> HistoryRow:
+        if status not in {"human_verified", "no_evidence", "needs_review"}:
+            raise ValueError("Trạng thái duyệt không hợp lệ.")
+        label = (
+            validate_review_label(display_label)
+            if status == "human_verified"
+            else "Chưa xác định vật"
+        )
+        reviewer = str(reviewed_by or "").strip()
+        if not reviewer:
+            raise ValueError("Thiếu tài khoản người duyệt.")
+        reviewed_at = datetime.now().astimezone().isoformat()
+        with self._engine.begin() as conn:
+            raw = conn.execute(
+                select(detections).where(detections.c.id == row_id)
+            ).mappings().first()
+            if raw is None:
+                raise KeyError(row_id)
+            conn.execute(
+                history_label_audit.insert().values(
+                    history_id=row_id,
+                    previous_label=raw.get("display_label"),
+                    new_label=label,
+                    previous_status=raw.get("label_status"),
+                    new_status=status,
+                    reviewed_by=reviewer,
+                    reviewed_at=reviewed_at,
+                    review_note=str(review_note or "").strip()[:500],
+                )
+            )
+            conn.execute(
+                detections.update()
+                .where(detections.c.id == row_id)
+                .values(
+                    display_label=label,
+                    label_status=status,
+                    label_source="admin_review",
+                    label_confidence=1.0 if status == "human_verified" else None,
+                    reviewed_by=reviewer,
+                    reviewed_at=reviewed_at,
+                    review_note=str(review_note or "").strip()[:500],
+                )
+            )
+        result = self.get(row_id)
+        if result is None:
+            raise KeyError(row_id)
+        return result
+
+    def label_audit(self, row_id: int) -> list[HistoryRow]:
+        with self._engine.begin() as conn:
+            rows = conn.execute(
+                select(history_label_audit)
+                .where(history_label_audit.c.history_id == row_id)
+                .order_by(history_label_audit.c.id.desc())
+            ).mappings().all()
+        return [HistoryRow(**dict(row)) for row in rows]
 
     def backfill_owner(
         self,
@@ -370,6 +574,13 @@ class HistoryService:
             "ts",
             "cls_id",
             "cls_name",
+            "display_label",
+            "label_status",
+            "label_source",
+            "label_confidence",
+            "reviewed_by",
+            "reviewed_at",
+            "review_note",
             "conf",
             "bbox_x1",
             "bbox_y1",

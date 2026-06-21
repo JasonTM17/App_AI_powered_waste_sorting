@@ -40,6 +40,10 @@ def test_training_page_defaults_to_pen_and_enables_manual_actions(tmp_path, qtbo
     assert page.btn_learn_refresh.isEnabled() is True
     assert page.btn_train_micro.isEnabled() is False
     assert page.btn_train_strong.isEnabled() is False
+    assert page.selected_capture_split() == "train"
+
+    page.capture_split_select.setCurrentIndex(1)
+    assert page.selected_capture_split() == "holdout"
 
 
 def test_training_page_disables_manual_actions_for_invalid_label(tmp_path, qtbot):
@@ -65,6 +69,19 @@ def test_training_page_maps_vietnamese_label_to_textile(tmp_path, qtbot):
     assert page.selected_class_name() == "Textile"
     assert page.class_id_for_name("vải") == 37
     assert "Textile" in page.label_status.text()
+
+
+def test_training_page_labels_auto_review_queue_for_manual_annotation():
+    row = {
+        "selected_cls_name": "Battery",
+        "trust_state": "needs_review",
+        "source": "auto_review_queue",
+    }
+
+    label = TrainingPage._label_for_catalog_row(row)
+
+    assert "Battery" in label
+    assert "Cần gắn nhãn từ lỗi nhận diện" in label
 
 
 def test_training_page_manual_phone_import_requires_label_and_emits_pending_import(
@@ -99,7 +116,7 @@ def test_training_page_camera_annotation_button_emits_class_and_id(tmp_path, qtb
     with qtbot.waitSignal(page.camera_annotation_requested, timeout=500) as blocker:
         button.click()
 
-    assert blocker.args == ["Textile", 37]
+    assert blocker.args == ["Textile", 37, page.class_select.currentText()]
 
 
 def test_training_page_delayed_camera_annotation_emits_after_countdown(tmp_path, qtbot):
@@ -108,11 +125,15 @@ def test_training_page_delayed_camera_annotation_emits_after_countdown(tmp_path,
     _set_label(page, "Textile")
     page._delayed_capture_remaining = 1
     emitted: list[list[object]] = []
-    page.camera_annotation_requested.connect(lambda cls_name, cls_id: emitted.append([cls_name, cls_id]))
+    page.camera_annotation_requested.connect(
+        lambda cls_name, cls_id, operator_label: emitted.append(
+            [cls_name, cls_id, operator_label]
+        )
+    )
 
     page._tick_delayed_annotation_capture()
 
-    assert emitted == [["Textile", 37]]
+    assert emitted == [["Textile", 37, "Textile"]]
     assert page.btn_delayed_annotate.text() == "Chụp sau 5s"
 
 

@@ -7,6 +7,7 @@ from app.core.inference import (
     YOLO_SPECIALIST_SOURCE,
     InferenceEngine,
     merge_specialist_detections,
+    specialist_shape_allowed,
 )
 
 
@@ -89,6 +90,30 @@ def test_specialist_suppresses_overlapping_duplicate_classes():
     assert merged == [stronger]
 
 
+def test_specialist_rejects_pen_label_for_wall_charger_shape():
+    charger_as_pen = _detection(
+        42,
+        "Pen",
+        0.61,
+        (84, 109, 582, 419),
+        source=YOLO_SPECIALIST_SOURCE,
+    )
+
+    assert specialist_shape_allowed(charger_as_pen, {"Pen": 2.2}) is False
+
+
+def test_specialist_keeps_elongated_pen_shape():
+    pen = _detection(
+        42,
+        "Pen",
+        0.61,
+        (40, 100, 560, 180),
+        source=YOLO_SPECIALIST_SOURCE,
+    )
+
+    assert specialist_shape_allowed(pen, {"Pen": 2.2}) is True
+
+
 def test_specialist_load_keeps_primary_class_names_isolated(tmp_path):
     model_path = tmp_path / "specialist.pt"
     model_path.write_bytes(b"stub")
@@ -105,6 +130,9 @@ def test_specialist_load_keeps_primary_class_names_isolated(tmp_path):
     engine._specialist_class_names = {}
     engine._specialist_class_ids = []
     engine._specialist_thresholds = {}
+    engine._specialist_min_aspect_ratios = {}
+    engine._specialist_routes = {}
+    engine._specialist_output_thresholds = {}
     engine._specialist_nms_iou = 0.7
     engine._specialist_overlap_iou = 0.5
 
@@ -120,6 +148,34 @@ def test_specialist_load_keeps_primary_class_names_isolated(tmp_path):
     assert engine.class_names == {0: "Aerosols", 1: "Aluminum can"}
     assert engine._specialist_class_names == {0: "Pen", 1: "Battery"}
     assert engine._specialist_class_ids == [0, 1]
+
+
+def test_specialist_route_maps_wall_charger_to_electronics_operator_label():
+    engine = InferenceEngine.__new__(InferenceEngine)
+    engine._specialist_routes = {"Wall charger": ("Electronics", "Cục sạc")}
+
+    mapped = engine._map_specialist_detection(
+        Detection(
+            6,
+            "Wall charger",
+            0.81,
+            (10, 20, 100, 120),
+            source=YOLO_SPECIALIST_SOURCE,
+        )
+    )
+
+    assert mapped.cls_name == "Electronics"
+    assert mapped.operator_label == "Cục sạc"
+    assert mapped.cls_id == 9
+
+
+def test_specialist_runs_only_when_primary_is_uncertain():
+    engine = InferenceEngine.__new__(InferenceEngine)
+    engine.conf = 0.4
+
+    assert engine._should_run_specialist([]) is True
+    assert engine._should_run_specialist([Detection(3, "Cardboard", 0.20, (0, 0, 10, 10))]) is True
+    assert engine._should_run_specialist([Detection(3, "Cardboard", 0.80, (0, 0, 10, 10))]) is False
 
 
 def test_model_path_falls_back_to_project_data_for_desktop_shortcut(tmp_path, monkeypatch):

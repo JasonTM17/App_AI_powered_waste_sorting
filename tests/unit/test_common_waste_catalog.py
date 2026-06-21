@@ -14,19 +14,27 @@ def test_common_waste_catalog_routes_examples_to_three_bins():
 
     assert rows["Vo chuoi"].canonical_class == "Organic"
     assert rows["Vo chuoi"].command == ORGANIC.code
-    assert rows["Vo trung"].canonical_class == "Organic"
-    assert rows["Vo trung"].command == ORGANIC.code
+    assert rows["Vỏ trứng gà"].canonical_class == "Organic"
+    assert rows["Vỏ trứng gà"].command == ORGANIC.code
     assert rows["Lon nuoc"].canonical_class == "Aluminum can"
     assert rows["Lon nuoc"].command == RECYCLABLE.code
     assert rows["But bi"].canonical_class == "Pen"
     assert rows["But bi"].command == INORGANIC.code
     assert rows["Khau trang"].canonical_class == "Textile"
     assert rows["Khau trang"].command == INORGANIC.code
+    assert rows["Cái lược"].canonical_class == "Unknown plastic"
+    assert rows["Cái lược"].command == INORGANIC.code
+    assert rows["Bì ni lông"].canonical_class == "Plastic bag"
+    assert rows["Bì ni lông"].command == RECYCLABLE.code
+    assert rows["Pin AA/AAA"].command == INORGANIC.code
+    assert rows["Hộp xốp bẩn"].command == INORGANIC.code
+    assert rows["Gốm sứ vỡ"].command == INORGANIC.code
 
 
 def test_common_aliases_canonicalize_to_training_classes():
     assert canonical_class_name("vo chuoi") == "Organic"
     assert canonical_class_name("vo trung") == "Organic"
+    assert canonical_class_name("vo trung ga") == "Organic"
     assert canonical_class_name("eggshell") == "Organic"
     assert canonical_class_name("bã mía") == "Organic"
     assert canonical_class_name("lon nuoc") == "Aluminum can"
@@ -41,6 +49,12 @@ def test_common_aliases_canonicalize_to_training_classes():
     assert canonical_class_name("hop xop") == "Disposable tableware"
     assert canonical_class_name("muong kim loai") == "Iron utensils"
     assert canonical_class_name("vi thuoc") == "Unknown plastic"
+    assert canonical_class_name("cai luoc") == "Unknown plastic"
+    assert canonical_class_name("lược nhựa") == "Unknown plastic"
+    assert canonical_class_name("găng tay cao su") == "Unknown plastic"
+    assert canonical_class_name("bi ni long") == "Plastic bag"
+    assert canonical_class_name("pin aa") == "Battery"
+    assert canonical_class_name("cục sạc") == "Electronics"
     assert category_for_class(canonical_class_name("vo goi ban")) == INORGANIC
 
 

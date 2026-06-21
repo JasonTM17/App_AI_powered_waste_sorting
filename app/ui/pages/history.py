@@ -15,14 +15,18 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTableView,
     QVBoxLayout,
     QWidget,
 )
 
+from app.core.common_waste_catalog import common_waste_catalog
 from app.core.history import HistoryService
+from app.core.history_labels import LABEL_STATUS_NAMES
 from app.ui.widgets.flow_layout import FlowLayout
 from app.ui.widgets.safe_inputs import SafeComboBox, SafeDateEdit
 
@@ -36,14 +40,15 @@ HISTORY_FILTER_HEIGHT = 40
 
 class HistoryTableModel(QAbstractTableModel):
     HEADERS: ClassVar[tuple[str, ...]] = (
-        "Time",
-        "Class",
+        "Thời gian",
+        "Tên vật",
+        "Lớp AI gốc",
+        "Trạng thái nhãn",
         "Nhóm",
         "Thùng",
-        "Conf",
-        "Cmd",
-        "Ack",
-        "RTT (ms)",
+        "Độ tin cậy",
+        "UART",
+        "ACK",
     )
 
     def __init__(self, rows=None):
@@ -70,27 +75,19 @@ class HistoryTableModel(QAbstractTableModel):
         if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
             return None
         r = self._rows[index.row()]
-        col = index.column()
-        if col == 0:
-            ts = getattr(r, "ts", "")
-            return ts.replace("T", " ")[:19]
-        if col == 1:
-            return getattr(r, "cls_name", "")
-        if col == 2:
-            return getattr(r, "route_label", "") or ""
-        if col == 3:
-            v = getattr(r, "bin_index", None)
-            return str(v) if v is not None else ""
-        if col == 4:
-            return f"{getattr(r, 'conf', 0):.2f}"
-        if col == 5:
-            return getattr(r, "uart_command", "") or ""
-        if col == 6:
-            return getattr(r, "ack_status", "") or ""
-        if col == 7:
-            v = getattr(r, "rtt_ms", None)
-            return str(v) if v is not None else ""
-        return None
+        status = str(getattr(r, "label_status", "") or "model_inferred")
+        values = (
+            str(getattr(r, "ts", "") or "").replace("T", " ")[:19],
+            getattr(r, "display_label", "") or "Chưa xác định vật",
+            getattr(r, "cls_name", "") or "",
+            LABEL_STATUS_NAMES.get(status, status),
+            getattr(r, "route_label", "") or "",
+            str(getattr(r, "bin_index", "") or ""),
+            f"{float(getattr(r, 'conf', 0) or 0) * 100:.1f}%",
+            getattr(r, "uart_command", "") or "",
+            getattr(r, "ack_status", "") or "",
+        )
+        return values[index.column()]
 
 
 class RecognitionTestTableModel(QAbstractTableModel):
@@ -204,12 +201,20 @@ class HistoryPage(QWidget):
         self.cls_filter.addItem("Tất cả lớp", "")
         self.ack_filter = SafeComboBox()
         self.ack_filter.addItems(["Tất cả", "ok", "no_ack", "error", "pending"])
+        self.label_filter = SafeComboBox()
+        self.label_filter.addItem("Tất cả trạng thái", "")
+        self.label_filter.addItem("Cần duyệt", "needs_review")
+        self.label_filter.addItem("Không đủ bằng chứng", "no_evidence")
+        self.label_filter.addItem("Đã duyệt", "human_verified")
         self.btn_refresh = QPushButton("Refresh")
         self.btn_refresh.setObjectName("secondary")
         self.btn_refresh.clicked.connect(lambda: self.request_reload())
         self.btn_export = QPushButton("Export CSV")
         self.btn_export.setObjectName("secondary")
         self.btn_export.clicked.connect(self._export)
+        self.btn_review = QPushButton("Duyệt nhãn")
+        self.btn_review.setObjectName("primary")
+        self.btn_review.clicked.connect(self._review_selected_label)
         self.refresh_status = QLabel("Đang cập nhật...")
         self.refresh_status.setObjectName("muted")
         self.refresh_status.setVisible(False)
@@ -218,8 +223,10 @@ class HistoryPage(QWidget):
             (self.date_to, 160),
             (self.cls_filter, 260),
             (self.ack_filter, 150),
+            (self.label_filter, 210),
             (self.btn_refresh, 112),
             (self.btn_export, 128),
+            (self.btn_review, 128),
         ):
             widget.setFixedHeight(HISTORY_FILTER_HEIGHT)
             widget.setMinimumWidth(width)
@@ -227,14 +234,17 @@ class HistoryPage(QWidget):
         filter_layout.addWidget(_filter_group("Đến ngày", self.date_to))
         filter_layout.addWidget(_filter_group("Lớp", self.cls_filter))
         filter_layout.addWidget(_filter_group("ACK", self.ack_filter))
+        filter_layout.addWidget(_filter_group("Nhãn", self.label_filter))
         filter_layout.addWidget(self.btn_refresh)
         filter_layout.addWidget(self.btn_export)
+        filter_layout.addWidget(self.btn_review)
         filter_layout.addWidget(self.refresh_status)
         outer.addWidget(filter_card)
         self.date_from.dateChanged.connect(lambda *_args: self.request_reload())
         self.date_to.dateChanged.connect(lambda *_args: self.request_reload())
         self.cls_filter.currentIndexChanged.connect(lambda *_args: self.request_reload())
         self.ack_filter.currentIndexChanged.connect(lambda *_args: self.request_reload())
+        self.label_filter.currentIndexChanged.connect(lambda *_args: self.request_reload())
 
         # charts row
         charts = QHBoxLayout()
@@ -359,12 +369,14 @@ class HistoryPage(QWidget):
                 23, 59, 59, tzinfo=timezone.utc,
             )
             ack_filter = ack if ack and ack != "Tất cả" else None
+            label_status = self.label_filter.currentData() or None
             rows = self.history.query(
                 limit=500,
                 cls_name=cls,
                 since=since_dt,
                 until=until_dt,
                 ack_status=ack_filter,
+                label_status=label_status,
             )
             filter_counts = self.history.count_by_class(
                 since=since_dt,
@@ -399,7 +411,65 @@ class HistoryPage(QWidget):
     def _set_busy(self, busy: bool) -> None:
         self.btn_refresh.setEnabled(not busy)
         self.btn_export.setEnabled(not busy)
+        self.btn_review.setEnabled(not busy)
         self.refresh_status.setVisible(busy)
+
+    def _review_selected_label(self) -> None:
+        index = self.table.currentIndex()
+        if not index.isValid() or index.row() >= len(self.model._rows):
+            QMessageBox.information(self, "Duyệt nhãn", "Hãy chọn một bản ghi lịch sử.")
+            return
+        row = self.model._rows[index.row()]
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Duyệt nhãn lịch sử")
+        dialog.setText(
+            f"Lớp AI gốc: {getattr(row, 'cls_name', '')}\n"
+            f"Nhãn hiện tại: {getattr(row, 'display_label', '') or 'Chưa xác định vật'}"
+        )
+        verify = dialog.addButton("Xác nhận nhãn", QMessageBox.ButtonRole.AcceptRole)
+        no_evidence = dialog.addButton(
+            "Không đủ bằng chứng", QMessageBox.ButtonRole.DestructiveRole
+        )
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.exec()
+        clicked = dialog.clickedButton()
+        if clicked is no_evidence:
+            self.history.review_label(
+                int(row.id),
+                display_label="",
+                reviewed_by="desktop_admin",
+                review_note="Admin đánh dấu ảnh không đủ bằng chứng.",
+                status="no_evidence",
+            )
+            self.request_reload()
+            return
+        if clicked is not verify:
+            return
+        labels = sorted({str(item["label"]) for item in common_waste_catalog()})
+        current = str(getattr(row, "display_label", "") or "")
+        if current and current not in labels:
+            labels.insert(0, current)
+        value, ok = QInputDialog.getItem(
+            self,
+            "Xác nhận tên vật",
+            "Chọn hoặc nhập tên vật tiếng Việt:",
+            labels,
+            max(0, labels.index(current)) if current in labels else 0,
+            True,
+        )
+        if not ok:
+            return
+        try:
+            self.history.review_label(
+                int(row.id),
+                display_label=value,
+                reviewed_by="desktop_admin",
+                review_note="Nhãn được duyệt trên Desktop.",
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Nhãn không hợp lệ", str(exc))
+            return
+        self.request_reload()
 
     def _refresh_class_filter(self, counts: dict[str, int]) -> None:
         seen = {name for name in counts if name}

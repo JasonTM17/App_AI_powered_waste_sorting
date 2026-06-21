@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.core.common_waste_catalog import SPECIALIST_REVIEW_LABELS
 from app.core.config import AppConfig
 from app.core.dataset_catalog import DatasetCatalog, is_sqlite_database_locked
 from app.core.dataset_trust import DatasetTrustState, classify_dataset_item
@@ -41,6 +42,7 @@ from app.utils.paths import dataset_db_path
 TRAINING_GRID_LIMIT = 80
 THUMBNAIL_BATCH_SIZE = 10
 OPERATOR_TRAINING_SOURCES = {
+    "auto_review_queue",
     "manual_camera_capture",
     "manual_import",
     "manual_phone_import",
@@ -140,15 +142,16 @@ class _TrainingDataWorker(QThread):
         if queue_total == catalog_total:
             return
         logger.warning(
-            "training catalog mismatch queue={} catalog={}; re-indexing in background",
+            "training catalog mismatch queue={} catalog={}; indexing newest items in background",
             queue_total,
             catalog_total,
         )
         catalog = DatasetCatalog(self._catalog_path)
         try:
-            catalog.index_queue(self._queue_dir)
+            indexed = catalog.index_queue_incremental(self._queue_dir, limit=1000)
         finally:
             catalog.close()
+        logger.info("training catalog incremental index completed items={}", indexed)
         if self.isInterruptionRequested():
             return
         refreshed = self._load_catalog_payload()
@@ -224,8 +227,8 @@ class TrainingPage(QWidget):
     open_web_requested = Signal()
     manual_phone_import_requested = Signal(str, int, object)
     capture_camera_sample_requested = Signal(str)
-    camera_annotation_requested = Signal(str, int)
-    capture_reviewed_camera_sample_requested = Signal(str, int, object, bool)
+    camera_annotation_requested = Signal(str, int, str)
+    capture_reviewed_camera_sample_requested = Signal(str, int, str, object, bool, str)
     learn_now_status_requested = Signal(str)
     learn_now_refresh_requested = Signal(str)
     learn_now_train_requested = Signal(str, str)
@@ -288,6 +291,15 @@ class TrainingPage(QWidget):
             self.class_select.lineEdit().textChanged.connect(lambda _text: self._on_label_changed())
         self.class_select.currentTextChanged.connect(lambda _text: self._on_label_changed())
         label_row.addWidget(self.class_select)
+
+        split_title = QLabel("Tập dữ liệu")
+        split_title.setObjectName("sectionTitle")
+        label_row.addWidget(split_title)
+        self.capture_split_select = SafeComboBox()
+        self.capture_split_select.addItem("Train / reference", "train")
+        self.capture_split_select.addItem("Holdout kiểm thử", "holdout")
+        self.capture_split_select.setMinimumWidth(170)
+        label_row.addWidget(self.capture_split_select)
 
         self.label_status = QLabel("Nhập nhãn hợp lệ trước khi thêm ảnh hoặc chụp camera.")
         self.label_status.setObjectName("muted")
@@ -418,6 +430,7 @@ class TrainingPage(QWidget):
 
     def _class_options(self) -> list[str]:
         names = list(TRAINING_CLASS_ORDER_45)
+        names.extend(label for label in SPECIALIST_REVIEW_LABELS if label not in names)
         for mapping in self._cfg.mappings:
             canonical = canonical_class_name(mapping.class_name)
             if canonical and default_class_id_for_name(canonical) is not None and canonical not in names:
@@ -436,6 +449,10 @@ class TrainingPage(QWidget):
     def selected_class_name(self) -> str:
         _raw, canonical, _cls_id = self._label_target()
         return canonical
+
+    def selected_capture_split(self) -> str:
+        value = str(self.capture_split_select.currentData() or "train").strip().lower()
+        return "holdout" if value == "holdout" else "train"
 
     def class_id_for_name(self, cls_name: str) -> int:
         canonical = canonical_class_name(cls_name)
@@ -604,7 +621,7 @@ class TrainingPage(QWidget):
     def _label_for_catalog_row(row: dict[str, object]) -> str:
         class_name = str(row.get("selected_cls_name") or row.get("cls_name") or "?")
         trust_state = str(row.get("trust_state") or "")
-        source = str(row.get("source") or "unknown").replace("_", " ")
+        source = _operator_source_label(str(row.get("source") or "unknown"))
         status = trust_state.replace("_", " ")
         return f"{status}: {class_name}\n{source}" if status else f"{class_name}\n{source}"
 
@@ -631,11 +648,11 @@ class TrainingPage(QWidget):
         self.capture_camera_sample_requested.emit(canonical)
 
     def _request_camera_annotation(self) -> None:
-        _raw, canonical, cls_id = self._label_target()
+        raw, canonical, cls_id = self._label_target()
         if cls_id is None:
             QMessageBox.warning(self, "Thiếu nhãn", "Nhập nhãn hợp lệ trước khi chụp & gắn nhãn.")
             return
-        self.camera_annotation_requested.emit(canonical, int(cls_id))
+        self.camera_annotation_requested.emit(canonical, int(cls_id), raw)
 
     def _start_delayed_annotation_capture(self, seconds: int = 5) -> None:
         _raw, _canonical, cls_id = self._label_target()
@@ -783,7 +800,7 @@ class TrainingPage(QWidget):
             label = f"{box.get('cls_name', '?')} {float(box.get('conf', 0) or 0):.2f}"
         if isinstance(meta, dict):
             status = _status_label(meta)
-            source = str(meta.get("source") or "unknown").replace("_", " ")
+            source = _operator_source_label(str(meta.get("source") or "unknown"))
             if status:
                 label = f"{status}: {label}"
             label = f"{label}\n{source}"
@@ -812,6 +829,18 @@ def _read_meta(image_path: Path) -> dict[str, object]:
     except Exception:
         return {}
     return meta if isinstance(meta, dict) else {}
+
+
+def _operator_source_label(source: str) -> str:
+    labels = {
+        "auto_review_queue": "Cần gắn nhãn từ lỗi nhận diện",
+        "auto_low_conf": "Cần gắn nhãn từ lỗi nhận diện",
+        "manual_camera_capture": "Camera thủ công",
+        "manual_import": "Thủ công",
+        "manual_phone_import": "Điện thoại/thủ công",
+        "unknown": "Không rõ nguồn",
+    }
+    return labels.get(source, source.replace("_", " "))
 
 
 def _trust_counts_from_rows(rows: list[dict[str, object]]) -> dict[str, int]:

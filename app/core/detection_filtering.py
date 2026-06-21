@@ -72,6 +72,81 @@ def collapse_duplicate_physical_detections(
     return sorted(collapsed, key=lambda item: item.conf, reverse=True)
 
 
+def merge_fragmented_same_label_detections(
+    detections: list[Detection],
+    *,
+    foreground_object_count: int | None = None,
+) -> list[Detection]:
+    """Merge split labels only when the foreground says the tray has one object.
+
+    A detector can draw two boxes around the cap and tip of one pen. Camera
+    blur can also split one long object into several foreground components, so
+    foreground_count is advisory: boxes still have to be close, same-label, and
+    aligned before being merged.
+    """
+    _ = foreground_object_count
+    clusters: list[list[Detection]] = []
+    for detection in detections:
+        for cluster in clusters:
+            if all(
+                item.cls_name == detection.cls_name
+                and item.operator_label == detection.operator_label
+                and _fragmented_parts_of_one_object(item.xyxy, detection.xyxy)
+                for item in cluster
+            ):
+                cluster.append(detection)
+                break
+        else:
+            clusters.append([detection])
+    return [
+        cluster[0] if len(cluster) == 1 else _merge_fragment_cluster(cluster)
+        for cluster in clusters
+    ]
+
+
+def _merge_fragment_cluster(cluster: list[Detection]) -> Detection:
+    strongest = _best_duplicate_candidate(cluster)
+    return Detection(
+        cls_id=strongest.cls_id,
+        cls_name=strongest.cls_name,
+        conf=max(item.conf for item in cluster),
+        xyxy=(
+            min(item.xyxy[0] for item in cluster),
+            min(item.xyxy[1] for item in cluster),
+            max(item.xyxy[2] for item in cluster),
+            max(item.xyxy[3] for item in cluster),
+        ),
+        source=strongest.source,
+        operator_label=strongest.operator_label,
+    )
+
+
+def _fragmented_parts_of_one_object(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+) -> bool:
+    ax1, ay1, ax2, ay2 = first
+    bx1, by1, bx2, by2 = second
+    union_width = max(ax2, bx2) - min(ax1, bx1)
+    union_height = max(ay2, by2) - min(ay1, by1)
+    if union_width <= 0 or union_height <= 0:
+        return False
+    aspect = union_width / union_height
+    horizontal = aspect >= 3.0
+    vertical = aspect <= 1 / 3.0
+    if not horizontal and not vertical:
+        return False
+    gap_x = max(ax1 - bx2, bx1 - ax2, 0)
+    gap_y = max(ay1 - by2, by1 - ay2, 0)
+    overlap_x = max(0, min(ax2, bx2) - max(ax1, bx1))
+    overlap_y = max(0, min(ay2, by2) - max(ay1, by1))
+    if horizontal:
+        min_height = max(1, min(ay2 - ay1, by2 - by1))
+        return gap_x <= max(20, round(union_width * 0.18)) and overlap_y / min_height >= 0.58
+    min_width = max(1, min(ax2 - ax1, bx2 - bx1))
+    return gap_y <= max(20, round(union_height * 0.18)) and overlap_x / min_width >= 0.58
+
+
 def find_ambiguous_organic_candidate(
     detections: list[Detection],
     *,
@@ -287,5 +362,6 @@ __all__ = [
     "find_ambiguous_organic_candidate",
     "is_low_detail_empty_tray",
     "is_uniform_empty_tray_artifact",
+    "merge_fragmented_same_label_detections",
     "suppress_overlapping_detections",
 ]

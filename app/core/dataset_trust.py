@@ -51,6 +51,7 @@ class TrustDecision:
 
 
 TRUSTED_SOURCES = {
+    "auto_review_queue",
     "auto_low_conf",
     "manual_import",
     "manual_phone_import",
@@ -68,6 +69,7 @@ TRUSTED_SOURCES = {
     DOWNLOADED_ANCHOR_BOOTSTRAP_SOURCE,
 }
 REVIEW_REQUIRED_SOURCES = {
+    "auto_review_queue",
     "auto_low_conf",
     "manual_phone_import",
     "manual_camera_capture",
@@ -93,7 +95,12 @@ def classify_dataset_item(meta: dict[str, Any] | None) -> TrustDecision:
         return _decision(DatasetTrustState.QUARANTINE, source, [DatasetBlockReason.QUARANTINED], class_names)
     if (
         meta.get("training_excluded") is True
-        and str(meta.get("training_exclusion_reason") or "") in {"bbox_saved_pending_review", "needs_annotation"}
+        and str(meta.get("training_exclusion_reason") or "")
+        in {
+            "awaiting_manual_annotation",
+            "bbox_saved_pending_review",
+            "needs_annotation",
+        }
     ):
         return _decision(
             DatasetTrustState.NEEDS_REVIEW,

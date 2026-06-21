@@ -7,6 +7,7 @@ const USER: CloudAuthIdentity = {
   account_id: 7,
   role: "user",
   username: "nguyen-son",
+  avatar_path: "",
   display_name: "Nguyễn Sơn",
   expires_at: "2026-07-01T00:00:00Z",
   password_default: false

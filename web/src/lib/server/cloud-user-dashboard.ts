@@ -19,12 +19,16 @@ import type { CloudAuthIdentity } from "@/lib/server/cloud-auth";
 import { cloudAlerts, cloudBinMap, cloudOperationsPool, cloudSchedules } from "@/lib/server/cloud-operations";
 
 const ALLOWED_RANGES = new Set([7, 30, 90, 180]);
-const CSV_FIELDS = ["id", "ts", "cls_name", "confidence", "category", "route_label", "bin_index", "ack_status", "device_id"];
+const CSV_FIELDS = ["id", "ts", "cls_name", "display_label", "label_status", "confidence", "category", "route_label", "bin_index", "ack_status", "device_id"];
 
 type HistoryRow = QueryResultRow & {
   id: number | string;
   ts: Date | string;
   cls_name: string;
+  display_label: string | null;
+  label_status: UserHistoryItem["label_status"] | null;
+  label_source: string | null;
+  label_confidence: number | string | null;
   confidence: number | string;
   route_label: string | null;
   bin_index: number | string | null;
@@ -76,7 +80,8 @@ export async function cloudUserHistory(
       values
     ),
     cloudOperationsPool().query<HistoryRow>(
-      `select id, ts, cls_name, confidence, route_label, bin_index, uart_command,
+      `select id, ts, cls_name, display_label, label_status, label_source, label_confidence,
+              confidence, route_label, bin_index, uart_command,
               ack_status, device_id, image_available
          from public.history
         where owner_username = $1 ${dateFilter}
@@ -90,7 +95,8 @@ export async function cloudUserHistory(
 
 export async function cloudUserAnalytics(identity: CloudAuthIdentity, rangeDays: AnalyticsRangeDays): Promise<UserAnalytics> {
   const historyResult = await cloudOperationsPool().query<HistoryRow>(
-    `select id, ts, cls_name, confidence, route_label, bin_index, uart_command,
+    `select id, ts, cls_name, display_label, label_status, label_source, label_confidence,
+            confidence, route_label, bin_index, uart_command,
             ack_status, device_id, image_available
        from public.history
       where owner_username = $1
@@ -224,7 +230,8 @@ export async function cloudUserAdvisor(identity: CloudAuthIdentity, rangeDays: A
 
 export async function cloudUserHistoryCsv(identity: CloudAuthIdentity, rangeDays: AnalyticsRangeDays) {
   const result = await cloudOperationsPool().query<HistoryRow>(
-    `select id, ts, cls_name, confidence, route_label, bin_index, uart_command,
+    `select id, ts, cls_name, display_label, label_status, label_source, label_confidence,
+            confidence, route_label, bin_index, uart_command,
             ack_status, device_id, image_available
        from public.history
       where owner_username = $1
@@ -235,7 +242,7 @@ export async function cloudUserHistoryCsv(identity: CloudAuthIdentity, rangeDays
   const lines = [CSV_FIELDS.join(",")];
   for (const row of result.rows) {
     const item = historyItem(row);
-    lines.push([item.id, item.ts, item.cls_name, item.confidence, item.category, item.route_label ?? "", item.bin_index ?? "", item.ack_status ?? "", item.device_id ?? ""].map(csvCell).join(","));
+    lines.push([item.id, item.ts, item.cls_name, item.display_label ?? "", item.label_status ?? "", item.confidence, item.category, item.route_label ?? "", item.bin_index ?? "", item.ack_status ?? "", item.device_id ?? ""].map(csvCell).join(","));
   }
   return `${lines.join("\r\n")}\r\n`;
 }
@@ -288,10 +295,10 @@ async function scopedBins(username: string): Promise<BinFullness[]> {
   return result.rows.map((row) => ({ bin_index: Number(row.bin_index), label: `${row.station_name} - ${row.label}`, percent: Math.max(0, Math.min(100, Number(row.fill_percent ?? 0))), updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : null, stale: !row.updated_at || Date.now() - new Date(row.updated_at).getTime() > 120_000 }));
 }
 
-function historyItem(row: HistoryRow): UserHistoryItem { return { id: Number(row.id), ts: new Date(row.ts).toISOString(), cls_name: row.cls_name, confidence: round3(Number(row.confidence ?? 0)), route_label: row.route_label, bin_index: row.bin_index === null ? null : Number(row.bin_index), category: category(row), ack_status: row.ack_status, device_id: row.device_id, image_available: false }; }
+function historyItem(row: HistoryRow): UserHistoryItem { return { id: Number(row.id), ts: new Date(row.ts).toISOString(), cls_name: row.cls_name, display_label: row.display_label || row.cls_name, label_status: row.label_status || "model_inferred", label_source: row.label_source || "", label_confidence: row.label_confidence === null ? null : Number(row.label_confidence), confidence: round3(Number(row.confidence ?? 0)), route_label: row.route_label, bin_index: row.bin_index === null ? null : Number(row.bin_index), category: category(row), ack_status: row.ack_status, device_id: row.device_id, image_available: false }; }
 function category(row: HistoryRow): UserHistoryItem["category"] { const command = row.uart_command?.trim().toUpperCase(); if (command === "O" || Number(row.bin_index) === 1) return "organic"; if (command === "I" || Number(row.bin_index) === 3) return "recyclable"; return "inorganic"; }
 function routeSummary(rows: HistoryRow[]): UserRouteTotal[] { const commands = [{ command: "O" as const, route_label: "Hữu cơ", bin_index: 1 }, { command: "R" as const, route_label: "Vô cơ", bin_index: 2 }, { command: "I" as const, route_label: "Tái chế", bin_index: 3 }]; return commands.map((base) => { const count = rows.filter((row) => category(row) === (base.command === "O" ? "organic" : base.command === "I" ? "recyclable" : "inorganic")).length; return { ...base, count, percent: percent(count, rows.length) }; }); }
-function classCounts(rows: HistoryRow[]): WasteClassCount[] { const map = new Map<string, HistoryRow[]>(); rows.forEach((row) => map.set(row.cls_name, [...(map.get(row.cls_name) ?? []), row])); return [...map.entries()].map(([cls_name, items]) => ({ cls_name, count: items.length, bin_index: items[0].bin_index === null ? null : Number(items[0].bin_index), route_label: items[0].route_label, percent: percent(items.length, rows.length) })).sort((a, b) => b.count - a.count).slice(0, 10); }
+function classCounts(rows: HistoryRow[]): WasteClassCount[] { const map = new Map<string, HistoryRow[]>(); rows.forEach((row) => { const name = row.label_status === "human_verified" || row.label_status === "metadata_verified" ? row.display_label || row.cls_name : row.cls_name; map.set(name, [...(map.get(name) ?? []), row]); }); return [...map.entries()].map(([cls_name, items]) => ({ cls_name, count: items.length, bin_index: items[0].bin_index === null ? null : Number(items[0].bin_index), route_label: items[0].route_label, percent: percent(items.length, rows.length) })).sort((a, b) => b.count - a.count).slice(0, 10); }
 function dailySeries(rows: HistoryRow[], start: Date, end: Date) { const out = []; for (let day = startOfDay(start); day <= end; day = addDays(day, 1)) { const items = rows.filter((row) => dateKey(new Date(row.ts)) === dateKey(day)); out.push({ date: dateKey(day), total: items.length, organic: items.filter((row) => category(row) === "organic").length, inorganic: items.filter((row) => category(row) === "inorganic").length, recyclable: items.filter((row) => category(row) === "recyclable").length }); } return out; }
 function monthlySeries(rows: HistoryRow[], start: Date, end: Date) { const out = []; const cursor = new Date(start.getFullYear(), start.getMonth(), 1); while (cursor <= end) { const key = dateKey(cursor).slice(0, 7); const items = rows.filter((row) => dateKey(new Date(row.ts)).startsWith(key)); out.push({ month: key, total: items.length, organic: items.filter((row) => category(row) === "organic").length, inorganic: items.filter((row) => category(row) === "inorganic").length, recyclable: items.filter((row) => category(row) === "recyclable").length }); cursor.setMonth(cursor.getMonth() + 1); } return out; }
 function routeCount(analytics: UserAnalytics, command: "O" | "R" | "I") { return analytics.route_totals.find((item) => item.command === command)?.count ?? 0; }

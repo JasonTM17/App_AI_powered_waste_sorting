@@ -301,12 +301,22 @@ def sync_history(conn: psycopg.Connection[Any], history_db: Path, limit: int) ->
             """
             insert into public.history
               (local_history_id, device_id, owner_username, ts, cls_id, cls_name, confidence,
-               route_label, bin_index, uart_command, ack_status, rtt_ms, image_available)
-            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               route_label, bin_index, uart_command, ack_status, rtt_ms, image_available,
+               display_label, label_status, label_source, label_confidence,
+               reviewed_by, reviewed_at, review_note)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s)
             on conflict (device_id, local_history_id) do update set
               owner_username = excluded.owner_username,
               ack_status = excluded.ack_status,
-              rtt_ms = excluded.rtt_ms
+              rtt_ms = excluded.rtt_ms,
+              display_label = excluded.display_label,
+              label_status = excluded.label_status,
+              label_source = excluded.label_source,
+              label_confidence = excluded.label_confidence,
+              reviewed_by = excluded.reviewed_by,
+              reviewed_at = excluded.reviewed_at,
+              review_note = excluded.review_note
             """,
             (
                 row_id,
@@ -322,6 +332,13 @@ def sync_history(conn: psycopg.Connection[Any], history_db: Path, limit: int) ->
                 getattr(row, "ack_status", None),
                 getattr(row, "rtt_ms", None),
                 bool(getattr(row, "image_path", None) or getattr(row, "annotated_path", None)),
+                getattr(row, "display_label", None),
+                getattr(row, "label_status", None),
+                getattr(row, "label_source", None),
+                getattr(row, "label_confidence", None),
+                getattr(row, "reviewed_by", None),
+                getattr(row, "reviewed_at", None),
+                getattr(row, "review_note", None),
             ),
         )
     if skipped_without_owner:

@@ -1,7 +1,8 @@
 param(
   [int]$AgentPort = 8765,
   [string]$CloudflaredPath = "cloudflared",
-  [switch]$NoAgentStart
+  [switch]$NoAgentStart,
+  [switch]$NoTunnel
 )
 
 $ErrorActionPreference = "Stop"
@@ -216,9 +217,14 @@ if (-not (Test-PortBusy $AgentPort)) {
   throw "Local agent is not listening on port $AgentPort."
 }
 
-$cloudflared = Resolve-CloudflaredExecutable $CloudflaredPath
-
 Start-SupabaseStateBridge
+
+if ($NoTunnel) {
+  Write-Host "Local agent and Supabase state bridge are ready. Named tunnel is managed separately."
+  exit 0
+}
+
+$cloudflared = Resolve-CloudflaredExecutable $CloudflaredPath
 
 $out = Join-Path $LogDir "public-hardware-bridge.out.log"
 $err = Join-Path $LogDir "public-hardware-bridge.err.log"

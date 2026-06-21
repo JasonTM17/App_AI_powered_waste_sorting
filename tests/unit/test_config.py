@@ -99,6 +99,10 @@ def test_app_config_parses_default_dict():
     assert c.model.conf_threshold == 0.4
     assert c.model.specialist.enabled is True
     assert c.model.specialist.class_thresholds["Pen"] == 0.45
+    assert c.model.specialist.class_routes["Wall charger"].parent_class == "Electronics"
+    assert c.model.specialist.class_routes["Wall charger"].operator_label == "Cục sạc"
+    assert c.model.specialist.class_routes["Battery 9V"].hazardous is True
+    assert c.model.class_thresholds["Organic"] == 0.25
     assert c.model.class_thresholds["Plastic bottle"] == 0.30
     assert c.model.class_thresholds["Glass bottle"] == 0.45
     assert c.uart.port == ""
@@ -125,12 +129,15 @@ def test_app_config_parses_default_dict():
     assert c.manual_reference_recognition.allow_unknown_matches is True
     assert c.manual_reference_recognition.min_similarity == 0.88
     assert c.manual_reference_recognition.unknown_min_similarity == 0.92
+    assert c.manual_reference_recognition.organic_unknown_min_similarity == 0.65
     assert c.manual_reference_recognition.min_consensus_similarity == 0.72
     assert c.manual_reference_recognition.min_votes == 4
     assert c.manual_reference_recognition.unknown_min_votes == 1
+    assert c.manual_reference_recognition.organic_unknown_min_votes == 7
     assert c.manual_reference_recognition.top_k == 7
     assert c.manual_reference_recognition.cache_refresh_seconds == 30.0
-    assert c.manual_reference_recognition.query_cache_seconds == 1.0
+    assert c.manual_reference_recognition.max_references_per_class == 60
+    assert c.manual_reference_recognition.query_cache_seconds == 5.0
     assert (
         c.manual_reference_recognition.correctable_yolo_classes
         == list(MANUAL_REFERENCE_CORRECTION_CLASSES)
@@ -147,6 +154,8 @@ def test_app_config_parses_default_dict():
     assert c.manual_reference_recognition.correction_targets_by_yolo_class[
         "Plastic bottle"
     ] == ["Organic"]
+    assert "Electronics" in c.manual_reference_recognition.correction_targets_by_yolo_class["Pen"]
+    assert c.model.specialist.min_aspect_ratios["Pen"] == 2.2
     assert c.manual_reference_recognition.min_correction_area_ratio == 0.25
     assert c.manual_reference_recognition.max_correction_confidence == 0.90
     assert c.three_bin_classifier.enabled is False
@@ -170,6 +179,27 @@ def test_specialist_threshold_out_of_range_rejected():
     d["model"]["specialist"]["class_thresholds"]["Pen"] = 1.5
     with pytest.raises(ValidationError):
         AppConfig.model_validate(d)
+
+
+def test_load_config_promotes_known_weak_primary_model_when_balanced_exists(
+    tmp_path: Path, monkeypatch
+):
+    data = _default_dict()
+    data["model"]["path"] = "models/manual-capture-20260612-candidate.pt"
+    cfg_path = tmp_path / "config.json"
+    cfg_path.write_text(json.dumps(data), encoding="utf-8")
+    balanced = tmp_path / "models" / "real-camera-balanced-20260619-candidate.pt"
+    balanced.parent.mkdir(parents=True)
+    balanced.write_bytes(b"model")
+
+    monkeypatch.setattr("app.core.config.resource_path", lambda value: tmp_path / Path(value))
+    monkeypatch.setattr("app.core.config.resolve_data_path", lambda value: tmp_path / Path(value))
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.model.path == "models/real-camera-balanced-20260619-candidate.pt"
+    saved = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert saved["model"]["path"] == "models/real-camera-balanced-20260619-candidate.pt"
 
 
 def test_unknown_fallback_invalid_command_rejected():
@@ -340,7 +370,10 @@ def test_load_config_repairs_stale_manual_reference_class_lists(tmp_path: Path):
     data["manual_reference_recognition"] = {
         "correctable_yolo_classes": ["Cardboard"],
         "correction_target_classes": ["Textile"],
+        "max_references_per_class": 30,
+        "query_cache_seconds": 1.0,
     }
+    data["model"]["class_thresholds"] = {"Plastic bottle": 0.3}
     cfg_path.write_text(json.dumps(data), encoding="utf-8")
 
     cfg = load_config(cfg_path)
@@ -362,6 +395,9 @@ def test_load_config_repairs_stale_manual_reference_class_lists(tmp_path: Path):
         "Plastic bottle"
     ] == ["Organic"]
     assert cfg.manual_reference_recognition.max_correction_confidence == 0.90
+    assert cfg.manual_reference_recognition.max_references_per_class == 60
+    assert cfg.manual_reference_recognition.query_cache_seconds == 5.0
+    assert cfg.model.class_thresholds["Organic"] == 0.25
 
 
 def test_load_config_keeps_legacy_enabled_speaker_on_hardware_default(tmp_path: Path):
@@ -541,3 +577,16 @@ def test_merge_missing_mappings_keeps_user_edits():
     assert merged.mappings[0].bin_index == 9
     assert merged.mappings[0].enabled is False
     assert merged.mappings[1].class_name == "Plastic"
+
+
+def test_load_config_recovers_missing_candidate_to_bundled_primary(tmp_path: Path):
+    cfg_path = tmp_path / "config.json"
+    data = _default_dict()
+    data["model"]["path"] = str(tmp_path / "deleted-candidate.pt")
+    cfg_path.write_text(json.dumps(data), encoding="utf-8")
+
+    cfg = load_config(cfg_path)
+
+    assert cfg.model.path == "models/real-camera-balanced-20260619-candidate.pt"
+    saved = json.loads(cfg_path.read_text(encoding="utf-8"))
+    assert saved["model"]["path"] == "models/real-camera-balanced-20260619-candidate.pt"
