@@ -67,6 +67,7 @@ grid.jpg
 test_can.jpg
 user-dashboard-logged-in.png
 tmp.*
+tmp_*.jpg
 capture_loop*.py
 clean_queue.py
 fix_dataset.py
