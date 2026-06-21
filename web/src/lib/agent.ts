@@ -1094,7 +1094,13 @@ export function isCloudDashboardApiPath(path: string) {
 
 export function shouldUseCloudHardwareBridge(raw = process.env.NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE) {
   const value = raw?.trim().toLowerCase() ?? "";
-  return value === "1" || value === "true" || value === "yes" || value === "on" || value === "cloud";
+  if (value === "1" || value === "true" || value === "yes" || value === "on" || value === "cloud") {
+    return true;
+  }
+  if (value === "0" || value === "false" || value === "no" || value === "off" || value === "local") {
+    return false;
+  }
+  return process.env.NEXT_PUBLIC_VERCEL === "1";
 }
 
 export function getAdminConnectionCardPresentation(
