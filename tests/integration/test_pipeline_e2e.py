@@ -319,6 +319,16 @@ class _SameClassPairInfer:
         ]
 
 
+class _FragmentedPenInfer:
+    class_names: ClassVar[dict[int, str]] = {42: "Pen"}
+
+    def predict(self, frame):
+        return [
+            Detection(42, "Pen", 0.86, (266, 189, 548, 257), operator_label="Bút bi"),
+            Detection(42, "Pen", 0.91, (836, 197, 1045, 236), operator_label="Bút bi"),
+        ]
+
+
 class _OnePenInfer:
     class_names: ClassVar[dict[int, str]] = {42: "Pen"}
 
@@ -1687,6 +1697,30 @@ def test_pipeline_collapses_many_labels_on_one_object_without_warning(tmp_path, 
     assert p.dispatch_status == "TEST OFF"
     assert uart.audio_tracks == []
     assert speaker.texts == []
+    p.close()
+
+
+def test_pipeline_merges_fragmented_pen_before_multi_object_guard(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
+    )
+    cfg.model.conf_threshold = 0.15
+    uart = _WarningUart()
+    p = Pipeline(cfg, _FragmentedPenInfer(), uart, tmp_path / "h.db")
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.full((420, 1200, 3), 245, dtype=np.uint8)
+    cv2.line(frame, (266, 224), (1045, 216), (35, 80, 170), 34)
+
+    _arm_dispatch(p)
+    detections = p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert len(detections) == 1
+    assert detections[0].cls_name == "Pen"
+    assert detections[0].operator_label == "Bút bi"
+    assert detections[0].xyxy == (266, 189, 1045, 257)
+    assert p.dispatch_status == "TEST OFF"
+    assert uart.audio_tracks == []
     p.close()
 
 

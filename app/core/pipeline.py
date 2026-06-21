@@ -23,6 +23,7 @@ from app.core.config import (
 )
 from app.core.detection_filtering import (
     collapse_duplicate_physical_detections,
+    collapse_single_object_scene_detections,
     find_ambiguous_organic_candidate,
     is_low_detail_empty_tray,
     is_uniform_empty_tray_artifact,
@@ -1351,6 +1352,7 @@ class Pipeline:
             filtered,
             foreground_object_count=foreground_count,
         )
+        filtered = collapse_single_object_scene_detections(frame_bgr, filtered)
         filtered = self._stabilize_multi_object_display(frame_bgr, filtered)
         self._save_low_conf_frame(frame_bgr, raw, ts)
         tracked = self.tracker.update(filtered)

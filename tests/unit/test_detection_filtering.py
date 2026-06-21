@@ -2,6 +2,7 @@ import numpy as np
 
 from app.core.detection_filtering import (
     collapse_duplicate_physical_detections,
+    collapse_single_object_scene_detections,
     find_ambiguous_organic_candidate,
     is_low_detail_empty_tray,
     is_uniform_empty_tray_artifact,
@@ -89,6 +90,31 @@ def test_collapse_duplicate_physical_detections_keeps_nearby_real_objects_separa
     assert [item.cls_name for item in filtered] == ["Pen", "Paper"]
 
 
+def test_large_closeup_object_collapses_nested_body_and_label_boxes():
+    frame = np.full((480, 640, 3), 180, dtype=np.uint8)
+    detections = [
+        Detection(24, "Plastic bottle", 0.61, (35, 25, 560, 455)),
+        Detection(1, "Aluminum can", 0.38, (410, 95, 625, 420)),
+        Detection(26, "Plastic caps", 0.29, (470, 70, 610, 190)),
+    ]
+
+    filtered = collapse_single_object_scene_detections(frame, detections)
+
+    assert [(item.cls_name, item.conf) for item in filtered] == [("Plastic bottle", 0.61)]
+
+
+def test_large_scene_collapse_keeps_two_side_by_side_objects_separate():
+    frame = np.full((480, 640, 3), 180, dtype=np.uint8)
+    detections = [
+        Detection(24, "Plastic bottle", 0.78, (25, 70, 280, 430)),
+        Detection(1, "Aluminum can", 0.73, (360, 65, 620, 435)),
+    ]
+
+    filtered = collapse_single_object_scene_detections(frame, detections)
+
+    assert [item.cls_name for item in filtered] == ["Plastic bottle", "Aluminum can"]
+
+
 def test_fragmented_same_label_merges_even_when_foreground_splits_one_long_object():
     parts = [
         Detection(42, "Pen", 0.72, (20, 90, 210, 128)),
@@ -100,6 +126,60 @@ def test_fragmented_same_label_merges_even_when_foreground_splits_one_long_objec
 
     assert [(item.cls_name, item.xyxy) for item in merged] == [("Pen", (20, 90, 510, 130))]
     assert [(item.cls_name, item.xyxy) for item in split_foreground] == [("Pen", (20, 90, 510, 130))]
+
+
+def test_fragmented_pen_merges_two_aligned_boxes_across_transparent_body_gap():
+    parts = [
+        Detection(42, "Pen", 0.86, (266, 489, 548, 557), operator_label="Bút bi"),
+        Detection(42, "Pen", 0.91, (836, 497, 1045, 536), operator_label="Bút bi"),
+    ]
+
+    merged = merge_fragmented_same_label_detections(parts, foreground_object_count=2)
+
+    assert len(merged) == 1
+    assert merged[0].cls_name == "Pen"
+    assert merged[0].operator_label == "Bút bi"
+    assert merged[0].conf == 0.91
+    assert merged[0].xyxy == (266, 489, 1045, 557)
+
+
+def test_fragmented_bottle_merges_even_when_operator_sub_label_fluctuates():
+    parts = [
+        Detection(
+            12,
+            "Glass bottle",
+            0.78,
+            (40, 120, 260, 190),
+            operator_label="Chai thủy tinh",
+        ),
+        Detection(
+            12,
+            "Glass bottle",
+            0.84,
+            (282, 124, 510, 194),
+            operator_label="Lọ thủy tinh",
+        ),
+    ]
+
+    merged = merge_fragmented_same_label_detections(parts, foreground_object_count=2)
+
+    assert len(merged) == 1
+    assert merged[0].cls_name == "Glass bottle"
+    assert merged[0].operator_label == "Lọ thủy tinh"
+    assert merged[0].xyxy == (40, 120, 510, 194)
+
+
+def test_fragmented_vertical_battery_merges_two_aligned_boxes():
+    parts = [
+        Detection(43, "Battery", 0.80, (180, 30, 235, 220), operator_label="Pin AA/AAA"),
+        Detection(43, "Battery", 0.88, (184, 245, 238, 480), operator_label="Pin AA/AAA"),
+    ]
+
+    merged = merge_fragmented_same_label_detections(parts, foreground_object_count=2)
+
+    assert len(merged) == 1
+    assert merged[0].cls_name == "Battery"
+    assert merged[0].xyxy == (180, 30, 238, 480)
 
 
 def test_fragmented_same_label_keeps_far_same_label_objects_separate():

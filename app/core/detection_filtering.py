@@ -72,17 +72,57 @@ def collapse_duplicate_physical_detections(
     return sorted(collapsed, key=lambda item: item.conf, reverse=True)
 
 
+def collapse_single_object_scene_detections(
+    frame_bgr: np.ndarray,
+    detections: list[Detection],
+    *,
+    min_large_area_ratio: float = 0.16,
+) -> list[Detection]:
+    """Collapse nested/nearby boxes when they are almost certainly one object.
+
+    Blurry close-up camera frames can make YOLO return one large object box plus
+    smaller label/cap/body boxes around the same bottle or can. Those duplicate
+    boxes make the UI look unstable and can block auto-sort as "multi object".
+    This keeps separate side-by-side objects, but folds boxes whose centers sit
+    inside the same large physical object.
+    """
+    if len(detections) <= 1 or frame_bgr.ndim < 2:
+        return detections
+    height, width = frame_bgr.shape[:2]
+    frame_area = float(max(1, width * height))
+    clusters: list[list[Detection]] = []
+    for detection in detections:
+        for cluster in clusters:
+            if any(
+                _same_physical_object(detection.xyxy, item.xyxy, iou_threshold=0.38)
+                or _same_large_scene_object(
+                    detection.xyxy,
+                    item.xyxy,
+                    frame_area=frame_area,
+                    min_large_area_ratio=min_large_area_ratio,
+                )
+                for item in cluster
+            ):
+                cluster.append(detection)
+                break
+        else:
+            clusters.append([detection])
+    return sorted((_best_duplicate_candidate(cluster) for cluster in clusters), key=lambda item: item.conf, reverse=True)
+
+
 def merge_fragmented_same_label_detections(
     detections: list[Detection],
     *,
     foreground_object_count: int | None = None,
 ) -> list[Detection]:
-    """Merge split labels only when the foreground says the tray has one object.
+    """Merge split boxes from one physical object before multi-object safety.
 
-    A detector can draw two boxes around the cap and tip of one pen. Camera
-    blur can also split one long object into several foreground components, so
-    foreground_count is advisory: boxes still have to be close, same-label, and
-    aligned before being merged.
+    A detector can draw separate boxes around the cap/body/tip of a pen,
+    battery, bottle, utensil, cable, or other elongated waste. Camera blur can
+    also split one object into several foreground components, so foreground
+    count is advisory: boxes still have to share the model class and be close
+    and aligned before being merged. Operator labels may legitimately fluctuate
+    between two fragments; the strongest detection supplies the final label.
     """
     _ = foreground_object_count
     clusters: list[list[Detection]] = []
@@ -90,7 +130,6 @@ def merge_fragmented_same_label_detections(
         for cluster in clusters:
             if all(
                 item.cls_name == detection.cls_name
-                and item.operator_label == detection.operator_label
                 and _fragmented_parts_of_one_object(item.xyxy, detection.xyxy)
                 for item in cluster
             ):
@@ -142,9 +181,23 @@ def _fragmented_parts_of_one_object(
     overlap_y = max(0, min(ay2, by2) - max(ay1, by1))
     if horizontal:
         min_height = max(1, min(ay2 - ay1, by2 - by1))
-        return gap_x <= max(20, round(union_width * 0.18)) and overlap_y / min_height >= 0.58
+        first_width = max(1, ax2 - ax1)
+        second_width = max(1, bx2 - bx1)
+        # A glossy/transparent object can disappear in the middle of the camera
+        # frame, leaving only two ends as boxes. Allow a wider gap only for very
+        # elongated, aligned parts; keep it proportional to detected material so
+        # two separate objects placed far apart remain blocked as multi-object.
+        close_gap = max(20, round(union_width * 0.18))
+        if aspect >= 7.0:
+            close_gap = max(close_gap, min(320, round((first_width + second_width) * 0.65)))
+        return gap_x <= close_gap and overlap_y / min_height >= 0.58
     min_width = max(1, min(ax2 - ax1, bx2 - bx1))
-    return gap_y <= max(20, round(union_height * 0.18)) and overlap_x / min_width >= 0.58
+    first_height = max(1, ay2 - ay1)
+    second_height = max(1, by2 - by1)
+    close_gap = max(20, round(union_height * 0.18))
+    if aspect <= 1 / 7.0:
+        close_gap = max(close_gap, min(320, round((first_height + second_height) * 0.65)))
+    return gap_y <= close_gap and overlap_x / min_width >= 0.58
 
 
 def find_ambiguous_organic_candidate(
@@ -311,6 +364,45 @@ def _same_local_object(
     return union_area / max(first_area, second_area) <= 1.72
 
 
+def _same_large_scene_object(
+    first: tuple[int, int, int, int],
+    second: tuple[int, int, int, int],
+    *,
+    frame_area: float,
+    min_large_area_ratio: float,
+) -> bool:
+    first_area = _box_area(first)
+    second_area = _box_area(second)
+    if first_area <= 0 or second_area <= 0:
+        return False
+    larger = first if first_area >= second_area else second
+    smaller = second if first_area >= second_area else first
+    larger_area = max(first_area, second_area)
+    smaller_area = min(first_area, second_area)
+    if larger_area / max(frame_area, 1.0) < min_large_area_ratio:
+        return False
+    lx1, ly1, lx2, ly2 = larger
+    sx1, sy1, sx2, sy2 = smaller
+    large_w = max(1, lx2 - lx1)
+    large_h = max(1, ly2 - ly1)
+    expand_x = max(12, round(large_w * 0.08))
+    expand_y = max(12, round(large_h * 0.08))
+    small_cx = (sx1 + sx2) / 2.0
+    small_cy = (sy1 + sy2) / 2.0
+    center_inside = (
+        lx1 - expand_x <= small_cx <= lx2 + expand_x
+        and ly1 - expand_y <= small_cy <= ly2 + expand_y
+    )
+    if not center_inside:
+        return False
+    intersection = _intersection_area(first, second)
+    smaller_coverage = intersection / max(smaller_area, 1)
+    union_area = first_area + second_area - intersection
+    contained_union = union_area / max(larger_area, 1) <= 1.35
+    substantial_overlap = smaller_coverage >= 0.28 and smaller_area / max(larger_area, 1) <= 0.85
+    return contained_union or substantial_overlap
+
+
 def _best_duplicate_candidate(cluster: list[Detection]) -> Detection:
     def rank(detection: Detection) -> tuple[int, int, float]:
         source_rank = PREFERRED_DUPLICATE_SOURCES.get(detection.source, 4)
@@ -359,6 +451,7 @@ def _same_physical_object(
 
 __all__ = [
     "collapse_duplicate_physical_detections",
+    "collapse_single_object_scene_detections",
     "find_ambiguous_organic_candidate",
     "is_low_detail_empty_tray",
     "is_uniform_empty_tray_artifact",
