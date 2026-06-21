@@ -4,7 +4,7 @@ import { shouldUseCloudHardwareBridge } from "@/lib/agent";
 import { isAllowedHardwareBridgeRoute } from "@/lib/server/hardware-bridge";
 
 describe("hardware bridge history allowlist", () => {
-  it("uses the local agent by default unless the cloud bridge is explicitly enabled or on Vercel", () => {
+  it("uses the local agent by default unless the cloud bridge is explicitly enabled", () => {
     const originalVercel = process.env.NEXT_PUBLIC_VERCEL;
     process.env.NEXT_PUBLIC_VERCEL = undefined;
     expect(shouldUseCloudHardwareBridge()).toBe(false);
@@ -16,8 +16,9 @@ describe("hardware bridge history allowlist", () => {
     expect(shouldUseCloudHardwareBridge("cloud")).toBe(true);
 
     process.env.NEXT_PUBLIC_VERCEL = "1";
-    expect(shouldUseCloudHardwareBridge()).toBe(true);
-    expect(shouldUseCloudHardwareBridge("0")).toBe(false); // explicit disable overrides Vercel default
+    expect(shouldUseCloudHardwareBridge()).toBe(false);
+    expect(shouldUseCloudHardwareBridge("1")).toBe(true);
+    expect(shouldUseCloudHardwareBridge("0")).toBe(false);
 
     process.env.NEXT_PUBLIC_VERCEL = originalVercel;
   });

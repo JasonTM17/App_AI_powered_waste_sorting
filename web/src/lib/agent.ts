@@ -1100,7 +1100,7 @@ export function shouldUseCloudHardwareBridge(raw = process.env.NEXT_PUBLIC_USE_C
   if (value === "0" || value === "false" || value === "no" || value === "off" || value === "local") {
     return false;
   }
-  return process.env.NEXT_PUBLIC_VERCEL === "1";
+  return false;
 }
 
 export function getAdminConnectionCardPresentation(
