@@ -14,7 +14,8 @@
       "Organic": 0.25,
       "Plastic bottle": 0.3,
       "Glass bottle": 0.3,
-      "Milk bottle": 0.3
+      "Milk bottle": 0.3,
+      "Pen": 0.85
     },
     "iou_threshold": 0.45,
     "input_size": 640,
@@ -577,8 +578,8 @@
     "min_sort_interval_seconds": 2.0,
     "busy_settle_seconds": 2.0,
     "min_stable_frames": 2,
-    "empty_rearm_seconds": 2.5,
-    "empty_rearm_frames": 12,
+    "empty_rearm_seconds": 1.0,
+    "empty_rearm_frames": 6,
     "require_roi_for_dispatch": true,
     "max_objects_per_dispatch": 1,
     "max_classes_per_dispatch": 1,

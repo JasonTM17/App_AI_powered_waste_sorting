@@ -183,14 +183,22 @@ def _fragmented_parts_of_one_object(
         min_height = max(1, min(ay2 - ay1, by2 - by1))
         first_width = max(1, ax2 - ax1)
         second_width = max(1, bx2 - bx1)
+        first_center_y = (ay1 + ay2) / 2.0
+        second_center_y = (by1 + by2) / 2.0
         # A glossy/transparent object can disappear in the middle of the camera
         # frame, leaving only two ends as boxes. Allow a wider gap only for very
         # elongated, aligned parts; keep it proportional to detected material so
         # two separate objects placed far apart remain blocked as multi-object.
         close_gap = max(20, round(union_width * 0.18))
-        if aspect >= 7.0:
+        if aspect >= 4.5:
             close_gap = max(close_gap, min(320, round((first_width + second_width) * 0.65)))
-        return gap_x <= close_gap and overlap_y / min_height >= 0.58
+        aligned_long_parts = (
+            aspect >= 4.5
+            and abs(first_center_y - second_center_y) <= union_height * 0.50
+        )
+        return gap_x <= close_gap and (
+            overlap_y / min_height >= 0.58 or aligned_long_parts
+        )
     min_width = max(1, min(ax2 - ax1, bx2 - bx1))
     first_height = max(1, ay2 - ay1)
     second_height = max(1, by2 - by1)

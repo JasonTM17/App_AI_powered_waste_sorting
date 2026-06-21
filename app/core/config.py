@@ -165,6 +165,7 @@ class ModelConfig(BaseModel):
             "Plastic bottle": 0.30,
             "Glass bottle": 0.45,
             "Milk bottle": 0.30,
+            "Pen": 0.85,
         }
     )
     iou_threshold: float = Field(0.45, ge=0.0, le=1.0)
@@ -262,8 +263,8 @@ class DispatchGuardConfig(BaseModel):
     min_sort_interval_seconds: float = Field(2.0, ge=0.0, le=300.0)
     busy_settle_seconds: float = Field(2.0, ge=0.0, le=30.0)
     min_stable_frames: int = Field(2, ge=1, le=30)
-    empty_rearm_seconds: float = Field(2.5, ge=0.0, le=60.0)
-    empty_rearm_frames: int = Field(12, ge=1, le=300)
+    empty_rearm_seconds: float = Field(1.0, ge=0.0, le=60.0)
+    empty_rearm_frames: int = Field(6, ge=1, le=300)
     require_roi_for_dispatch: bool = True
     max_objects_per_dispatch: int = Field(1, ge=1, le=5)
     max_classes_per_dispatch: int = Field(1, ge=1, le=5)
@@ -342,8 +343,8 @@ def default_dispatch_guard_config() -> DispatchGuardConfig:
         min_sort_interval_seconds=2.0,
         busy_settle_seconds=2.0,
         min_stable_frames=2,
-        empty_rearm_seconds=2.5,
-        empty_rearm_frames=12,
+        empty_rearm_seconds=1.0,
+        empty_rearm_frames=6,
         require_roi_for_dispatch=True,
         max_objects_per_dispatch=1,
         max_classes_per_dispatch=1,
@@ -533,11 +534,11 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     if cfg.dispatch_guard.busy_settle_seconds < 2.0:
         cfg.dispatch_guard.busy_settle_seconds = 2.0
         changed = True
-    if cfg.dispatch_guard.empty_rearm_seconds < 2.5:
-        cfg.dispatch_guard.empty_rearm_seconds = 2.5
+    if cfg.dispatch_guard.empty_rearm_seconds < 1.0:
+        cfg.dispatch_guard.empty_rearm_seconds = 1.0
         changed = True
-    if cfg.dispatch_guard.empty_rearm_frames < 12:
-        cfg.dispatch_guard.empty_rearm_frames = 12
+    if cfg.dispatch_guard.empty_rearm_frames < 6:
+        cfg.dispatch_guard.empty_rearm_frames = 6
         changed = True
     if cfg.dispatch_guard.min_stable_frames < 2:
         cfg.dispatch_guard.min_stable_frames = 2
@@ -571,6 +572,9 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
         changed = True
     if cfg.model.class_thresholds.get("Glass bottle", 1.0) < 0.45:
         cfg.model.class_thresholds["Glass bottle"] = 0.45
+        changed = True
+    if cfg.model.class_thresholds.get("Pen", 0.0) < 0.85:
+        cfg.model.class_thresholds["Pen"] = 0.85
         changed = True
     if cfg.model.specialist.class_thresholds.get("Pen") == 0.15:
         cfg.model.specialist.class_thresholds["Pen"] = 0.45

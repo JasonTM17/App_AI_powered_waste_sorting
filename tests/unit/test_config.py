@@ -174,6 +174,10 @@ def test_conf_threshold_out_of_range_rejected():
         AppConfig.model_validate(d)
 
 
+def test_default_config_requires_high_confidence_before_dispatching_pen():
+    assert AppConfig().model.class_thresholds["Pen"] == 0.85
+
+
 def test_specialist_threshold_out_of_range_rejected():
     d = _default_dict()
     d["model"]["specialist"]["class_thresholds"]["Pen"] = 1.5
@@ -220,8 +224,8 @@ def test_default_dispatch_guard_filters_post_sort_vibration() -> None:
     assert AppConfig().dispatch_guard.busy_settle_seconds == 2.0
     assert AppConfig().dispatch_guard.min_sort_interval_seconds == 2.0
     assert AppConfig().dispatch_guard.min_stable_frames == 2
-    assert AppConfig().dispatch_guard.empty_rearm_seconds == 2.5
-    assert AppConfig().dispatch_guard.empty_rearm_frames == 12
+    assert AppConfig().dispatch_guard.empty_rearm_seconds == 1.0
+    assert AppConfig().dispatch_guard.empty_rearm_frames == 6
     assert AppConfig().dispatch_guard.max_dispatch_bbox_area_ratio == 0.82
     assert AppConfig().dispatch_guard.min_dispatch_sharpness == 24.0
     assert AppConfig().dispatch_guard.min_dispatch_confidence == 0.55
@@ -246,15 +250,15 @@ def test_load_config_hardens_legacy_dispatch_guard_against_scale_vibration(
     assert cfg.dispatch_guard.busy_settle_seconds == 2.0
     assert cfg.dispatch_guard.min_stable_frames == 2
     assert cfg.dispatch_guard.min_dispatch_confidence == 0.55
-    assert cfg.dispatch_guard.empty_rearm_seconds == 2.5
-    assert cfg.dispatch_guard.empty_rearm_frames == 12
+    assert cfg.dispatch_guard.empty_rearm_seconds == 1.0
+    assert cfg.dispatch_guard.empty_rearm_frames == 6
     raw = json.loads(cfg_path.read_text(encoding="utf-8"))
     assert raw["dispatch_guard"]["min_sort_interval_seconds"] == 2.0
     assert raw["dispatch_guard"]["busy_settle_seconds"] == 2.0
     assert raw["dispatch_guard"]["min_stable_frames"] == 2
     assert raw["dispatch_guard"]["min_dispatch_confidence"] == 0.55
-    assert raw["dispatch_guard"]["empty_rearm_seconds"] == 2.5
-    assert raw["dispatch_guard"]["empty_rearm_frames"] == 12
+    assert raw["dispatch_guard"]["empty_rearm_seconds"] == 1.0
+    assert raw["dispatch_guard"]["empty_rearm_frames"] == 6
 
 
 def test_manual_reference_recognition_invalid_values_rejected():

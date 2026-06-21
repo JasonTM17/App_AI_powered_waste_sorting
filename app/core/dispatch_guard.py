@@ -59,6 +59,7 @@ class DispatchGuard:
         self._rearmed = False
         self._empty_since: float | None = None
         self._empty_frames = 0
+        self._pending_rearm = False
         self._last_dispatch_started_at: float | None = None
         self._last_dispatch_track_id: int | None = None
         self._has_dispatched = False
@@ -78,9 +79,17 @@ class DispatchGuard:
             self.last_reason = "ROI OFF"
             return
         if self._is_busy(now):
+            self._observe_empty_during_busy(
+                has_visible_object=has_visible_object,
+                now=now,
+            )
             self.state = "SORTING" if self._busy_track_id is not None else "RETURNING"
             self.last_reason = "sort busy"
             return
+        if self._pending_rearm:
+            self._pending_rearm = False
+            self._armed = True
+            self._rearmed = self._has_dispatched
         if self._armed and not has_visible_object:
             self.state = "READY"
             self.last_reason = ""
@@ -138,6 +147,7 @@ class DispatchGuard:
         self._rearmed = False
         self._empty_since = None
         self._empty_frames = 0
+        self._pending_rearm = False
         self._last_dispatch_started_at = now
         self._last_dispatch_track_id = int(track_id)
         self._busy_track_id = int(track_id)
@@ -179,3 +189,20 @@ class DispatchGuard:
             self._busy_track_id = None
             self.state = "WAITING_EMPTY"
             self.last_reason = "waiting empty tray"
+
+    def _observe_empty_during_busy(self, *, has_visible_object: bool, now: float) -> None:
+        if has_visible_object:
+            self._empty_since = None
+            self._empty_frames = 0
+            self._pending_rearm = False
+            return
+        if self._empty_since is None:
+            self._empty_since = now
+            self._empty_frames = 1
+        else:
+            self._empty_frames += 1
+        if (
+            now - self._empty_since >= self.empty_rearm_seconds
+            and self._empty_frames >= self.empty_rearm_frames
+        ):
+            self._pending_rearm = True

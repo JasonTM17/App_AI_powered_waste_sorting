@@ -1249,7 +1249,8 @@ def test_pipeline_corrects_pen_like_unknown_before_three_bin_recycle_fallback(
     assert [(item.cls_name, item.source, item.operator_label) for item in detections] == [
         ("Pen", "visual_correction:pen", "But bi")
     ]
-    assert uart.sent == [(1, "R", detections[0].conf)]
+    assert uart.sent == []
+    assert p.dispatch_status == "low confidence review required"
     p.close()
 
 
@@ -1683,6 +1684,8 @@ def test_pipeline_collapses_many_labels_on_one_object_without_warning(tmp_path, 
         mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
     )
     cfg.model.conf_threshold = 0.15
+    cfg.model.class_thresholds["Pen"] = 0.15
+    cfg.manual_reference_recognition.enabled = False
     uart = _WarningUart()
     speaker = _StubSpeaker()
     p = Pipeline(cfg, _OneObjectManyLabelsInfer(), uart, tmp_path / "h.db", speaker=speaker)
@@ -2225,6 +2228,40 @@ def test_pipeline_unknown_object_does_not_dispatch_while_visible(tmp_path, monke
     assert uart.sent == []
     assert p.history.query(limit=10) == []
     assert p.dispatch_status == "unknown object review required"
+    p.close()
+
+
+def test_pipeline_does_not_dispatch_subthreshold_pen_from_reference_source(tmp_path):
+    cfg = _dispatch_ready_config(
+        mappings=[ClassMapping(class_name="Pen", command="R", bin_index=2)]
+    )
+    uart = _StubUart()
+    p = Pipeline(
+        cfg,
+        _ScriptedInfer(
+            [
+                [
+                    Detection(
+                        42,
+                        "Pen",
+                        0.78,
+                        (20, 20, 150, 70),
+                        source="manual_reference",
+                        operator_label="Bút bi",
+                    )
+                ]
+            ]
+        ),
+        uart,
+        tmp_path / "h.db",
+    )
+    frame = np.zeros((120, 180, 3), dtype=np.uint8)
+
+    _arm_dispatch(p)
+    p.process_frame(frame, ts=datetime.now(UTC))
+
+    assert uart.sent == []
+    assert p.dispatch_status == "low confidence review required"
     p.close()
 
 

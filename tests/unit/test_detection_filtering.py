@@ -143,6 +143,21 @@ def test_fragmented_pen_merges_two_aligned_boxes_across_transparent_body_gap():
     assert merged[0].xyxy == (266, 489, 1045, 557)
 
 
+def test_fragmented_pen_merges_offset_boxes_from_real_camera_frame():
+    parts = [
+        Detection(42, "Pen", 0.90, (376, 481, 634, 588), operator_label="Bút bi"),
+        Detection(42, "Pen", 0.88, (913, 449, 1139, 493), operator_label="Bút bi"),
+    ]
+
+    merged = merge_fragmented_same_label_detections(parts, foreground_object_count=2)
+
+    assert len(merged) == 1
+    assert merged[0].cls_name == "Pen"
+    assert merged[0].operator_label == "Bút bi"
+    assert merged[0].conf == 0.90
+    assert merged[0].xyxy == (376, 449, 1139, 588)
+
+
 def test_fragmented_bottle_merges_even_when_operator_sub_label_fluctuates():
     parts = [
         Detection(

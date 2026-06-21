@@ -1408,12 +1408,7 @@ class Pipeline:
             roi_ready=roi_ready,
             now=now_mono,
         )
-        if (
-            roi_ready
-            and not visible_in_roi
-            and self._dispatch_guard.state == "READY"
-            and self._dispatch_guard.consume_rearmed()
-        ):
+        if roi_ready and self._dispatch_guard.consume_rearmed():
             self.tracker.clear_active()
             self._unknown_fallback.reset()
         self.dispatch_status = self._dispatch_guard.last_reason
@@ -1880,7 +1875,14 @@ class Pipeline:
         return True
 
     def _low_confidence_dispatch_blocked(self, detection: Detection) -> bool:
-        if detection.conf < float(self.cfg.dispatch_guard.min_dispatch_confidence):
+        class_threshold = float(
+            self.cfg.model.class_thresholds.get(detection.cls_name, 0.0)
+        )
+        required_confidence = max(
+            float(self.cfg.dispatch_guard.min_dispatch_confidence),
+            class_threshold,
+        )
+        if detection.conf < required_confidence:
             return True
         if detection.source != "visual_correction:metal_utensil":
             return False
