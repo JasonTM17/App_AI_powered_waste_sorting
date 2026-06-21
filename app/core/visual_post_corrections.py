@@ -49,6 +49,19 @@ def apply_visual_post_corrections(
                 source="visual_correction:leafy_organic",
                 operator_label="La cay",
             )
+        elif detection.cls_name == "Eggshell" and _looks_like_smooth_neutral_disc(
+            frame_bgr,
+            detection.xyxy,
+        ):
+            # A smooth neutral disc/cap is frequently mislabelled as an egg
+            # shell by the low-resolution camera. Do not route it to Organic.
+            corrected = _replace_detection(
+                detection,
+                unknown_class_name,
+                cls_id=UNKNOWN_OBJECT_CLASS_ID,
+                source="visual_correction:smooth_white_disc",
+                operator_label="Vat trang can kiem tra",
+            )
         elif detection.cls_name == "Organic" and detection.conf <= 0.68:
             if _looks_like_elongated_wooden_utensil(frame_bgr, detection.xyxy):
                 corrected = _replace_detection(
@@ -513,6 +526,33 @@ def _looks_like_eggshell(
         and 105.0 <= stats["value_mean"] <= 238.0
         and 3.0 <= stats["saturation_mean"] <= 85.0
         and stats["warmth"] >= 4.0
+    )
+
+
+def _looks_like_smooth_neutral_disc(
+    frame_bgr: np.ndarray,
+    xyxy: tuple[int, int, int, int],
+) -> bool:
+    """Recognize a smooth white cap/disc, not a broken eggshell fragment."""
+    crop = _crop(frame_bgr, xyxy, pad_ratio=0.06)
+    if crop is None:
+        return False
+    mask = _foreground_mask(crop)
+    stats = _mask_stats(crop, mask)
+    if stats is None:
+        return False
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    neutral_bright_ratio = float(np.mean((hsv[:, :, 1] <= 28) & (hsv[:, :, 2] >= 145)))
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+    return (
+        stats["area_ratio"] >= 0.14
+        and 0.68 <= stats["box_aspect"] <= 1.40
+        and stats["oriented_aspect"] <= 1.35
+        and stats["circularity"] >= 0.62
+        and stats["saturation_mean"] <= 28.0
+        and stats["value_mean"] >= 145.0
+        and neutral_bright_ratio >= 0.36
+        and float(np.std(gray)) <= 42.0
     )
 
 

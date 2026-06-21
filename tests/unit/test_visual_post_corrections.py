@@ -72,6 +72,18 @@ def test_visual_correction_relabels_round_warm_unknown_as_eggshell():
     assert corrected[0].cls_name == "Eggshell"
 
 
+def test_visual_correction_routes_smooth_white_disc_to_safe_unknown():
+    frame = np.full((240, 320, 3), 226, dtype=np.uint8)
+    cv2.circle(frame, (160, 120), 58, (185, 185, 185), -1)
+    cv2.circle(frame, (160, 120), 50, (202, 202, 202), -1)
+    detection = Detection(11, "Eggshell", 0.89, (92, 52, 228, 188))
+
+    corrected = apply_visual_post_corrections(frame, [detection])
+
+    assert corrected[0].cls_name == "Unknown object"
+    assert corrected[0].source == "visual_correction:smooth_white_disc"
+
+
 def test_visual_correction_relabels_crumpled_gray_paper_unknown_as_paper():
     frame = np.full((260, 360, 3), 228, dtype=np.uint8)
     paper = np.array(
@@ -276,6 +288,21 @@ def test_visual_correction_relabels_blue_pen_like_unknown_as_pen():
     assert corrected[0].cls_name == "Pen"
     assert corrected[0].source == "visual_correction:pen"
     assert corrected[0].operator_label == "But bi"
+
+
+def test_visual_correction_relabels_copper_black_unknown_as_battery():
+    frame = np.full((360, 300, 3), 232, dtype=np.uint8)
+    cv2.rectangle(frame, (124, 54), (184, 116), (78, 132, 188), -1)
+    cv2.rectangle(frame, (124, 116), (184, 294), (34, 34, 36), -1)
+    cv2.rectangle(frame, (138, 146), (172, 238), (224, 224, 218), -1)
+    cv2.rectangle(frame, (132, 54), (176, 294), (75, 72, 72), 3)
+    detection = Detection(-1, "Unknown object", 0.14, (112, 38, 196, 310))
+
+    corrected = apply_visual_post_corrections(frame, [detection])
+
+    assert corrected[0].cls_name == "Battery"
+    assert corrected[0].source == "visual_correction:battery"
+    assert corrected[0].operator_label == "Pin AA/AAA"
 
 
 def test_visual_correction_relabels_pen_like_plastic_bottle_as_pen():
