@@ -314,6 +314,25 @@ def test_split_long_pen_without_reference_counts_as_one_object():
     assert decision.foreground_count == 2
 
 
+def test_split_long_pen_inside_one_merged_reference_stays_one_object():
+    frame = np.full((420, 1200, 3), 245, dtype=np.uint8)
+    frame[189:257, 266:548] = (35, 70, 180)
+    frame[197:236, 836:1045] = (44, 56, 112)
+
+    decision = evaluate_foreground_multi_object_dispatch(
+        frame,
+        roi=_roi(width=1200, height=420),
+        max_objects=1,
+        min_area_ratio=0.002,
+        reference_boxes=((266, 189, 1045, 257),),
+    )
+
+    assert decision.allowed is True
+    assert decision.object_count == 1
+    assert decision.foreground_count == 2
+    assert decision.reference_count == 1
+
+
 def test_two_yolo_boxes_stay_blocked_even_when_foreground_merges_cleanly():
     decision = evaluate_foreground_multi_object_dispatch(
         _two_object_frame(),

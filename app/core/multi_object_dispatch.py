@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from itertools import pairwise
 
 import numpy as np
 
@@ -176,6 +177,8 @@ def _contained_independent_object_count(
     ]
     if len(contained) < 2:
         return len(contained)
+    if _elongated_reference_fragments_form_one_object(contained, reference):
+        return 1
 
     independent: list[tuple[int, int, int, int]] = []
     for candidate in sorted(contained, key=_box_area, reverse=True):
@@ -185,6 +188,54 @@ def _contained_independent_object_count(
         ):
             independent.append(candidate)
     return len(independent)
+
+
+def _elongated_reference_fragments_form_one_object(
+    boxes: list[tuple[int, int, int, int]],
+    reference: tuple[int, int, int, int],
+) -> bool:
+    """Trust one merged elongated detection when foreground sees only its parts.
+
+    Transparent barrels, glossy bottles, batteries, utensils, and cables can
+    leave disconnected dark/color components inside one detector reference.
+    Multiple real objects still have multiple reference boxes and therefore
+    remain blocked by the reference count in the caller.
+    """
+    if not 2 <= len(boxes) <= 5:
+        return False
+    rx1, ry1, rx2, ry2 = reference
+    reference_width = max(1, rx2 - rx1)
+    reference_height = max(1, ry2 - ry1)
+    aspect = reference_width / reference_height
+    horizontal = aspect >= 5.0
+    vertical = aspect <= 0.20
+    if not horizontal and not vertical:
+        return False
+
+    if horizontal:
+        ordered = sorted(boxes, key=lambda box: box[0])
+        material_length = sum(max(0, box[2] - box[0]) for box in ordered)
+        max_gap = max(
+            (max(0, current[0] - previous[2]) for previous, current in pairwise(ordered)),
+            default=0,
+        )
+        centers = [((box[1] + box[3]) / 2.0) for box in ordered]
+        aligned = max(centers) - min(centers) <= reference_height * 0.70
+        enough_material = material_length / reference_width >= 0.42
+        allowed_gap = max(96, min(320, round(material_length * 0.65)))
+        return aligned and enough_material and max_gap <= allowed_gap
+
+    ordered = sorted(boxes, key=lambda box: box[1])
+    material_length = sum(max(0, box[3] - box[1]) for box in ordered)
+    max_gap = max(
+        (max(0, current[1] - previous[3]) for previous, current in pairwise(ordered)),
+        default=0,
+    )
+    centers = [((box[0] + box[2]) / 2.0) for box in ordered]
+    aligned = max(centers) - min(centers) <= reference_width * 0.70
+    enough_material = material_length / reference_height >= 0.42
+    allowed_gap = max(96, min(320, round(material_length * 0.65)))
+    return aligned and enough_material and max_gap <= allowed_gap
 
 
 def _foreground_objects_clearly_separate(

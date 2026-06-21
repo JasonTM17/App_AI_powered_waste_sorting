@@ -1710,7 +1710,8 @@ def test_pipeline_merges_fragmented_pen_before_multi_object_guard(tmp_path, monk
     p = Pipeline(cfg, _FragmentedPenInfer(), uart, tmp_path / "h.db")
     p.set_hardware_dispatch_enabled(False)
     frame = np.full((420, 1200, 3), 245, dtype=np.uint8)
-    cv2.line(frame, (266, 224), (1045, 216), (35, 80, 170), 34)
+    frame[189:257, 266:548] = (35, 80, 170)
+    frame[197:236, 836:1045] = (44, 56, 112)
 
     _arm_dispatch(p)
     detections = p.process_frame(frame, ts=datetime.now(UTC))
