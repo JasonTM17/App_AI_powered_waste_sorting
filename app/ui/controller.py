@@ -653,6 +653,8 @@ class AppController(QObject):
         enabled = self._actuation_test_enabled and (
             not qa_active or self._qa_dispatch_armed
         )
+        if enabled:
+            self._apply_auto_sort_runtime_timing()
         try:
             self._pipeline.set_hardware_dispatch_enabled(
                 enabled,
@@ -660,6 +662,16 @@ class AppController(QObject):
             )
         except TypeError:
             self._pipeline.set_hardware_dispatch_enabled(enabled)
+
+    def _apply_auto_sort_runtime_timing(self) -> None:
+        """Give the UI a short stable-label window before the first real dump."""
+        if self._pipeline is None:
+            return
+        setter = getattr(self._pipeline, "set_min_dispatch_stable_frames", None)
+        if not callable(setter):
+            return
+        min_visible_frames = max(3, int(self.cfg.dispatch_guard.min_stable_frames))
+        setter(min_visible_frames)
 
     def _on_uart_connected(self, ok: bool) -> None:
         if not ok and self._actuation_test_enabled:

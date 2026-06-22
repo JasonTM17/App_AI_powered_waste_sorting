@@ -311,6 +311,7 @@ class Pipeline:
         self._last_multi_class_warning_at = 0.0
         self._multi_object_display_hold.clear()
         self._multi_object_display_hold_frames = 0
+        self._clear_hazardous_battery_warning()
         self.dispatch_status = self._dispatch_guard.last_reason
         self._reset_foreground_gate()
 
@@ -431,6 +432,33 @@ class Pipeline:
             self._hazardous_battery_seen_at > 0.0
             and time.monotonic() - self._hazardous_battery_seen_at
             <= self.cfg.hazardous_waste.battery_warning_hold_seconds
+        )
+
+    def _hazardous_warning_stable_frames(self) -> int:
+        return max(2, int(self.cfg.dispatch_guard.min_stable_frames))
+
+    def _clear_hazardous_battery_warning(self) -> None:
+        if self._hazardous_battery_seen_at <= 0.0:
+            return
+        self._hazardous_battery_seen_at = 0.0
+        self._hazardous_battery_track_id = None
+        self._hazardous_battery_track = None
+        self._hazardous_battery_frame = None
+        self._hazardous_confirmation_until = 0.0
+        logger.info("hazardous battery warning cleared because no stable battery is visible")
+
+    @staticmethod
+    def _foreground_block_is_single_object_noise(
+        foreground_multi: object,
+        tracked: list[TrackedDetection],
+    ) -> bool:
+        """Treat one small unmatched foreground fragment as glare/shadow of one object."""
+        if len(tracked) != 1:
+            return False
+        return (
+            int(getattr(foreground_multi, "reference_count", 0)) == 1
+            and int(getattr(foreground_multi, "object_count", 0)) <= 2
+            and int(getattr(foreground_multi, "unmatched_foreground_count", 0)) == 1
         )
 
     def confirm_hazardous_battery_dispatch(self) -> tuple[bool, str]:
@@ -1619,7 +1647,7 @@ class Pipeline:
         battery_tracks = [track for track in tracked if self._is_battery(track.detection)]
         if battery_tracks:
             stable_battery = max(battery_tracks, key=lambda track: track.stable_frames)
-            if stable_battery.stable_frames >= self.cfg.dispatch_guard.min_stable_frames:
+            if stable_battery.stable_frames >= self._hazardous_warning_stable_frames():
                 self._hazardous_battery_seen_at = now_mono
                 self._hazardous_battery_track_id = stable_battery.track_id
                 self._hazardous_battery_track = stable_battery
@@ -1632,6 +1660,8 @@ class Pipeline:
                     ts=ts,
                     extra_meta={"hazardous": True, "requires_confirmation": True},
                 )
+        else:
+            self._clear_hazardous_battery_warning()
         roi_ready = self._roi_ready_for_dispatch(frame_bgr)
         roi_reference_boxes = tuple(
             t.detection.xyxy for t in tracked if self._in_roi(t.detection.xyxy)
@@ -1745,30 +1775,41 @@ class Pipeline:
                     self.tracker.mark_emitted(t.track_id)
             return detections_for_render
         if foreground_multi is not None and not foreground_multi.allowed:
-            logger.debug(
-                "foreground dispatch blocked objects={} references={} components={} unmatched={}",
-                foreground_multi.object_count,
-                foreground_multi.reference_count,
-                foreground_multi.foreground_count,
-                foreground_multi.unmatched_foreground_count,
-            )
-            self.dispatch_status = foreground_multi.reason
-            if self.cfg.auto_review_queue.capture_multiple_objects:
-                self._queue_review(
-                    frame_bgr,
-                    detections_for_render,
-                    reason="foreground_multiple_objects",
-                    ts=ts,
-                    extra_meta={"foreground_count": foreground_multi.object_count},
+            if self._foreground_block_is_single_object_noise(foreground_multi, tracked):
+                logger.debug(
+                    "foreground dispatch single-object noise ignored objects={} references={} "
+                    "components={} unmatched={}",
+                    foreground_multi.object_count,
+                    foreground_multi.reference_count,
+                    foreground_multi.foreground_count,
+                    foreground_multi.unmatched_foreground_count,
                 )
-            self._speak_multi_class_warning(foreground_multi.class_names)
-            if (
-                not self._hardware_dispatch_enabled
-                and not self._preserve_tracks_when_dispatch_disabled
-            ):
-                for t in tracked:
-                    self.tracker.mark_emitted(t.track_id)
-            return detections_for_render
+                foreground_multi = None
+            else:
+                logger.debug(
+                    "foreground dispatch blocked objects={} references={} components={} unmatched={}",
+                    foreground_multi.object_count,
+                    foreground_multi.reference_count,
+                    foreground_multi.foreground_count,
+                    foreground_multi.unmatched_foreground_count,
+                )
+                self.dispatch_status = foreground_multi.reason
+                if self.cfg.auto_review_queue.capture_multiple_objects:
+                    self._queue_review(
+                        frame_bgr,
+                        detections_for_render,
+                        reason="foreground_multiple_objects",
+                        ts=ts,
+                        extra_meta={"foreground_count": foreground_multi.object_count},
+                    )
+                self._speak_multi_class_warning(foreground_multi.class_names)
+                if (
+                    not self._hardware_dispatch_enabled
+                    and not self._preserve_tracks_when_dispatch_disabled
+                ):
+                    for t in tracked:
+                        self.tracker.mark_emitted(t.track_id)
+                return detections_for_render
         if (
             self.cfg.three_bin_classifier.enabled
             and self.cfg.three_bin_classifier.mode == "route_consensus"

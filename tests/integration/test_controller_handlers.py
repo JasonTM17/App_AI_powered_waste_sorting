@@ -94,6 +94,7 @@ class _PipelineSpy:
         self.dispatch_enabled = None
         self.reset_count = 0
         self.reset_arm_immediately = None
+        self.stable_frames_set = None
 
     def set_uart(self, uart):
         self.uart = uart
@@ -106,6 +107,9 @@ class _PipelineSpy:
 
     def set_hardware_dispatch_enabled(self, enabled):
         self.dispatch_enabled = enabled
+
+    def set_min_dispatch_stable_frames(self, frames):
+        self.stable_frames_set = frames
 
     def reset_dispatch_state(self, *, arm_immediately=False):
         self.reset_count += 1
@@ -626,6 +630,7 @@ def test_actuation_test_mode_controls_pipeline_dispatch(tmp_path):
     assert spy.dispatch_enabled is True
     assert spy.reset_count == 1
     assert spy.reset_arm_immediately is True
+    assert spy.stable_frames_set == 3
 
     controller.set_actuation_test_mode(False)
 

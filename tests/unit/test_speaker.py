@@ -131,3 +131,30 @@ def test_waste_speaker_serializes_different_announcements(monkeypatch):
     assert finished.wait(2)
     assert order == ["first", "second"]
     assert max_active == 1
+
+
+def test_waste_speaker_clears_pending_audio_when_switched_to_hardware(monkeypatch):
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    order: list[str] = []
+
+    speaker = WasteSpeaker(enabled=True, cooldown_seconds=0.0)
+
+    def play(text, _audio_path):
+        order.append(text)
+        if len(order) == 1:
+            started.set()
+            assert release.wait(2)
+        finished.set()
+
+    monkeypatch.setattr(speaker, "_play_background", play)
+    speaker.speak_text(text="first", key="first", cooldown_seconds=0)
+    assert started.wait(2)
+    speaker.speak_text(text="second", key="second", cooldown_seconds=0)
+
+    speaker.configure(enabled=False, cooldown_seconds=0.0, voice_gender="female")
+    release.set()
+
+    assert finished.wait(2)
+    assert order == ["first"]

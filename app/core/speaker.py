@@ -85,9 +85,18 @@ class WasteSpeaker:
         voice_gender: str = "female",
     ) -> None:
         with self._lock:
+            was_enabled = self.enabled
             self.enabled = enabled
             self.cooldown_seconds = cooldown_seconds
             self.voice_gender = normalize_voice_gender(voice_gender)
+            if was_enabled and not enabled:
+                self._audio_queue.clear()
+                logger.info("speaker pending laptop audio cleared because output switched to hardware")
+
+    def clear_pending(self) -> None:
+        """Drop queued laptop-speaker audio that has not started playing yet."""
+        with self._lock:
+            self._audio_queue.clear()
 
     def speak(
         self,

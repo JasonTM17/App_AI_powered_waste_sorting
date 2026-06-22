@@ -11,7 +11,7 @@ from PIL import Image
 
 from app.core import pipeline as pipeline_module
 from app.core.config import MULTI_CLASS_WARNING_TEXT, AppConfig, ClassMapping
-from app.core.events import Detection
+from app.core.events import Detection, TrackedDetection
 from app.core.inference import YOLO_SPECIALIST_SOURCE
 from app.core.pipeline import Pipeline
 from app.core.three_bin_classifier import (
@@ -1992,6 +1992,24 @@ def test_pipeline_blocks_two_objects_merged_into_one_yolo_box(tmp_path, monkeypa
     p.close()
 
 
+def test_pipeline_ignores_single_unmatched_foreground_fragment_for_one_tracked_object():
+    decision = SimpleNamespace(
+        reference_count=1,
+        object_count=2,
+        unmatched_foreground_count=1,
+    )
+    tracked = [
+        TrackedDetection(
+            track_id=1,
+            detection=Detection(32, "Iron utensils", 0.78, (0, 20, 300, 180)),
+            stable_frames=3,
+            first_seen_ts=0.0,
+        )
+    ]
+
+    assert Pipeline._foreground_block_is_single_object_noise(decision, tracked) is True
+
+
 def test_pipeline_splits_loose_yolo_box_into_reviewed_spoon_and_pen(
     tmp_path,
     monkeypatch,
@@ -2435,6 +2453,40 @@ def test_pipeline_battery_requires_explicit_confirmation_before_dispatch(tmp_pat
     pipeline.close()
 
 
+def test_pipeline_clears_hazardous_banner_when_current_object_is_not_battery(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    cfg = _dispatch_ready_config(
+        mappings=[
+            ClassMapping(class_name="Battery", command="I", bin_index=3),
+            ClassMapping(class_name="Iron utensils", command="R", bin_index=2),
+        ]
+    )
+    uart = _StubUart()
+    pipeline = Pipeline(
+        cfg,
+        _ScriptedInfer(
+            [
+                [Detection(43, "Battery", 0.91, (30, 30, 150, 100))],
+                [Detection(43, "Battery", 0.91, (30, 30, 150, 100))],
+                [Detection(32, "Iron utensils", 0.78, (30, 30, 260, 120))],
+            ]
+        ),
+        uart,
+        tmp_path / "h.db",
+    )
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+
+    _arm_dispatch(pipeline)
+    pipeline.process_frame(frame, datetime.now(UTC))
+    pipeline.process_frame(frame, datetime.now(UTC))
+    assert pipeline.hazardous_warning_active() is True
+
+    pipeline.process_frame(frame, datetime.now(UTC))
+
+    assert pipeline.hazardous_warning_active() is False
+    pipeline.close()
+
+
 def test_pipeline_battery_confirmation_dispatches_once_immediately(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
     cfg = _dispatch_ready_config(
@@ -2446,6 +2498,7 @@ def test_pipeline_battery_confirmation_dispatches_once_immediately(tmp_path, mon
         _ScriptedInfer(
             [
                 [Detection(43, "Battery", 0.91, (30, 30, 150, 100))],
+                [Detection(43, "Battery", 0.91, (30, 30, 150, 100))],
                 [Detection(43, "Battery", 0.91, (220, 180, 340, 250))],
             ]
         ),
@@ -2455,6 +2508,7 @@ def test_pipeline_battery_confirmation_dispatches_once_immediately(tmp_path, mon
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
 
     _arm_dispatch(pipeline)
+    pipeline.process_frame(frame, datetime.now(UTC))
     pipeline.process_frame(frame, datetime.now(UTC))
     confirmed, _message = pipeline.confirm_hazardous_battery_dispatch()
     assert confirmed is True
@@ -2476,7 +2530,10 @@ def test_pipeline_visual_battery_unknown_requires_confirmation(tmp_path, monkeyp
     pipeline = Pipeline(
         cfg,
         _ScriptedInfer(
-            [[Detection(-1, "Unknown object", 0.14, (112, 38, 196, 310))]]
+            [
+                [Detection(-1, "Unknown object", 0.14, (112, 38, 196, 310))],
+                [Detection(-1, "Unknown object", 0.14, (112, 38, 196, 310))],
+            ]
         ),
         uart,
         tmp_path / "h.db",
@@ -2488,6 +2545,7 @@ def test_pipeline_visual_battery_unknown_requires_confirmation(tmp_path, monkeyp
     cv2.rectangle(frame, (132, 54), (176, 294), (75, 72, 72), 3)
 
     _arm_dispatch(pipeline)
+    detections = pipeline.process_frame(frame, datetime.now(UTC))
     detections = pipeline.process_frame(frame, datetime.now(UTC))
 
     assert [(item.cls_name, item.source, item.operator_label) for item in detections] == [
