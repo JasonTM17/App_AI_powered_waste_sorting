@@ -959,6 +959,51 @@ def test_pipeline_keeps_small_cardboard_detection_without_reference_correction(
     assert uart.sent == []
 
 
+def test_pipeline_corrects_high_confidence_paper_to_reviewed_plastic_bag(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    monkeypatch.setenv("TRASH_SORTER_REFERENCE_EMBEDDER", "legacy")
+    cfg = _dispatch_ready_config(
+        mappings=[
+            ClassMapping(class_name="Paper", command="R", bin_index=3),
+            ClassMapping(class_name="Plastic bag", command="R", bin_index=3),
+        ]
+    )
+    cfg.capture.output_dir = str(tmp_path / "dataset_v2")
+    cfg.model.conf_threshold = 0.3
+    cfg.manual_reference_recognition.top_k = 4
+    cfg.manual_reference_recognition.min_votes = 4
+    cfg.manual_reference_recognition.max_correction_confidence = 0.95
+    _write_manual_reference(
+        Path(cfg.capture.output_dir) / "low_conf_queue",
+        cls_name="Plastic bag",
+        cls_id=23,
+        rgb_color=(50, 50, 50),
+        recognition_only=True,
+        count=4,
+    )
+    uart = _StubUart()
+    p = Pipeline(
+        cfg,
+        _ScriptedInfer([[Detection(18, "Paper", 0.923, (10, 10, 90, 90))]]),
+        uart,
+        tmp_path / "h.db",
+    )
+    p.set_hardware_dispatch_enabled(False)
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    frame[10:90, 10:90] = (50, 50, 50)
+
+    detections = p.process_frame(frame, datetime.now(UTC))
+
+    assert [(d.cls_name, d.source) for d in detections] == [
+        ("Plastic bag", "manual_reference")
+    ]
+    assert uart.sent == []
+    p.close()
+
+
 def test_pipeline_rejects_non_textile_reference_for_cardboard_correction(
     tmp_path,
     monkeypatch,

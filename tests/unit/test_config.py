@@ -161,10 +161,15 @@ def test_app_config_parses_default_dict():
     assert c.manual_reference_recognition.correction_targets_by_yolo_class[
         "Plastic bottle"
     ] == ["Organic"]
+    assert c.manual_reference_recognition.correction_targets_by_yolo_class["Paper"] == [
+        "Plastic bag",
+        "Zip plastic bag",
+    ]
     assert "Electronics" in c.manual_reference_recognition.correction_targets_by_yolo_class["Pen"]
+    assert "Organic" in c.manual_reference_recognition.correction_targets_by_yolo_class["Pen"]
     assert c.model.specialist.min_aspect_ratios["Pen"] == 2.2
     assert c.manual_reference_recognition.min_correction_area_ratio == 0.25
-    assert c.manual_reference_recognition.max_correction_confidence == 0.90
+    assert c.manual_reference_recognition.max_correction_confidence == 0.95
     assert c.three_bin_classifier.enabled is False
     assert c.three_bin_classifier.model_path == "models/three_bin_classifier.pt"
     assert c.three_bin_classifier.mode == "unknown_only"
@@ -417,7 +422,11 @@ def test_load_config_repairs_stale_manual_reference_class_lists(tmp_path: Path):
     assert cfg.manual_reference_recognition.correction_targets_by_yolo_class[
         "Plastic bottle"
     ] == ["Organic"]
-    assert cfg.manual_reference_recognition.max_correction_confidence == 0.90
+    assert cfg.manual_reference_recognition.correction_targets_by_yolo_class["Paper"] == [
+        "Plastic bag",
+        "Zip plastic bag",
+    ]
+    assert cfg.manual_reference_recognition.max_correction_confidence == 0.95
     assert cfg.manual_reference_recognition.max_references_per_class == 60
     assert cfg.manual_reference_recognition.query_cache_seconds == 5.0
     assert cfg.model.class_thresholds["Organic"] == 0.25

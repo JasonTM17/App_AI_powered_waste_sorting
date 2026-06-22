@@ -72,6 +72,18 @@ def test_visual_correction_relabels_round_warm_unknown_as_eggshell():
     assert corrected[0].cls_name == "Eggshell"
 
 
+def test_visual_correction_relabels_round_warm_pen_as_eggshell():
+    frame = np.full((240, 320, 3), 232, dtype=np.uint8)
+    cv2.ellipse(frame, (165, 125), (58, 52), 0, 0, 360, (170, 195, 220), -1)
+    cv2.ellipse(frame, (148, 111), (24, 17), -20, 0, 360, (195, 215, 232), -1)
+    detection = Detection(19, "Pen", 0.41, (95, 65, 230, 190))
+
+    corrected = apply_visual_post_corrections(frame, [detection])
+
+    assert corrected[0].cls_name == "Eggshell"
+    assert corrected[0].source == "visual_correction:eggshell"
+
+
 def test_visual_correction_routes_smooth_white_disc_to_safe_unknown():
     frame = np.full((240, 320, 3), 226, dtype=np.uint8)
     cv2.circle(frame, (160, 120), 58, (185, 185, 185), -1)

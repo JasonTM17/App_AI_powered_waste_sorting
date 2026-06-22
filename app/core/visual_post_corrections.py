@@ -70,6 +70,20 @@ def apply_visual_post_corrections(
                     source="visual_correction:wooden_utensil",
                     operator_label="Thia go",
                 )
+        elif detection.cls_name == "Pen" and _looks_like_eggshell(
+            frame_bgr,
+            detection.xyxy,
+        ):
+            # A pen must be elongated. On the blurry tray camera a whole brown
+            # egg can briefly inherit the Pen label, so use its round warm
+            # silhouette before routing it to the inorganic bin.
+            corrected = _replace_detection(
+                detection,
+                "Eggshell",
+                cls_id=UNKNOWN_OBJECT_CLASS_ID - 1,
+                source="visual_correction:eggshell",
+                operator_label="Qua trung",
+            )
         elif detection.cls_name == "Aluminum can" and detection.conf <= 0.62:
             if _looks_like_transparent_plastic_bottle(frame_bgr, detection.xyxy):
                 corrected = _replace_detection(
@@ -519,10 +533,10 @@ def _looks_like_eggshell(
         return False
 
     return (
-        0.12 <= stats["area_ratio"] <= 0.82
+        0.12 <= stats["area_ratio"] <= 0.90
         and 0.58 <= stats["box_aspect"] <= 1.55
         and stats["oriented_aspect"] <= 1.75
-        and stats["circularity"] >= 0.38
+        and stats["circularity"] >= 0.26
         and 105.0 <= stats["value_mean"] <= 238.0
         and 3.0 <= stats["saturation_mean"] <= 85.0
         and stats["warmth"] >= 4.0

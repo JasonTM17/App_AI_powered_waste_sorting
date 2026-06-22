@@ -314,15 +314,16 @@ class ManualReferenceRecognitionConfig(BaseModel):
         default_factory=lambda: {
             "Cardboard": ["Textile", "Organic"],
             "Glass bottle": ["Iron utensils", "Wood"],
-            "Pen": ["Disposable tableware", "Iron utensils", "Electronics"],
+            "Pen": ["Disposable tableware", "Iron utensils", "Electronics", "Organic"],
             "Plastic cup": ["Organic", "Iron utensils"],
             "Plastic bottle": ["Organic"],
+            "Paper": ["Plastic bag", "Zip plastic bag"],
             "Aluminum can": ["Plastic bottle"],
             "Ceramic": ["Plastic bottle", "Glass bottle", "Iron utensils"],
         }
     )
     min_correction_area_ratio: float = Field(0.25, ge=0.0, le=1.0)
-    max_correction_confidence: float = Field(0.90, ge=0.0, le=1.0)
+    max_correction_confidence: float = Field(0.95, ge=0.0, le=1.0)
 
 
 class ThreeBinClassifierConfig(BaseModel):
@@ -389,7 +390,7 @@ def default_manual_reference_recognition_config() -> ManualReferenceRecognitionC
         correctable_yolo_classes=list(MANUAL_REFERENCE_CORRECTION_CLASSES),
         correction_target_classes=list(MANUAL_REFERENCE_CORRECTION_CLASSES),
         min_correction_area_ratio=0.25,
-        max_correction_confidence=0.90,
+        max_correction_confidence=0.95,
     )
 
 
@@ -599,8 +600,8 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     if cfg.manual_reference_recognition.unknown_min_similarity < 0.92:
         cfg.manual_reference_recognition.unknown_min_similarity = 0.92
         changed = True
-    if cfg.manual_reference_recognition.max_correction_confidence < 0.90:
-        cfg.manual_reference_recognition.max_correction_confidence = 0.90
+    if cfg.manual_reference_recognition.max_correction_confidence < 0.95:
+        cfg.manual_reference_recognition.max_correction_confidence = 0.95
         changed = True
     legacy_thresholds = {
         "Plastic bottle": 0.08,
@@ -660,9 +661,10 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     required_targets_by_source = {
         "Cardboard": ["Textile", "Organic"],
         "Glass bottle": ["Iron utensils", "Wood"],
-        "Pen": ["Disposable tableware", "Iron utensils", "Electronics"],
+        "Pen": ["Disposable tableware", "Iron utensils", "Electronics", "Organic"],
         "Plastic cup": ["Organic", "Iron utensils"],
         "Plastic bottle": ["Organic"],
+        "Paper": ["Plastic bag", "Zip plastic bag"],
         "Aluminum can": ["Plastic bottle"],
         "Ceramic": ["Plastic bottle", "Glass bottle", "Iron utensils"],
     }

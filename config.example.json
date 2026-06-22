@@ -703,14 +703,15 @@
     "correction_targets_by_yolo_class": {
       "Cardboard": ["Textile", "Organic"],
       "Glass bottle": ["Iron utensils", "Wood"],
-      "Pen": ["Disposable tableware", "Iron utensils", "Electronics"],
+      "Pen": ["Disposable tableware", "Iron utensils", "Electronics", "Organic"],
       "Plastic cup": ["Organic", "Iron utensils"],
       "Plastic bottle": ["Organic"],
+      "Paper": ["Plastic bag", "Zip plastic bag"],
       "Aluminum can": ["Plastic bottle"],
       "Ceramic": ["Plastic bottle", "Glass bottle", "Iron utensils"]
     },
     "min_correction_area_ratio": 0.25,
-    "max_correction_confidence": 0.9
+    "max_correction_confidence": 0.95
   },
   "three_bin_classifier": {
     "enabled": true,
