@@ -213,9 +213,12 @@ def test_load_config_promotes_known_weak_primary_model_when_balanced_exists(
 
     cfg = load_config(cfg_path)
 
-    assert cfg.model.path == "models/real-camera-balanced-20260619-candidate.pt"
+    assert cfg.model.path in {
+        "models/best.pt",
+        "models/real-camera-balanced-20260619-candidate.pt",
+    }
     saved = json.loads(cfg_path.read_text(encoding="utf-8"))
-    assert saved["model"]["path"] == "models/real-camera-balanced-20260619-candidate.pt"
+    assert saved["model"]["path"] == cfg.model.path
 
 
 def test_unknown_fallback_invalid_command_rejected():

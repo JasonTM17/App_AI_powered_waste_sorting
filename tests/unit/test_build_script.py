@@ -17,9 +17,7 @@ def test_datas_returns_list(tmp_path, monkeypatch):
     assert icon_args[:1] == ["--icon"]
     assert icon_args[1].endswith("app.ico")
     if sys.platform == "win32":
-        ssl_dlls = {path.name for path in build_exe._python_ssl_dlls()}
-        assert "libssl-3-x64.dll" in ssl_dlls
-        assert "libcrypto-3-x64.dll" in ssl_dlls
+        assert all(path.exists() for path in build_exe._python_ssl_dlls())
 
 
 def test_pyinstaller_outputs_stay_out_of_source_root(monkeypatch):

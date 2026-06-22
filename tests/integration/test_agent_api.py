@@ -1441,6 +1441,8 @@ def test_user_history_and_analytics_are_scoped_to_account_owner(tmp_path, monkey
             "id",
             "ts",
             "cls_name",
+            "display_label",
+            "label_status",
             "confidence",
             "category",
             "route_label",

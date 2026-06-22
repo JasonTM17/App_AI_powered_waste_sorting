@@ -134,6 +134,41 @@ flowchart TD
 
 Các guard này giải thích phần lớn câu hỏi kiểu “nhận diện đúng mà không đổ”. Khi UI ghi `TEST OFF`, `UART OFF`, `outside ROI`, `waiting empty tray`, `low confidence`, `many objects`, hoặc `ACK pending`, tức là AI đã thấy vật nhưng pipeline cố tình không gửi lệnh để tránh đổ sai.
 
+### 5.1. State machine của một lượt đổ
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Detecting: camera frame mới
+    Detecting --> Reviewing: có detection hợp lệ
+    Reviewing --> Blocked: guard fail
+    Reviewing --> ReadyToDispatch: guard pass
+    Blocked --> Detecting: frame tiếp theo
+    ReadyToDispatch --> Dispatching: gửi UART + phát loa
+    Dispatching --> AckPending: chờ firmware
+    AckPending --> Settling: ACK
+    AckPending --> Error: NACK hoặc timeout
+    Settling --> WaitingEmptyTray: servo về HOME
+    WaitingEmptyTray --> Idle: khay trống / re-arm
+    Error --> Idle: reset trạng thái lượt
+```
+
+Một lượt chỉ được xem là xong khi có ACK/timeout và khay được re-arm. Đây là lý do hệ thống không nên nhận lượt thứ hai ngay lập tức sau khi vừa đổ: servo, khay và camera cần thời gian ổn định để tránh đổ nhầm vật cũ hoặc bóng/rung.
+
+### 5.2. Quy trình vận hành thực tế
+
+1. Mở desktop app hoặc `Trash Sorter Pro.lnk`.
+2. Kiểm tra thanh trạng thái có `Camera`, `Model`, `UART` xanh nếu muốn chạy máy thật.
+3. Kiểm tra ROI phủ đúng vùng khay trắng, không lấy quá nhiều cạnh lồng/cạnh khay.
+4. Chọn đúng loa: `Loa phần cứng` hoặc `Loa laptop`.
+5. Bật camera, đặt một vật duy nhất vào khay.
+6. Nếu chỉ muốn kiểm tra nhận diện, để `TEST OFF`.
+7. Nếu muốn đổ thật, bật phân loại tự động/Actuation Test Mode sau khi ROI và UART sẵn sàng.
+8. Chờ app hiển thị nhãn ổn định rồi mới để hệ thống gửi lệnh.
+9. Sau khi đổ, lấy vật khỏi khay và chờ trạng thái re-arm trước vật tiếp theo.
+
+Nguyên tắc vận hành với camera mờ: đặt vật đủ xa camera, tránh sát mép khung, tránh bỏ hai vật cùng lúc, và ưu tiên chụp/duyệt mẫu thật khi class nào đó nhận diện không ổn định.
+
 ## 6. Mapping 3 thùng
 
 Runtime vẫn nhận diện nhiều class chi tiết, nhưng phần cứng chỉ cần 3 nhóm vận hành:

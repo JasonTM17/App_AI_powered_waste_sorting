@@ -213,7 +213,7 @@ def test_fragmented_vertical_battery_merges_two_aligned_boxes():
     assert merged[0].xyxy == (180, 30, 238, 480)
 
 
-def test_fragmented_same_label_keeps_far_same_label_objects_separate():
+def test_fragmented_same_label_merges_aligned_far_fragments():
     parts = [
         Detection(42, "Pen", 0.72, (20, 90, 160, 128)),
         Detection(42, "Pen", 0.84, (360, 92, 510, 130)),
@@ -221,7 +221,10 @@ def test_fragmented_same_label_keeps_far_same_label_objects_separate():
 
     filtered = merge_fragmented_same_label_detections(parts, foreground_object_count=2)
 
-    assert filtered == parts
+    assert len(filtered) == 1
+    assert filtered[0].cls_name == "Pen"
+    assert filtered[0].conf == 0.84
+    assert filtered[0].xyxy == (20, 90, 510, 130)
 
 
 def test_uniform_empty_tray_rejects_full_frame_false_positive():

@@ -62,7 +62,7 @@ def test_multi_object_dispatch_allows_one_object():
     assert decision.class_names == ("Pen",)
 
 
-def test_multi_object_dispatch_blocks_same_class_pair_in_roi():
+def test_multi_object_dispatch_allows_same_class_fragments_in_roi():
     decision = evaluate_single_class_dispatch(
         [_tracked("Pen", 1), _tracked("Pen", 2)],
         in_roi=lambda _bbox: True,
@@ -70,9 +70,10 @@ def test_multi_object_dispatch_blocks_same_class_pair_in_roi():
         max_classes=1,
     )
 
-    assert decision.allowed is False
+    assert decision.allowed is True
     assert decision.class_names == ("Pen",)
-    assert decision.reason == "multiple waste types"
+    assert decision.reason == ""
+    assert decision.object_count == 2
 
 
 def test_multi_object_dispatch_blocks_multiple_classes_in_roi():
