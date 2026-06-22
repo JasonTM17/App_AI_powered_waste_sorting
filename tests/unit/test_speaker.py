@@ -158,3 +158,23 @@ def test_waste_speaker_clears_pending_audio_when_switched_to_hardware(monkeypatc
 
     assert finished.wait(2)
     assert order == ["first"]
+
+
+def test_waste_speaker_stops_active_laptop_process_when_switched_to_hardware():
+    class _FakeProcess:
+        def __init__(self):
+            self.terminated = False
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+    speaker = WasteSpeaker(enabled=True, cooldown_seconds=0.0)
+    process = _FakeProcess()
+    speaker._active_process = process
+
+    speaker.configure(enabled=False, cooldown_seconds=0.0, voice_gender="female")
+
+    assert process.terminated is True

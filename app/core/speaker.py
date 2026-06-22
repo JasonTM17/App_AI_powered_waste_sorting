@@ -23,6 +23,10 @@ from app.core.waste_categories import category_for_command
 from app.utils.logging import logger
 
 
+class _PlaybackCancelledError(Exception):
+    """Raised internally when laptop audio is stopped by a mode switch."""
+
+
 class Speaker(Protocol):
     def speak(
         self,
@@ -73,9 +77,11 @@ class WasteSpeaker:
         self._lock = threading.Lock()
         self._last_spoken_at: dict[str, float] = {}
         self._completion_beeps: set[str] = set()
-        self._audio_queue: deque[tuple[str, str, Path | None]] = deque()
+        self._audio_queue: deque[tuple[str, str, Path | None, bool]] = deque()
         self._current_audio_key = ""
         self._playback_active = False
+        self._active_process: subprocess.Popen | None = None
+        self._playback_cancelled = threading.Event()
 
     def configure(
         self,
@@ -90,13 +96,24 @@ class WasteSpeaker:
             self.cooldown_seconds = cooldown_seconds
             self.voice_gender = normalize_voice_gender(voice_gender)
             if was_enabled and not enabled:
-                self._audio_queue.clear()
+                self._clear_pending_locked(stop_current=True)
                 logger.info("speaker pending laptop audio cleared because output switched to hardware")
 
-    def clear_pending(self) -> None:
+    def clear_pending(self, *, stop_current: bool = False) -> None:
         """Drop queued laptop-speaker audio that has not started playing yet."""
         with self._lock:
-            self._audio_queue.clear()
+            self._clear_pending_locked(stop_current=stop_current)
+
+    def _clear_pending_locked(self, *, stop_current: bool) -> None:
+        self._audio_queue.clear()
+        if stop_current:
+            self._playback_cancelled.set()
+            process = self._active_process
+            if process is not None and process.poll() is None:
+                try:
+                    process.terminate()
+                except Exception as exc:
+                    logger.debug("speaker active process terminate failed: {}", exc)
 
     def speak(
         self,
@@ -222,10 +239,10 @@ class WasteSpeaker:
                 return
             if clean_key == self._current_audio_key:
                 return
-            if any(queued_key == clean_key for queued_key, _, _ in self._audio_queue):
+            if any(queued_key == clean_key for queued_key, _, _, _ in self._audio_queue):
                 return
             self._last_spoken_at[clean_key] = now
-            self._audio_queue.append((clean_key, clean_text, audio_path))
+            self._audio_queue.append((clean_key, clean_text, audio_path, require_enabled))
             if not self._playback_active:
                 self._playback_active = True
                 start_worker = True
@@ -244,8 +261,11 @@ class WasteSpeaker:
                     self._current_audio_key = ""
                     self._playback_active = False
                     return
-                key, text, audio_path = self._audio_queue.popleft()
+                key, text, audio_path, require_enabled = self._audio_queue.popleft()
+                if require_enabled and not self.enabled:
+                    continue
                 self._current_audio_key = key
+                self._playback_cancelled.clear()
             try:
                 self._play_background(text, audio_path)
             finally:
@@ -258,9 +278,15 @@ class WasteSpeaker:
             try:
                 self._play_audio_file(audio_path)
                 return
+            except _PlaybackCancelledError:
+                logger.info("speaker audio playback cancelled")
+                return
             except Exception as e:
                 logger.warning("speaker mp3 failed, falling back to TTS: {}", e)
-        self._speak_background(text)
+        try:
+            self._speak_background(text)
+        except _PlaybackCancelledError:
+            logger.info("speaker text playback cancelled")
 
     def _play_completion_tone(self) -> None:
         if sys.platform != "win32":
@@ -296,7 +322,7 @@ class WasteSpeaker:
             "$player.Stop(); $player.Close()"
         )
         creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        result = subprocess.run(
+        process = subprocess.Popen(
             [
                 "powershell.exe",
                 "-NoProfile",
@@ -311,12 +337,28 @@ class WasteSpeaker:
             env=env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=10,
-            check=False,
             creationflags=creationflags,
         )
-        if result.returncode != 0:
-            raise RuntimeError(f"PowerShell MediaPlayer exited {result.returncode}")
+        with self._lock:
+            self._active_process = process
+        deadline = time.monotonic() + 10.0
+        try:
+            while process.poll() is None:
+                if self._playback_cancelled.is_set():
+                    process.terminate()
+                    raise _PlaybackCancelledError()
+                if time.monotonic() > deadline:
+                    process.kill()
+                    raise RuntimeError("PowerShell MediaPlayer timed out")
+                time.sleep(0.05)
+            if process.returncode != 0:
+                if self._playback_cancelled.is_set():
+                    raise _PlaybackCancelledError()
+                raise RuntimeError(f"PowerShell MediaPlayer exited {process.returncode}")
+        finally:
+            with self._lock:
+                if self._active_process is process:
+                    self._active_process = None
 
     def _speak_background(self, text: str) -> None:
         if sys.platform != "win32":
@@ -334,7 +376,7 @@ class WasteSpeaker:
         )
         creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
         try:
-            subprocess.run(
+            process = subprocess.Popen(
                 [
                     "powershell.exe",
                     "-NoProfile",
@@ -348,9 +390,26 @@ class WasteSpeaker:
                 env=env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                timeout=8,
-                check=False,
                 creationflags=creationflags,
             )
+            with self._lock:
+                self._active_process = process
+            deadline = time.monotonic() + 8.0
+            try:
+                while process.poll() is None:
+                    if self._playback_cancelled.is_set():
+                        process.terminate()
+                        raise _PlaybackCancelledError()
+                    if time.monotonic() > deadline:
+                        process.kill()
+                        logger.warning("speaker TTS timed out")
+                        return
+                    time.sleep(0.05)
+            finally:
+                with self._lock:
+                    if self._active_process is process:
+                        self._active_process = None
         except Exception as e:
+            if isinstance(e, _PlaybackCancelledError):
+                raise
             logger.warning("speaker failed: {}", e)
