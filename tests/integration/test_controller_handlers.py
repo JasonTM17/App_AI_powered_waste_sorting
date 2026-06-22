@@ -115,6 +115,9 @@ class _PipelineSpy:
         self.reset_count += 1
         self.reset_arm_immediately = arm_immediately
 
+    def close(self):
+        pass
+
 
 class _FakeUartWorker(QThread):
     ack_received = Signal(int, str, str, object)
@@ -175,6 +178,14 @@ class _SpeakerSpy:
         self.warning_calls = 0
         self.commands = []
         self.events = []
+        self.configure_calls = []
+        self.clear_pending_calls = []
+
+    def configure(self, *, enabled, cooldown_seconds, voice_gender="female"):
+        self.configure_calls.append((enabled, cooldown_seconds, voice_gender))
+
+    def clear_pending(self, *, stop_current=False):
+        self.clear_pending_calls.append(stop_current)
 
     def preview_warning(self):
         self.warning_calls += 1
@@ -676,6 +687,46 @@ def test_laptop_speaker_plays_proximity_alert_locally(tmp_path):
         controller.stop()
 
     assert speaker.events == [("bin_full_R", "male")]
+
+
+def test_switching_to_hardware_speaker_disables_laptop_proximity_alerts(tmp_path):
+    class _ModeUart:
+        is_connected = True
+
+        def __init__(self):
+            self.sensor_audio_modes = []
+
+        def send_sensor_audio_mode(self, enabled):
+            self.sensor_audio_modes.append(enabled)
+
+    cfg = AppConfig()
+    cfg.speaker.output_mode = "computer_speaker"
+    cfg.speaker.enabled = True
+    cfg.speaker.voice_gender = "male"
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    speaker = _SpeakerSpy()
+    uart = _ModeUart()
+    pipeline = _PipelineSpy()
+    controller._speaker = speaker
+    controller._uart = uart
+    controller._pipeline = pipeline
+
+    try:
+        selected = controller.set_speaker_output_mode("hardware")
+        controller._on_uart_proximity("R")
+    finally:
+        controller._uart = None
+        controller.stop()
+
+    assert selected == "hardware"
+    assert controller.cfg.speaker.output_mode == "hardware"
+    assert controller.cfg.speaker.enabled is False
+    assert pipeline.cfg.speaker.output_mode == "hardware"
+    assert pipeline.cfg.speaker.enabled is False
+    assert speaker.events == []
+    assert speaker.configure_calls[-1][0] is False
+    assert speaker.clear_pending_calls == [True]
+    assert uart.sensor_audio_modes and uart.sensor_audio_modes[-1] is True
 
 
 def test_laptop_startup_event_plays_selected_voice_pack(tmp_path):

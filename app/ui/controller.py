@@ -1055,6 +1055,29 @@ class AppController(QObject):
             model_changed,
         )
 
+    def set_speaker_output_mode(self, mode: str) -> str:
+        """Switch audio output and force every runtime path onto that output.
+
+        The Live page and Settings page both call this method so the visible
+        segmented button, the laptop speaker queue, the pipeline payload mode,
+        and the Arduino proximity/full-bin audio mode cannot drift apart.
+        """
+        clean_mode = "computer_speaker" if str(mode or "").strip() == "computer_speaker" else "hardware"
+        new_cfg = self.cfg.model_copy(deep=True)
+        new_cfg.speaker.output_mode = clean_mode
+        self.update_config(new_cfg)
+        if not computer_speaker_enabled(self.cfg):
+            clear_pending = getattr(self._speaker, "clear_pending", None)
+            if callable(clear_pending):
+                clear_pending(stop_current=True)
+            self._sync_sensor_audio_mode()
+        logger.info(
+            "speaker output selected mode={} laptop_enabled={}",
+            self.cfg.speaker.output_mode,
+            computer_speaker_enabled(self.cfg),
+        )
+        return self.cfg.speaker.output_mode
+
     def test_camera(self, source: str) -> None:
         from app.utils.camera_enum import has_external_camera
 

@@ -209,10 +209,8 @@ def main(*, require_admin_login: bool = True) -> int:
         )
 
     def _on_speaker_output_mode_request(mode: str) -> None:
-        new_cfg = controller.cfg.model_copy(deep=True)
-        new_cfg.speaker.output_mode = mode
-        controller.update_config(new_cfg)
-        _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
+        selected_mode = controller.set_speaker_output_mode(mode)
+        _sync_speaker_output_mode(selected_mode)
         if controller.cfg.speaker.output_mode == "computer_speaker":
             controller.test_audio_event(
                 "startup",
@@ -227,6 +225,7 @@ def main(*, require_admin_login: bool = True) -> int:
         _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
 
     window.live_page.speaker_output_mode_changed.connect(_on_speaker_output_mode_request)
+    _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
 
     def _open_web_dashboard(tab: str = "live") -> None:
         from PySide6.QtCore import QPoint, QUrl
