@@ -70,6 +70,11 @@ def encode_profile_request() -> bytes:
     return b"PROFILE\n"
 
 
+def encode_home() -> bytes:
+    """Return the servo gate to the firmware's calibrated upright position."""
+    return b"HOME\n"
+
+
 def encode_angle_test(d6_angle: int, d7_angle: int) -> bytes:
     if not 0 <= int(d6_angle) <= 180 or not 0 <= int(d7_angle) <= 180:
         raise ValueError("servo angles must be between 0 and 180")

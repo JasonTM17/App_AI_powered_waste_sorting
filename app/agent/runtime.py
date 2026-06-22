@@ -37,6 +37,7 @@ from app.core.uart_protocol import (
     UartProtocol,
     encode_angle_test,
     encode_audio_test,
+    encode_home,
     encode_home_test,
     encode_mp3_test,
     encode_ping,
@@ -139,6 +140,7 @@ class ThreadUartSender:
                 time.sleep(ARDUINO_SERIAL_RESET_SETTLE_S)
                 self._serial.write(encode_ping())
                 self._serial.write(encode_profile_request())
+                self._serial.write(encode_home())
             self.connected = True
             self.message = f"connected {self.port} ({self.protocol})"
             return True
@@ -890,6 +892,7 @@ class AgentRuntime:
             with suppress(Exception):
                 self._uart._serial.write(encode_ping())
                 self._uart._serial.write(encode_profile_request())
+                self._uart._serial.write(encode_home())
             time.sleep(0.25)
         return self.hardware_diagnostics()
 

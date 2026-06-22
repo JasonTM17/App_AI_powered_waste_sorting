@@ -66,6 +66,7 @@ class UnknownObjectFallback:
     ) -> Detection | None:
         candidate = self._from_low_conf_yolo(
             raw_detections,
+            frame_shape=frame_bgr.shape,
             roi_filter=roi_filter,
             min_raw_confidence=min_raw_confidence,
         )
@@ -111,11 +112,25 @@ class UnknownObjectFallback:
     def _from_low_conf_yolo(
         raw_detections: list[Detection],
         *,
+        frame_shape: tuple[int, ...],
         roi_filter: RoiFilter,
         min_raw_confidence: float,
     ) -> UnknownObjectCandidate | None:
+        height, width = frame_shape[:2] if len(frame_shape) >= 2 else (0, 0)
+        frame_area = float(width * height)
+
+        def is_bounded_object(detection: Detection) -> bool:
+            x1, y1, x2, y2 = detection.xyxy
+            bbox_area = max(0, x2 - x1) * max(0, y2 - y1)
+            coverage = bbox_area / frame_area if frame_area > 0 else 1.0
+            return coverage <= MAX_UNKNOWN_BBOX_COVERAGE
+
         candidates = [
-            d for d in raw_detections if d.conf >= min_raw_confidence and roi_filter(d.xyxy)
+            d
+            for d in raw_detections
+            if d.conf >= min_raw_confidence
+            and is_bounded_object(d)
+            and roi_filter(d.xyxy)
         ]
         if not candidates:
             return None

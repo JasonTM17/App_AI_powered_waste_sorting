@@ -1754,6 +1754,7 @@ class AppController(QObject):
                 iou=self.cfg.model.iou_threshold,
                 imgsz=self.cfg.model.input_size,
                 half=self.cfg.model.half_precision,
+                specialist=self.cfg.model.specialist,
             )
         except Exception as e:
             self.reload_model_result.emit(False, str(e))

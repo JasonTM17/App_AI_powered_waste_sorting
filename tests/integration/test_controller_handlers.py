@@ -296,9 +296,12 @@ class _ClosablePipelineSpy(_PipelineSpy):
 
 
 class _FakeInferenceEngine:
+    last_kwargs: dict[str, object] = {}
+
     def __init__(self, path, **_kwargs):
         self.path = path
         self.class_names = {24: "Plastic bottle"}
+        type(self).last_kwargs = dict(_kwargs)
 
 
 def test_uart_preserves_configured_port_when_temporarily_missing(tmp_path, monkeypatch):
@@ -979,6 +982,20 @@ def test_training_status_does_not_auto_load_candidate_for_live_test(
     assert pipeline.reset_count == 0
     assert controller.cfg.model.path == "models/production.pt"
     assert results == []
+
+
+def test_load_candidate_keeps_specialist_model_enabled(tmp_path, monkeypatch):
+    monkeypatch.setattr(controller_module, "InferenceEngine", _FakeInferenceEngine)
+    cfg = AppConfig()
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    pipeline = _PipelineSpy()
+    controller._pipeline = pipeline
+
+    controller.load_candidate_model_for_test(str(tmp_path / "candidate.pt"))
+
+    assert _FakeInferenceEngine.last_kwargs["specialist"] is cfg.model.specialist
+    assert pipeline.engine is controller._engine
+    assert pipeline.reset_count == 1
 
 
 def test_import_manual_phone_samples_writes_pending_review_item(tmp_path, monkeypatch):

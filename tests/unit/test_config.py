@@ -30,12 +30,12 @@ def _default_dict():
             "conf_threshold": 0.4,
             "iou_threshold": 0.45,
             "input_size": 640,
-            "half_precision": False,
+            "half_precision": True,
             "specialist": {
                 "enabled": True,
                 "path": "models/new-class-specialist.pt",
                 "class_thresholds": {
-                    "Pen": 0.45,
+                    "Pen": 0.35,
                     "Battery": 0.3,
                     "Toothbrush": 0.25,
                 },
@@ -68,8 +68,8 @@ def _default_dict():
             "require_roi_for_dispatch": True,
             "max_objects_per_dispatch": 1,
             "max_classes_per_dispatch": 1,
-            "min_dispatch_confidence": 0.55,
-            "max_dispatch_bbox_area_ratio": 0.82,
+            "min_dispatch_confidence": 0.0,
+            "max_dispatch_bbox_area_ratio": 1.0,
             "min_dispatch_sharpness": 24.0,
             "multi_class_warning_cooldown_seconds": 5.0,
             "multi_class_warning_text": MULTI_CLASS_WARNING_TEXT,
@@ -97,12 +97,14 @@ def test_app_config_parses_default_dict():
     assert c.camera.source == ""
     assert c.camera.rotation == 0
     assert c.model.conf_threshold == 0.4
+    assert c.model.half_precision is True
     assert c.model.specialist.enabled is True
-    assert c.model.specialist.class_thresholds["Pen"] == 0.45
+    assert c.model.specialist.class_thresholds["Pen"] == 0.35
     assert c.model.specialist.class_routes["Wall charger"].parent_class == "Electronics"
     assert c.model.specialist.class_routes["Wall charger"].operator_label == "Cục sạc"
     assert c.model.specialist.class_routes["Battery 9V"].hazardous is True
     assert c.model.class_thresholds["Organic"] == 0.25
+    assert c.model.class_thresholds["Plastic bag"] == 0.16
     assert c.model.class_thresholds["Plastic bottle"] == 0.30
     assert c.model.class_thresholds["Glass bottle"] == 0.45
     assert c.uart.port == ""
@@ -119,12 +121,17 @@ def test_app_config_parses_default_dict():
     assert c.dispatch_guard.require_roi_for_dispatch is True
     assert c.dispatch_guard.max_objects_per_dispatch == 1
     assert c.dispatch_guard.max_classes_per_dispatch == 1
-    assert c.dispatch_guard.min_dispatch_confidence == 0.55
-    assert c.dispatch_guard.max_dispatch_bbox_area_ratio == 0.82
+    assert c.dispatch_guard.min_dispatch_confidence == 0.0
+    assert c.dispatch_guard.max_dispatch_bbox_area_ratio == 1.0
     assert c.dispatch_guard.min_dispatch_sharpness == 24.0
     assert c.dispatch_guard.multi_class_warning_cooldown_seconds == 5.0
     assert c.dispatch_guard.multi_class_warning_text == MULTI_CLASS_WARNING_TEXT
     assert c.dispatch_guard.multi_class_warning_audio_track == 8
+    assert c.auto_review_queue.enabled is False
+    assert c.auto_review_queue.capture_low_confidence is False
+    assert c.auto_review_queue.capture_unknown is False
+    assert c.auto_review_queue.capture_multiple_objects is False
+    assert c.auto_review_queue.capture_visual_safety is False
     assert c.manual_reference_recognition.enabled is True
     assert c.manual_reference_recognition.allow_unknown_matches is True
     assert c.manual_reference_recognition.min_similarity == 0.88
@@ -174,8 +181,8 @@ def test_conf_threshold_out_of_range_rejected():
         AppConfig.model_validate(d)
 
 
-def test_default_config_requires_high_confidence_before_dispatching_pen():
-    assert AppConfig().model.class_thresholds["Pen"] == 0.85
+def test_default_config_accepts_visually_recognized_pen():
+    assert AppConfig().model.class_thresholds["Pen"] == 0.35
 
 
 def test_specialist_threshold_out_of_range_rejected():
@@ -221,14 +228,14 @@ def test_dispatch_guard_invalid_values_rejected():
 
 
 def test_default_dispatch_guard_filters_post_sort_vibration() -> None:
-    assert AppConfig().dispatch_guard.busy_settle_seconds == 2.0
-    assert AppConfig().dispatch_guard.min_sort_interval_seconds == 2.0
-    assert AppConfig().dispatch_guard.min_stable_frames == 2
-    assert AppConfig().dispatch_guard.empty_rearm_seconds == 1.0
-    assert AppConfig().dispatch_guard.empty_rearm_frames == 6
-    assert AppConfig().dispatch_guard.max_dispatch_bbox_area_ratio == 0.82
-    assert AppConfig().dispatch_guard.min_dispatch_sharpness == 24.0
-    assert AppConfig().dispatch_guard.min_dispatch_confidence == 0.55
+    assert AppConfig().dispatch_guard.busy_settle_seconds == 0.0
+    assert AppConfig().dispatch_guard.min_sort_interval_seconds == 0.0
+    assert AppConfig().dispatch_guard.min_stable_frames == 1
+    assert AppConfig().dispatch_guard.empty_rearm_seconds == 0.0
+    assert AppConfig().dispatch_guard.empty_rearm_frames == 1
+    assert AppConfig().dispatch_guard.max_dispatch_bbox_area_ratio == 1.0
+    assert AppConfig().dispatch_guard.min_dispatch_sharpness == 0.0
+    assert AppConfig().dispatch_guard.min_dispatch_confidence == 0.0
 
 
 def test_load_config_hardens_legacy_dispatch_guard_against_scale_vibration(
@@ -240,25 +247,37 @@ def test_load_config_hardens_legacy_dispatch_guard_against_scale_vibration(
     data["dispatch_guard"]["busy_settle_seconds"] = 0.35
     data["dispatch_guard"]["min_stable_frames"] = 1
     data["dispatch_guard"]["min_dispatch_confidence"] = 0.30
+    data["dispatch_guard"]["max_dispatch_bbox_area_ratio"] = 0.82
     data["dispatch_guard"]["empty_rearm_seconds"] = 0.8
     data["dispatch_guard"]["empty_rearm_frames"] = 3
     cfg_path.write_text(json.dumps(data), encoding="utf-8")
 
     cfg = load_config(cfg_path)
 
-    assert cfg.dispatch_guard.min_sort_interval_seconds == 2.0
-    assert cfg.dispatch_guard.busy_settle_seconds == 2.0
-    assert cfg.dispatch_guard.min_stable_frames == 2
-    assert cfg.dispatch_guard.min_dispatch_confidence == 0.55
-    assert cfg.dispatch_guard.empty_rearm_seconds == 1.0
-    assert cfg.dispatch_guard.empty_rearm_frames == 6
+    assert cfg.dispatch_guard.min_sort_interval_seconds == 0.0
+    assert cfg.dispatch_guard.busy_settle_seconds == 0.0
+    assert cfg.dispatch_guard.min_stable_frames == 1
+    assert cfg.dispatch_guard.min_dispatch_confidence == 0.0
+    assert cfg.dispatch_guard.max_dispatch_bbox_area_ratio == 1.0
+    assert cfg.dispatch_guard.empty_rearm_seconds == 0.0
+    assert cfg.dispatch_guard.empty_rearm_frames == 1
+    assert cfg.roi.enabled is True
+    assert (cfg.roi.x, cfg.roi.y, cfg.roi.width, cfg.roi.height) == (43, 0, 1167, 720)
     raw = json.loads(cfg_path.read_text(encoding="utf-8"))
-    assert raw["dispatch_guard"]["min_sort_interval_seconds"] == 2.0
-    assert raw["dispatch_guard"]["busy_settle_seconds"] == 2.0
-    assert raw["dispatch_guard"]["min_stable_frames"] == 2
-    assert raw["dispatch_guard"]["min_dispatch_confidence"] == 0.55
-    assert raw["dispatch_guard"]["empty_rearm_seconds"] == 1.0
-    assert raw["dispatch_guard"]["empty_rearm_frames"] == 6
+    assert raw["dispatch_guard"]["min_sort_interval_seconds"] == 0.0
+    assert raw["dispatch_guard"]["busy_settle_seconds"] == 0.0
+    assert raw["dispatch_guard"]["min_stable_frames"] == 1
+    assert raw["dispatch_guard"]["min_dispatch_confidence"] == 0.0
+    assert raw["dispatch_guard"]["max_dispatch_bbox_area_ratio"] == 1.0
+    assert raw["dispatch_guard"]["empty_rearm_seconds"] == 0.0
+    assert raw["dispatch_guard"]["empty_rearm_frames"] == 1
+    assert raw["roi"] == {
+        "enabled": True,
+        "x": 43,
+        "y": 0,
+        "width": 1167,
+        "height": 720,
+    }
 
 
 def test_manual_reference_recognition_invalid_values_rejected():
@@ -402,6 +421,7 @@ def test_load_config_repairs_stale_manual_reference_class_lists(tmp_path: Path):
     assert cfg.manual_reference_recognition.max_references_per_class == 60
     assert cfg.manual_reference_recognition.query_cache_seconds == 5.0
     assert cfg.model.class_thresholds["Organic"] == 0.25
+    assert cfg.model.class_thresholds["Plastic bag"] == 0.16
 
 
 def test_load_config_keeps_legacy_enabled_speaker_on_hardware_default(tmp_path: Path):

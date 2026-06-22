@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -43,3 +44,15 @@ def test_video_view_does_not_upscale_low_resolution_camera(qtbot):
     assert scaled is not None
     assert scaled.width() == 640
     assert scaled.height() == 480
+
+
+def test_video_view_crops_to_roi_and_translates_detections(qtbot):
+    v = VideoView()
+    qtbot.addWidget(v)
+    v.set_roi(SimpleNamespace(enabled=True, x=20, y=10, width=100, height=80))
+    v.set_frame(np.zeros((120, 160, 3), dtype=np.uint8))
+    v.set_detections([Detection(0, "paper", 0.9, (30, 20, 90, 60))])
+
+    assert (v._frame_w, v._frame_h) == (100, 80)
+    assert v._view_origin == (20, 10)
+    assert v._detections[0].xyxy == (10, 10, 70, 50)

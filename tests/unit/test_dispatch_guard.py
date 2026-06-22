@@ -296,3 +296,35 @@ def test_empty_seen_while_returning_rearms_for_the_next_object():
         now=1.1,
     )
     assert next_object.allowed is True
+
+
+def test_verified_empty_seen_while_returning_stays_latched_for_early_next_object():
+    guard = DispatchGuard(
+        min_sort_interval_seconds=0,
+        busy_settle_seconds=1,
+        min_stable_frames=2,
+        empty_rearm_seconds=60,
+        empty_rearm_frames=60,
+    )
+    guard.reset(arm_immediately=True)
+    guard.begin_dispatch(track_id=1, now=0, ack_timeout_seconds=0)
+    guard.complete_dispatch(track_id=1, now=0)
+
+    guard.observe_frame(
+        has_visible_object=True,
+        verified_empty=True,
+        roi_ready=True,
+        now=0.5,
+    )
+    guard.observe_frame(has_visible_object=True, roi_ready=True, now=0.9)
+    guard.observe_frame(has_visible_object=True, roi_ready=True, now=1.1)
+
+    assert guard.consume_rearmed() is True
+    next_object = guard.evaluate(
+        track_id=2,
+        stable_frames=2,
+        in_roi=True,
+        roi_ready=True,
+        now=1.1,
+    )
+    assert next_object.allowed is True

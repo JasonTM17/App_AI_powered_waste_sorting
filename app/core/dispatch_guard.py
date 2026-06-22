@@ -60,6 +60,7 @@ class DispatchGuard:
         self._empty_since: float | None = None
         self._empty_frames = 0
         self._pending_rearm = False
+        self._verified_empty_latched = False
         self._last_dispatch_started_at: float | None = None
         self._last_dispatch_track_id: int | None = None
         self._has_dispatched = False
@@ -68,19 +69,29 @@ class DispatchGuard:
         self.state: AutoSortState = "READY" if self._armed else "WAITING_EMPTY"
         self.last_reason = "" if self._armed else "waiting empty tray"
 
-    def observe_frame(self, *, has_visible_object: bool, roi_ready: bool, now: float) -> None:
+    def observe_frame(
+        self,
+        *,
+        has_visible_object: bool,
+        roi_ready: bool,
+        now: float,
+        verified_empty: bool = False,
+    ) -> None:
         self._expire_busy(now)
         if not roi_ready:
             self._armed = False
             self._rearmed = False
             self._empty_since = None
             self._empty_frames = 0
+            self._pending_rearm = False
+            self._verified_empty_latched = False
             self.state = "WAITING_EMPTY"
             self.last_reason = "ROI OFF"
             return
         if self._is_busy(now):
             self._observe_empty_during_busy(
                 has_visible_object=has_visible_object,
+                verified_empty=verified_empty,
                 now=now,
             )
             self.state = "SORTING" if self._busy_track_id is not None else "RETURNING"
@@ -90,6 +101,16 @@ class DispatchGuard:
             self._pending_rearm = False
             self._armed = True
             self._rearmed = self._has_dispatched
+            self._verified_empty_latched = False
+        if verified_empty:
+            was_armed = self._armed
+            self._armed = True
+            self._rearmed = self._has_dispatched and not was_armed
+            self._empty_since = now
+            self._empty_frames = max(self._empty_frames, 1)
+            self.state = "READY"
+            self.last_reason = ""
+            return
         if self._armed and not has_visible_object:
             self.state = "READY"
             self.last_reason = ""
@@ -148,6 +169,7 @@ class DispatchGuard:
         self._empty_since = None
         self._empty_frames = 0
         self._pending_rearm = False
+        self._verified_empty_latched = False
         self._last_dispatch_started_at = now
         self._last_dispatch_track_id = int(track_id)
         self._busy_track_id = int(track_id)
@@ -162,6 +184,8 @@ class DispatchGuard:
             return
         self._busy_track_id = None
         self._busy_until = now + self.busy_settle_seconds
+        if self.empty_rearm_seconds <= 0.0 and self.empty_rearm_frames <= 1:
+            self._pending_rearm = True
         self.state = "RETURNING" if self.busy_settle_seconds > 0 else "WAITING_EMPTY"
         self.last_reason = "sort busy" if self.busy_settle_seconds > 0 else "waiting empty tray"
         self._expire_busy(now)
@@ -190,11 +214,24 @@ class DispatchGuard:
             self.state = "WAITING_EMPTY"
             self.last_reason = "waiting empty tray"
 
-    def _observe_empty_during_busy(self, *, has_visible_object: bool, now: float) -> None:
+    def _observe_empty_during_busy(
+        self,
+        *,
+        has_visible_object: bool,
+        verified_empty: bool,
+        now: float,
+    ) -> None:
+        if verified_empty:
+            self._empty_since = now
+            self._empty_frames = max(self._empty_frames, 1)
+            self._pending_rearm = True
+            self._verified_empty_latched = True
+            return
         if has_visible_object:
             self._empty_since = None
             self._empty_frames = 0
-            self._pending_rearm = False
+            if not self._verified_empty_latched:
+                self._pending_rearm = False
             return
         if self._empty_since is None:
             self._empty_since = now

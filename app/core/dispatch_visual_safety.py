@@ -57,7 +57,7 @@ def evaluate_dispatch_visual_safety(
     height, width = frame_bgr.shape[:2]
     x1, y1, x2, y2 = _clamp_box(xyxy, width, height)
     area_ratio = float((x2 - x1) * (y2 - y1)) / float(width * height)
-    if max_bbox_area_ratio > 0 and area_ratio > max_bbox_area_ratio:
+    if 0 < max_bbox_area_ratio < 1.0 and area_ratio > max_bbox_area_ratio:
         return DispatchVisualSafetyDecision(
             False,
             "object framing invalid",

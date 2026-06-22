@@ -1,5 +1,6 @@
 import numpy as np
 
+from app.core.events import Detection
 from app.core.unknown_object_fallback import UnknownObjectFallback
 
 
@@ -65,3 +66,22 @@ def test_transparent_edge_fallback_detects_crumpled_clear_plastic():
     assert detected.source == "unknown_fallback:transparent_edges"
     assert detected.xyxy[0] < 160 < detected.xyxy[2]
     assert detected.xyxy[1] < 126 < detected.xyxy[3]
+
+
+def test_low_conf_yolo_fallback_rejects_box_covering_the_tray():
+    frame = np.full((240, 320, 3), 235, dtype=np.uint8)
+    tray_sized_guess = Detection(0, "noise", 0.13, (2, 2, 318, 238))
+    fallback = UnknownObjectFallback()
+
+    detected = fallback.detect(
+        frame,
+        [tray_sized_guess],
+        class_name="Unknown object",
+        roi_filter=lambda _xyxy: True,
+        min_raw_confidence=0.05,
+        min_area_ratio=0.003,
+        stable_frames=1,
+        warmup_frames=6,
+    )
+
+    assert detected is None

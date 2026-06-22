@@ -3,6 +3,7 @@ import pytest
 from app.core.uart_protocol import (
     encode_angle_test,
     encode_audio_test,
+    encode_home,
     encode_home_test,
     encode_mp3_test,
     encode_profile_request,
@@ -79,6 +80,10 @@ def test_parse_pong():
 
 def test_encode_profile_request():
     assert encode_profile_request() == b"PROFILE\n"
+
+
+def test_encode_home():
+    assert encode_home() == b"HOME\n"
 
 
 def test_encode_angle_test():

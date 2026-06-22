@@ -518,12 +518,17 @@ def evaluate_single_class_dispatch(
     """Allow dispatch only when the ROI contains one sortable object."""
     visible = [item for item in tracked if in_roi(item.detection.xyxy)]
     if max_objects > 0 and len(visible) > max_objects:
-        return MultiObjectDecision(
-            allowed=False,
-            class_names=tuple(sorted({item.detection.cls_name for item in visible})),
-            reason="multiple waste types",
-            object_count=len(visible),
-        )
+        # When all visible detections share the same class, they are likely
+        # fragments of one elongated object (pen, utensil, cable) that YOLO
+        # split into multiple bounding boxes.  Allow dispatch in that case.
+        unique_classes = {item.detection.cls_name for item in visible}
+        if len(unique_classes) > 1:
+            return MultiObjectDecision(
+                allowed=False,
+                class_names=tuple(sorted(unique_classes)),
+                reason="multiple waste types",
+                object_count=len(visible),
+            )
     if max_classes <= 0:
         return MultiObjectDecision(allowed=True, object_count=len(visible))
     class_names = sorted(

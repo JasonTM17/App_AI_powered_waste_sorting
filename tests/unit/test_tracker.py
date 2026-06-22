@@ -118,3 +118,29 @@ def test_same_object_resets_stability_when_route_changes():
 
     assert second.track_id == first.track_id
     assert second.stable_frames == 1
+
+
+def test_emitted_track_becomes_eligible_when_route_changes():
+    tr = Tracker()
+    organic = Detection(17, "Organic", 0.9, (10, 10, 100, 100))
+    pen = Detection(42, "Pen", 0.9, (12, 12, 102, 102))
+
+    first = tr.update([organic])[0]
+    tr.mark_emitted(first.track_id)
+    second = tr.update([pen])[0]
+
+    assert second.track_id == first.track_id
+    assert tr.should_emit(second.track_id) is True
+
+
+def test_emitted_track_stays_emitted_when_label_changes_within_same_route():
+    tr = Tracker()
+    pen = Detection(42, "Pen", 0.9, (10, 10, 100, 100))
+    utensil = Detection(32, "Iron utensils", 0.9, (12, 12, 102, 102))
+
+    first = tr.update([pen])[0]
+    tr.mark_emitted(first.track_id)
+    second = tr.update([utensil])[0]
+
+    assert second.track_id == first.track_id
+    assert tr.should_emit(second.track_id) is False

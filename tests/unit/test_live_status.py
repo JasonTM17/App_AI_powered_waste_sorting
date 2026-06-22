@@ -2,6 +2,7 @@ from app.core.config import MULTI_CLASS_WARNING_TEXT
 from app.ui.live_status import (
     TEST_OFF_ACK_TEXT,
     UART_OFF_ACK_TEXT,
+    WAITING_DISPATCH_ACK_TEXT,
     WAITING_EMPTY_ACK_TEXT,
     live_ack_status_text,
     multi_object_warning_text,
@@ -50,6 +51,18 @@ def test_live_ack_status_reports_uart_off_when_test_mode_on_and_idle():
             multi_class_warning_text="only one",
         )
         == UART_OFF_ACK_TEXT
+    )
+
+
+def test_live_ack_status_does_not_claim_pending_before_uart_send():
+    assert (
+        live_ack_status_text(
+            test_mode_enabled=True,
+            dispatch_status="",
+            uart_connected=True,
+            multi_class_warning_text="only one",
+        )
+        == WAITING_DISPATCH_ACK_TEXT
     )
 
 

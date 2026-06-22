@@ -12,19 +12,20 @@
     "conf_threshold": 0.4,
     "class_thresholds": {
       "Organic": 0.25,
+      "Plastic bag": 0.16,
       "Plastic bottle": 0.3,
       "Glass bottle": 0.3,
       "Milk bottle": 0.3,
-      "Pen": 0.85
+      "Pen": 0.35
     },
     "iou_threshold": 0.45,
     "input_size": 640,
-    "half_precision": false,
+    "half_precision": true,
     "specialist": {
       "enabled": true,
       "path": "models/new-class-specialist.pt",
       "class_thresholds": {
-        "Pen": 0.45,
+        "Pen": 0.35,
         "Battery": 0.3,
         "Toothbrush": 0.25
       },
@@ -532,11 +533,11 @@
     }
   ],
   "roi": {
-    "enabled": false,
-    "x": 0,
+    "enabled": true,
+    "x": 43,
     "y": 0,
-    "width": 0,
-    "height": 0
+    "width": 1167,
+    "height": 720
   },
   "capture": {
     "mode": "off",
@@ -544,12 +545,12 @@
     "output_dir": "dataset_v2"
   },
   "auto_review_queue": {
-    "enabled": true,
+    "enabled": false,
     "cooldown_seconds": 12.0,
-    "capture_low_confidence": true,
-    "capture_unknown": true,
-    "capture_multiple_objects": true,
-    "capture_visual_safety": true
+    "capture_low_confidence": false,
+    "capture_unknown": false,
+    "capture_multiple_objects": false,
+    "capture_visual_safety": false
   },
   "hazardous_waste": {
     "battery_warning_hold_seconds": 8.0,
@@ -575,16 +576,17 @@
     "warmup_frames": 6
   },
   "dispatch_guard": {
-    "min_sort_interval_seconds": 2.0,
-    "busy_settle_seconds": 2.0,
-    "min_stable_frames": 2,
-    "empty_rearm_seconds": 1.0,
-    "empty_rearm_frames": 6,
+    "min_sort_interval_seconds": 0.0,
+    "busy_settle_seconds": 0.0,
+    "min_stable_frames": 1,
+    "empty_rearm_seconds": 0.0,
+    "empty_rearm_frames": 1,
     "require_roi_for_dispatch": true,
     "max_objects_per_dispatch": 1,
     "max_classes_per_dispatch": 1,
-    "max_dispatch_bbox_area_ratio": 0.82,
-    "min_dispatch_sharpness": 24.0,
+    "min_dispatch_confidence": 0.0,
+    "max_dispatch_bbox_area_ratio": 1.0,
+    "min_dispatch_sharpness": 0.0,
     "multi_class_warning_cooldown_seconds": 5.0,
     "multi_class_warning_text": "Chỉ đặt 1 vật trong khay. Đang thấy nhiều loại/vật nên không phân loại.",
     "multi_class_warning_audio_track": 8

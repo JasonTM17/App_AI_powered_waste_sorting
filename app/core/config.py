@@ -109,7 +109,7 @@ class SpecialistModelConfig(BaseModel):
     path: str = "models/new-class-specialist.pt"
     class_thresholds: dict[str, float] = Field(
         default_factory=lambda: {
-            "Pen": 0.45,
+            "Pen": 0.35,
             "Battery": 0.30,
             "Toothbrush": 0.25,
         }
@@ -162,15 +162,16 @@ class ModelConfig(BaseModel):
     class_thresholds: dict[str, float] = Field(
         default_factory=lambda: {
             "Organic": 0.25,
+            "Plastic bag": 0.16,
             "Plastic bottle": 0.30,
             "Glass bottle": 0.45,
             "Milk bottle": 0.30,
-            "Pen": 0.85,
+            "Pen": 0.35,
         }
     )
     iou_threshold: float = Field(0.45, ge=0.0, le=1.0)
     input_size: int = 640
-    half_precision: bool = False
+    half_precision: bool = True
     specialist: SpecialistModelConfig = Field(default_factory=SpecialistModelConfig)
 
     @field_validator("class_thresholds")
@@ -218,6 +219,18 @@ class RoiConfig(BaseModel):
     height: int = 0
 
 
+def default_tray_roi_for_camera(width: int, height: int) -> RoiConfig:
+    """Return the calibrated white-tray crop scaled to the camera resolution."""
+    base_w = 960
+    return RoiConfig(
+        enabled=True,
+        x=max(0, round(32 * width / base_w)),
+        y=0,
+        width=max(1, round(875 * width / base_w)),
+        height=max(1, height),
+    )
+
+
 class CaptureConfig(BaseModel):
     mode: Literal["off", "manual", "auto_low_conf"] = "off"
     low_conf_threshold: float = Field(0.6, ge=0.0, le=1.0)
@@ -225,12 +238,12 @@ class CaptureConfig(BaseModel):
 
 
 class AutoReviewQueueConfig(BaseModel):
-    enabled: bool = True
+    enabled: bool = False
     cooldown_seconds: float = Field(12.0, ge=1.0, le=300.0)
-    capture_low_confidence: bool = True
-    capture_unknown: bool = True
-    capture_multiple_objects: bool = True
-    capture_visual_safety: bool = True
+    capture_low_confidence: bool = False
+    capture_unknown: bool = False
+    capture_multiple_objects: bool = False
+    capture_visual_safety: bool = False
 
 
 class HazardousWasteConfig(BaseModel):
@@ -268,9 +281,9 @@ class DispatchGuardConfig(BaseModel):
     require_roi_for_dispatch: bool = True
     max_objects_per_dispatch: int = Field(1, ge=1, le=5)
     max_classes_per_dispatch: int = Field(1, ge=1, le=5)
-    min_dispatch_confidence: float = Field(0.55, ge=0.0, le=1.0)
-    max_dispatch_bbox_area_ratio: float = Field(0.82, ge=0.1, le=1.0)
-    min_dispatch_sharpness: float = Field(24.0, ge=0.0, le=1000.0)
+    min_dispatch_confidence: float = Field(0.0, ge=0.0, le=1.0)
+    max_dispatch_bbox_area_ratio: float = Field(1.0, ge=0.1, le=1.0)
+    min_dispatch_sharpness: float = Field(0.0, ge=0.0, le=1000.0)
     multi_class_warning_cooldown_seconds: float = Field(5.0, ge=0.0, le=120.0)
     multi_class_warning_text: str = MULTI_CLASS_WARNING_TEXT
     multi_class_warning_audio_track: int = Field(8, ge=0, le=8)
@@ -340,17 +353,17 @@ def default_unknown_object_fallback_config() -> UnknownObjectFallbackConfig:
 
 def default_dispatch_guard_config() -> DispatchGuardConfig:
     return DispatchGuardConfig(
-        min_sort_interval_seconds=2.0,
-        busy_settle_seconds=2.0,
-        min_stable_frames=2,
-        empty_rearm_seconds=1.0,
-        empty_rearm_frames=6,
+        min_sort_interval_seconds=0.0,
+        busy_settle_seconds=0.0,
+        min_stable_frames=1,
+        empty_rearm_seconds=0.0,
+        empty_rearm_frames=1,
         require_roi_for_dispatch=True,
         max_objects_per_dispatch=1,
         max_classes_per_dispatch=1,
-        min_dispatch_confidence=0.55,
-        max_dispatch_bbox_area_ratio=0.82,
-        min_dispatch_sharpness=24.0,
+        min_dispatch_confidence=0.0,
+        max_dispatch_bbox_area_ratio=1.0,
+        min_dispatch_sharpness=0.0,
         multi_class_warning_cooldown_seconds=5.0,
         multi_class_warning_text=MULTI_CLASS_WARNING_TEXT,
         multi_class_warning_audio_track=8,
@@ -515,6 +528,17 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     if cfg.uart.protocol == "plain_group" and cfg.uart.ack_timeout_ms < 3000:
         cfg.uart.ack_timeout_ms = DEFAULT_UART_ACK_TIMEOUT_MS
         changed = True
+    if (
+        not cfg.roi.enabled
+        or cfg.roi.width <= 0
+        or cfg.roi.height <= 0
+        or cfg.roi.x < 0
+        or cfg.roi.y < 0
+        or cfg.roi.x + cfg.roi.width > cfg.camera.width
+        or cfg.roi.y + cfg.roi.height > cfg.camera.height
+    ):
+        cfg.roi = default_tray_roi_for_camera(cfg.camera.width, cfg.camera.height)
+        changed = True
     normalized_speaker = normalize_speaker_output_config(cfg)
     if normalized_speaker.speaker != cfg.speaker:
         cfg = normalized_speaker
@@ -528,26 +552,46 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     if cfg.manual_reference_recognition.max_references_per_class == 30:
         cfg.manual_reference_recognition.max_references_per_class = 60
         changed = True
-    if cfg.dispatch_guard.min_sort_interval_seconds < 2.0:
-        cfg.dispatch_guard.min_sort_interval_seconds = 2.0
+    if cfg.dispatch_guard.min_sort_interval_seconds != 0.0:
+        cfg.dispatch_guard.min_sort_interval_seconds = 0.0
         changed = True
-    if cfg.dispatch_guard.busy_settle_seconds < 2.0:
-        cfg.dispatch_guard.busy_settle_seconds = 2.0
+    if cfg.dispatch_guard.busy_settle_seconds != 0.0:
+        cfg.dispatch_guard.busy_settle_seconds = 0.0
         changed = True
-    if cfg.dispatch_guard.empty_rearm_seconds < 1.0:
-        cfg.dispatch_guard.empty_rearm_seconds = 1.0
+    if cfg.dispatch_guard.empty_rearm_seconds != 0.0:
+        cfg.dispatch_guard.empty_rearm_seconds = 0.0
         changed = True
-    if cfg.dispatch_guard.empty_rearm_frames < 6:
-        cfg.dispatch_guard.empty_rearm_frames = 6
+    if cfg.dispatch_guard.empty_rearm_frames != 1:
+        cfg.dispatch_guard.empty_rearm_frames = 1
         changed = True
-    if cfg.dispatch_guard.min_stable_frames < 2:
-        cfg.dispatch_guard.min_stable_frames = 2
+    if cfg.dispatch_guard.min_stable_frames != 1:
+        cfg.dispatch_guard.min_stable_frames = 1
         changed = True
     if cfg.auto_review_queue.cooldown_seconds < 12.0:
         cfg.auto_review_queue.cooldown_seconds = 12.0
         changed = True
-    if cfg.dispatch_guard.min_dispatch_confidence < 0.55:
-        cfg.dispatch_guard.min_dispatch_confidence = 0.55
+    if cfg.auto_review_queue.enabled:
+        cfg.auto_review_queue.enabled = False
+        changed = True
+    if cfg.auto_review_queue.capture_low_confidence:
+        cfg.auto_review_queue.capture_low_confidence = False
+        changed = True
+    if cfg.auto_review_queue.capture_unknown:
+        cfg.auto_review_queue.capture_unknown = False
+        changed = True
+    if cfg.auto_review_queue.capture_multiple_objects:
+        cfg.auto_review_queue.capture_multiple_objects = False
+        changed = True
+    if cfg.auto_review_queue.capture_visual_safety:
+        cfg.auto_review_queue.capture_visual_safety = False
+        changed = True
+    # Once a known mapped class is recognized, confidence no longer blocks the
+    # hardware command. Normalize persisted values so UI/config reflects it.
+    if cfg.dispatch_guard.min_dispatch_confidence != 0.0:
+        cfg.dispatch_guard.min_dispatch_confidence = 0.0
+        changed = True
+    if cfg.dispatch_guard.max_dispatch_bbox_area_ratio <= 0.82:
+        cfg.dispatch_guard.max_dispatch_bbox_area_ratio = 1.0
         changed = True
     if not cfg.manual_reference_recognition.allow_unknown_matches:
         cfg.manual_reference_recognition.allow_unknown_matches = True
@@ -570,14 +614,17 @@ def _repair_config(cfg: AppConfig, path: Path) -> tuple[AppConfig, bool]:
     if "Organic" not in cfg.model.class_thresholds:
         cfg.model.class_thresholds["Organic"] = 0.25
         changed = True
+    if cfg.model.class_thresholds.get("Plastic bag") != 0.16:
+        cfg.model.class_thresholds["Plastic bag"] = 0.16
+        changed = True
     if cfg.model.class_thresholds.get("Glass bottle", 1.0) < 0.45:
         cfg.model.class_thresholds["Glass bottle"] = 0.45
         changed = True
-    if cfg.model.class_thresholds.get("Pen", 0.0) < 0.85:
-        cfg.model.class_thresholds["Pen"] = 0.85
+    if cfg.model.class_thresholds.get("Pen") != 0.35:
+        cfg.model.class_thresholds["Pen"] = 0.35
         changed = True
-    if cfg.model.specialist.class_thresholds.get("Pen") == 0.15:
-        cfg.model.specialist.class_thresholds["Pen"] = 0.45
+    if cfg.model.specialist.class_thresholds.get("Pen") != 0.35:
+        cfg.model.specialist.class_thresholds["Pen"] = 0.35
         changed = True
     if cfg.three_bin_classifier.min_confidence <= 0.42:
         cfg.three_bin_classifier.min_confidence = 0.72
