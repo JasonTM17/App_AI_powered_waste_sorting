@@ -32,6 +32,18 @@ Trash Sorter Pro là một hệ sinh thái AI phân loại rác end-to-end:
 | --- | --- |
 | ![Desktop Training](docs/assets/screenshots/desktop-training.png) | ![Desktop Settings](docs/assets/screenshots/desktop-settings.png) |
 
+## Video demo sản phẩm
+
+[![Xem video demo Trash Sorter Pro](docs/assets/demo/product-prototype.jpg)](docs/assets/demo/product-demo-overview.mp4)
+
+Nhấn vào ảnh để xem video vận hành tổng thể. Các góc quay bổ sung:
+
+- [Toàn cảnh mô hình và camera](docs/assets/demo/hardware-front-view.mp4)
+- [Cận cảnh thùng Hữu cơ](docs/assets/demo/organic-bin-demo.mp4)
+- [Cận cảnh thùng Vô cơ và mạch điều khiển](docs/assets/demo/inorganic-bin-demo.mp4)
+
+Video được quay trực tiếp trên nguyên mẫu phần cứng thật; không phải video mô phỏng.
+
 ## Ảnh minh hoạ Web dashboard
 
 | User Dashboard | EcoPet AI |

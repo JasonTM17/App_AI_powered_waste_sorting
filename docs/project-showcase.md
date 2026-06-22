@@ -35,6 +35,20 @@ Desktop app là bề mặt vận hành trực tiếp tại máy phân loại. M�
 Admin bật/tắt camera, chọn chế độ chỉ nhận diện hoặc tự động phân loại, xem
 camera stream, kết quả hiện tại, trạng thái UART/model/FPS và cấu hình loa.
 
+### Video nguyên mẫu phần cứng
+
+[![Trash Sorter Pro hardware prototype](assets/demo/product-prototype.jpg)](assets/demo/product-demo-overview.mp4)
+
+| Video | Nội dung | Thời lượng |
+| --- | --- | ---: |
+| [Demo vận hành tổng thể](assets/demo/product-demo-overview.mp4) | Đặt vật lên khay, cơ cấu quay và ba thùng phân loại | 17 giây |
+| [Toàn cảnh mô hình](assets/demo/hardware-front-view.mp4) | Camera, khay, servo, mạch điều khiển và bố trí ba thùng | 4 giây |
+| [Thùng Hữu cơ](assets/demo/organic-bin-demo.mp4) | Góc cận cảnh thùng và cảm biến mức đầy | 2 giây |
+| [Thùng Vô cơ](assets/demo/inorganic-bin-demo.mp4) | Góc cận cảnh thùng, cảm biến và mạch điều khiển | 1 giây |
+
+Các tệp media là bản quay trực tiếp từ nguyên mẫu sản phẩm và được lưu cùng tài liệu để
+README/portfolio không phụ thuộc liên kết ngoài.
+
 ### Web dashboard
 
 | User Dashboard | EcoPet AI |
