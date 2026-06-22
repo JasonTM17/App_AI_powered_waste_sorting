@@ -210,6 +210,7 @@ def test_load_config_promotes_known_weak_primary_model_when_balanced_exists(
 
     monkeypatch.setattr("app.core.config.resource_path", lambda value: tmp_path / Path(value))
     monkeypatch.setattr("app.core.config.resolve_data_path", lambda value: tmp_path / Path(value))
+    monkeypatch.chdir(tmp_path)
 
     cfg = load_config(cfg_path)
 
@@ -615,14 +616,23 @@ def test_merge_missing_mappings_keeps_user_edits():
     assert merged.mappings[1].class_name == "Plastic"
 
 
-def test_load_config_recovers_missing_candidate_to_bundled_primary(tmp_path: Path):
+def test_load_config_recovers_missing_candidate_to_bundled_primary(
+    tmp_path: Path, monkeypatch
+):
     cfg_path = tmp_path / "config.json"
     data = _default_dict()
     data["model"]["path"] = str(tmp_path / "deleted-candidate.pt")
     cfg_path.write_text(json.dumps(data), encoding="utf-8")
+    bundled_primary = tmp_path / "models" / "best.pt"
+    bundled_primary.parent.mkdir(parents=True)
+    bundled_primary.write_bytes(b"model")
+
+    monkeypatch.setattr("app.core.config.resource_path", lambda value: tmp_path / Path(value))
+    monkeypatch.setattr("app.core.config.resolve_data_path", lambda value: tmp_path / Path(value))
+    monkeypatch.chdir(tmp_path)
 
     cfg = load_config(cfg_path)
 
-    assert cfg.model.path == "models/real-camera-balanced-20260619-candidate.pt"
+    assert cfg.model.path == "models/best.pt"
     saved = json.loads(cfg_path.read_text(encoding="utf-8"))
-    assert saved["model"]["path"] == "models/real-camera-balanced-20260619-candidate.pt"
+    assert saved["model"]["path"] == "models/best.pt"
