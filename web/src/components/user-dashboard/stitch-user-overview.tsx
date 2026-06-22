@@ -64,7 +64,7 @@ function DailyWasteBars({ analytics }: { analytics: UserAnalytics | null }) {
             );
           })
         ) : (
-          <div className="chart-empty">Đang tải biểu đồ rác theo ngày...</div>
+          <div className="chart-empty">Chưa có lịch sử phân loại trong khoảng thời gian này.</div>
         )}
       </div>
     </section>

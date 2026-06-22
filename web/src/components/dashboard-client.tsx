@@ -1,5 +1,6 @@
 "use client";
 
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
   Activity,
   AlertTriangle,
@@ -143,6 +144,7 @@ import { HardwareProfilePanel } from "@/components/operations/hardware-profile-p
 import { MappingPanel } from "@/components/operations/mapping-panel";
 import { SettingsPanel } from "@/components/settings/settings-panel";
 import { streamCloudChat } from "@/lib/cloud-chat-stream";
+import { supabaseRealtimeClient } from "@/lib/supabase-realtime";
 
 type TabId =
   | "live"
@@ -217,6 +219,7 @@ type DemoHardwareTargetResponse = {
 
 const DATASET_LIMIT = 60;
 const USE_CLOUD_HARDWARE_BRIDGE = shouldUseCloudHardwareBridge();
+const USE_CLOUD_USER_API = process.env.NODE_ENV === "production" || USE_CLOUD_HARDWARE_BRIDGE;
 
 const BIN_LABELS: Record<string, string> = {
   O: "Hữu cơ",
@@ -716,7 +719,7 @@ export function DashboardClient() {
     dashboardAbortRef.current = controller;
     setBusy(true);
     try {
-      if (USE_CLOUD_HARDWARE_BRIDGE) {
+      if (USE_CLOUD_USER_API) {
         const summary = await cloudFetch<UserDashboardSummary>(
           `/api/user/dashboard-summary?range_days=${userRangeDays}`,
           { signal: controller.signal, timeoutMs: 45_000 },
@@ -801,7 +804,7 @@ export function DashboardClient() {
         }),
         timeoutMs: 90_000
       };
-      const data = USE_CLOUD_HARDWARE_BRIDGE
+      const data = USE_CLOUD_USER_API
         ? await cloudFetch<UserAdvisorResponse>("/api/user/advisor", advisorInit, agentToken)
         : await fetchAgent<UserAdvisorResponse>("/api/user/advisor", advisorInit);
       setUserAdvisor(data);
@@ -1814,6 +1817,26 @@ export function DashboardClient() {
     if (auth?.role !== "user" || auth.password_default || !agentToken || !refreshableUserViews.includes(userView)) {
       return;
     }
+    const supabase = supabaseRealtimeClient();
+    let realtimeChannel: RealtimeChannel | null = null;
+    if (supabase) {
+      let refreshQueued = false;
+      const queueRefresh = () => {
+        if (refreshQueued || document.visibilityState === "hidden") return;
+        refreshQueued = true;
+        window.setTimeout(() => {
+          refreshQueued = false;
+          void refreshUserDashboard();
+          void refreshUserOperations({ background: true });
+        }, 150);
+      };
+      realtimeChannel = supabase
+        .channel(`user-realtime-${auth.username || "session"}`)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "realtime_pulse" }, queueRefresh)
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") queueRefresh();
+        });
+    }
     let cancelled = false;
     let eventRequestInFlight = false;
     userOperationsEventCursorRef.current = 0;
@@ -1845,6 +1868,7 @@ export function DashboardClient() {
     return () => {
       cancelled = true;
       window.clearInterval(eventTimer);
+      if (supabase && realtimeChannel) void supabase.removeChannel(realtimeChannel);
     };
   }, [agentToken, auth?.role, auth?.password_default, userView]);
 
@@ -1852,6 +1876,25 @@ export function DashboardClient() {
     const refreshableAdminTabs: TabId[] = ["bin-map", "alerts", "devices", "reports"];
     if (auth?.role !== "admin" || auth.password_default || !agentToken || !refreshableAdminTabs.includes(active)) {
       return;
+    }
+    const supabase = supabaseRealtimeClient();
+    let realtimeChannel: RealtimeChannel | null = null;
+    if (supabase) {
+      let refreshQueued = false;
+      const queueRefresh = () => {
+        if (refreshQueued || document.visibilityState === "hidden") return;
+        refreshQueued = true;
+        window.setTimeout(() => {
+          refreshQueued = false;
+          void refreshAdminRealtimeOperations();
+        }, 150);
+      };
+      realtimeChannel = supabase
+        .channel(`admin-operations-realtime-${auth.username || "session"}`)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "realtime_pulse" }, queueRefresh)
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") queueRefresh();
+        });
     }
     let cancelled = false;
     let eventRequestInFlight = false;
@@ -1884,6 +1927,7 @@ export function DashboardClient() {
     return () => {
       cancelled = true;
       window.clearInterval(eventTimer);
+      if (supabase && realtimeChannel) void supabase.removeChannel(realtimeChannel);
     };
   }, [active, agentToken, auth?.role, auth?.password_default]);
 

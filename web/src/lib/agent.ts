@@ -1124,7 +1124,7 @@ export function getAdminConnectionCardPresentation(
 
   return {
     eyebrow: "Local Agent",
-    endpoint: AGENT_URL,
+    endpoint: "Máy phân loại cục bộ",
     statusText: localAgentError ? "Agent offline" : "Hệ thống đang chạy",
     offline: Boolean(localAgentError)
   };

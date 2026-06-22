@@ -696,9 +696,17 @@ button {
   border: 1px solid rgba(6, 78, 59, 0.2);
   border-left: 4px solid var(--green);
   border-radius: 8px;
+  color: #0f241d;
   display: flex;
   justify-content: space-between;
   padding: 12px;
+}
+
+.detection-card strong,
+.detection-card > span {
+  color: #0b1f18;
+  font-weight: 800;
+  text-shadow: none;
 }
 
 .detection-card div {
@@ -708,11 +716,13 @@ button {
 }
 
 .detection-card small {
-  color: var(--muted);
+  color: #25634f;
   display: block;
   font-size: 12px;
+  font-weight: 700;
   line-height: 16px;
   overflow-wrap: anywhere;
+  text-shadow: 0 1px 1px rgba(255, 255, 255, 0.42);
 }
 
 .hardware-grid {
@@ -5470,6 +5480,29 @@ td {
 .user-account-header .account-avatar.generated-avatar {
   border-radius: 14px;
   font-size: 17px;
+}
+
+.user-account-header .avatar-upload-button {
+  align-items: center;
+  background: #eef7ea;
+  border: 1px solid #9fc796;
+  color: #173d20;
+  display: inline-flex;
+  font-weight: 750;
+  justify-content: center;
+  min-height: 44px;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.user-account-header .avatar-upload-button:hover {
+  background: #dff0d8;
+  border-color: #5d9853;
+  color: #0d2f16;
+}
+
+.user-account-header .avatar-upload-button:focus-within {
+  outline: 3px solid rgba(45, 90, 39, 0.22);
+  outline-offset: 2px;
 }
 
 .user-account-grid {

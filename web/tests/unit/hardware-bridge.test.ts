@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { shouldUseCloudHardwareBridge } from "@/lib/agent";
+import { getAdminConnectionCardPresentation, shouldUseCloudHardwareBridge } from "@/lib/agent";
 import { isAllowedHardwareBridgeRoute } from "@/lib/server/hardware-bridge";
 
 describe("hardware bridge history allowlist", () => {
@@ -27,6 +27,13 @@ describe("hardware bridge history allowlist", () => {
     expect(isAllowedHardwareBridgeRoute("/api/devices/refresh", "POST")).toBe(true);
     expect(isAllowedHardwareBridgeRoute("/api/devices/refresh", "GET")).toBe(false);
     expect(isAllowedHardwareBridgeRoute("/api/devices/refresh", "DELETE")).toBe(false);
+  });
+
+  it("does not expose the local agent URL in the Admin sidebar card", () => {
+    const card = getAdminConnectionCardPresentation(false, "idle", "");
+
+    expect(card.endpoint).toBe("Máy phân loại cục bộ");
+    expect(card.endpoint).not.toContain("http");
   });
 
   it("allows Admin history reads, images and label reviews", () => {

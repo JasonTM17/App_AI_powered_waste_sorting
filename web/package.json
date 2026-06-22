@@ -19,6 +19,7 @@
     "test:unit:watch": "vitest --watch"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.108.2",
     "@types/pg": "^8.20.0",
     "leaflet": "^1.9.4",
     "leaflet.markercluster": "^1.5.3",
@@ -26,8 +27,8 @@
     "next": "^16.1.6",
     "pg": "^8.21.0",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
-    ,"sharp": "^0.34.5"
+    "react-dom": "^19.2.4",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",
