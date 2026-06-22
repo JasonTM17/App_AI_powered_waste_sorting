@@ -60,6 +60,7 @@ Video được quay trực tiếp trên nguyên mẫu phần cứng thật; khô
 
 ## Tài liệu chi tiết
 
+- [Tài liệu kỹ thuật tiếng Việt: kiến trúc, pipeline AI, UART, loa, training và sơ đồ graph](docs/technical-architecture-vi.md)
 - [Project showcase, kiến trúc và GitHub About](docs/project-showcase.md)
 - [Hướng dẫn chạy web app](docs/huong-dan-chay-web-app.md)
 - [Supabase/cloud readiness](docs/supabase-full-cloud-readiness.md)
