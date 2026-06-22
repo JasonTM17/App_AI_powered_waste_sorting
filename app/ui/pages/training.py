@@ -242,6 +242,7 @@ class TrainingPage(QWidget):
         self._catalog_path = dataset_db_path()
         self._learn_now_status: dict[str, object] = {}
         self._training_status: dict[str, object] = {}
+        self._training_launch_pending = False
         self._actuation_training_locked = False
         self._icon_cache: dict[str, tuple[int, QIcon]] = {}
         self._loaded = False
@@ -470,6 +471,7 @@ class TrainingPage(QWidget):
 
     def set_training_status(self, status: object) -> None:
         self._training_status = status if isinstance(status, dict) else {}
+        self._training_launch_pending = False
         running = bool(self._training_status.get("running"))
         if running and not self._training_timer.isActive():
             self._training_timer.start()
@@ -482,6 +484,8 @@ class TrainingPage(QWidget):
         self._update_train_panel()
 
     def set_learn_now_action_result(self, ok: bool, message: str) -> None:
+        if not ok:
+            self._training_launch_pending = False
         prefix = "OK" if ok else "Lỗi"
         self.learn_status.setText(f"{prefix}: {message}")
         self.reload()
@@ -690,10 +694,21 @@ class TrainingPage(QWidget):
         self.learn_now_refresh_requested.emit(canonical)
 
     def _request_train_profile(self, profile: str) -> None:
+        if self._training_launch_pending or bool(self._training_status.get("running")):
+            return
         _raw, canonical, cls_id = self._label_target()
         if cls_id is None:
             QMessageBox.warning(self, "Thiếu nhãn", "Nhập nhãn hợp lệ trước khi train.")
             return
+        self._training_launch_pending = True
+        self._training_status = {
+            "running": True,
+            "message": "Đang khởi động training, vui lòng chờ...",
+            "run_name": "",
+            "progress_percent": 0.0,
+            "best_model_path": "",
+        }
+        self._update_train_panel()
         self.learn_now_train_requested.emit(canonical, profile)
 
     def _request_candidate_load(self) -> None:
@@ -756,7 +771,11 @@ class TrainingPage(QWidget):
         self.candidate_path.setText(f"Candidate: {best_model or '-'}")
         has_status = bool(row)
         valid = cls_id is not None
-        can_start_training = not running and not self._actuation_training_locked
+        can_start_training = (
+            not running
+            and not self._training_launch_pending
+            and not self._actuation_training_locked
+        )
         self.btn_train_micro.setEnabled(
             valid and has_status and bool(row.get("ready_for_micro_train")) and can_start_training
         )

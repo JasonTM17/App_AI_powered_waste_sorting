@@ -209,6 +209,24 @@ def test_training_page_disables_fast_train_when_auto_sort_is_enabled(tmp_path, q
     assert "Tat phan loai tu dong" in page.learn_status.text()
 
 
+def test_training_page_coalesces_repeated_fast_train_clicks(tmp_path, qtbot):
+    page = TrainingPage(_config_for_dataset(tmp_path / "dataset"))
+    qtbot.addWidget(page)
+    _set_label(page, "Paper")
+    requests: list[tuple[str, str]] = []
+    page.learn_now_train_requested.connect(
+        lambda class_name, profile: requests.append((class_name, profile))
+    )
+
+    page._request_train_profile("micro")
+    page._request_train_profile("micro")
+
+    assert requests == [("Paper", "micro")]
+    assert page._training_launch_pending is True
+    assert page._training_status["running"] is True
+    assert page.btn_train_micro.isEnabled() is False
+
+
 def test_training_page_training_running_disables_train_and_enables_stop(tmp_path, qtbot):
     page = TrainingPage(_config_for_dataset(tmp_path / "dataset"))
     qtbot.addWidget(page)

@@ -58,6 +58,47 @@ def test_start_learn_now_training_preserves_class_names_with_spaces(tmp_path):
     assert command[class_arg_index] == "Plastic bottle"
 
 
+def test_training_process_probe_runs_without_a_console(monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    class Result:
+        stdout = ""
+
+    def fake_run(command, **kwargs):
+        calls.append({"command": command, **kwargs})
+        return Result()
+
+    monkeypatch.setattr(learn_now_training.subprocess, "run", fake_run)
+
+    assert learn_now_training.training_processes() == []
+    assert calls
+    assert "-NonInteractive" in calls[0]["command"]
+    assert calls[0]["creationflags"] == learn_now_training._no_window_creationflags()
+
+
+def test_stop_training_processes_runs_without_a_console(monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    class Result:
+        stdout = ""
+
+    def fake_run(command, **kwargs):
+        calls.append({"command": command, **kwargs})
+        return Result()
+
+    monkeypatch.setattr(
+        learn_now_training,
+        "training_processes",
+        lambda: [{"ProcessId": 4321, "CommandLine": "train_yolo.py"}],
+    )
+    monkeypatch.setattr(learn_now_training.subprocess, "run", fake_run)
+
+    assert learn_now_training.stop_training_processes() == [4321]
+    assert calls
+    assert "-NonInteractive" in calls[0]["command"]
+    assert calls[0]["creationflags"] == learn_now_training._no_window_creationflags()
+
+
 def test_build_training_status_reports_latest_candidate(tmp_path, monkeypatch):
     monkeypatch.setattr(learn_now_training, "training_processes", lambda: [])
     run = tmp_path / "runs" / "train" / "learn-now-micro-textile-stage2"

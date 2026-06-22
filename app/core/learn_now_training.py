@@ -10,6 +10,13 @@ from collections.abc import Callable
 from pathlib import Path
 
 
+def _no_window_creationflags() -> int:
+    """Keep recurring training probes from flashing a console on Windows."""
+    if os.name != "nt":
+        return 0
+    return int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
 def start_learn_now_training(
     root: Path,
     class_name: str,
@@ -32,7 +39,7 @@ def start_learn_now_training(
     else:
         command.extend(["-ClassName", class_name, "-TrainProfile", profile])
 
-    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+    creationflags = _no_window_creationflags()
     launcher = popen or subprocess.Popen
     process = launcher(
         command,
@@ -139,11 +146,12 @@ def training_processes() -> list[dict[str, object]]:
     )
     try:
         res = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", command],
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", command],
             capture_output=True,
             check=False,
             text=True,
             timeout=3,
+            creationflags=_no_window_creationflags(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return []
@@ -181,11 +189,18 @@ def stop_training_processes(pid: int | None = None) -> list[int]:
     id_list = ",".join(str(item) for item in ids)
     try:
         subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command", f"Stop-Process -Id {id_list} -Force"],
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                f"Stop-Process -Id {id_list} -Force",
+            ],
             capture_output=True,
             check=False,
             text=True,
             timeout=5,
+            creationflags=_no_window_creationflags(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return []
