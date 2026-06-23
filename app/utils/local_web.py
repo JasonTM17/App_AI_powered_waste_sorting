@@ -10,7 +10,6 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.utils.logging import logger
 from app.utils.paths import auth_db_path
@@ -95,14 +94,6 @@ def ensure_local_web_stack() -> LocalWebResult:
         return LocalWebResult(ok=False, message="Web chưa sẵn sàng ở cổng 3000.")
 
     return LocalWebResult(ok=True, message="Web dashboard đã sẵn sàng. Vui lòng đăng nhập.", url=LOCAL_WEB_URL)
-
-
-def dashboard_url_for_tab(url: str, tab: str) -> str:
-    """Return a dashboard URL with the requested tab while preserving other query params."""
-    parts = urlsplit(url)
-    query = dict(parse_qsl(parts.query, keep_blank_values=True))
-    query["tab"] = tab
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
 def _should_open_local_web() -> bool:
