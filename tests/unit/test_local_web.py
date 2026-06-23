@@ -79,20 +79,6 @@ def test_desktop_launcher_allows_custom_production_web_url_when_explicitly_reque
     assert started == []
 
 
-def test_dashboard_url_for_tab_preserves_production_path():
-    assert (
-        local_web.dashboard_url_for_tab(local_web.PRODUCTION_WEB_URL, "live")
-        == "https://trash-sorter-v2.vercel.app/admin?tab=live"
-    )
-
-
-def test_dashboard_url_for_tab_preserves_custom_query_params():
-    assert (
-        local_web.dashboard_url_for_tab("https://example.com/admin?mode=cloud&tab=live", "data")
-        == "https://example.com/admin?mode=cloud&tab=data"
-    )
-
-
 def test_desktop_launcher_injects_dev_auth_defaults_for_unconfigured_local_launch(
     tmp_path, monkeypatch
 ):

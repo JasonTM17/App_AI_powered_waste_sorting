@@ -228,14 +228,11 @@ def main(*, require_admin_login: bool = True) -> int:
     _sync_speaker_output_mode(controller.cfg.speaker.output_mode)
 
     def _open_web_dashboard(tab: str = "live") -> None:
-        import webbrowser
-
         from PySide6.QtCore import QPoint, QUrl
         from PySide6.QtGui import QDesktopServices
 
         from app.ui.web_launcher import WebLauncherThread
         from app.ui.widgets.toast import Toast
-        from app.utils.local_web import dashboard_url_for_tab
 
         t = Toast(window, "Đang bật web dashboard…", level="info", duration_ms=2500)
         tr = window.mapToGlobal(QPoint(window.width(), 0))
@@ -245,11 +242,10 @@ def main(*, require_admin_login: bool = True) -> int:
         web_launchers.append(worker)
 
         def _done(ok: bool, message: str, url: str) -> None:
-            final_url = dashboard_url_for_tab(url, tab)
             level = "ok" if ok else "warn"
             Toast(window, message, level=level, duration_ms=5000).show_at(window.mapFromGlobal(tr))
-            if ok and not QDesktopServices.openUrl(QUrl(final_url)):
-                webbrowser.open(final_url)
+            if ok:
+                QDesktopServices.openUrl(QUrl(url))
 
         worker.done.connect(_done)
         worker.finished.connect(
