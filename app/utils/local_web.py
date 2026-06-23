@@ -1,4 +1,4 @@
-"""Start and open the local web dashboard from the desktop app."""
+"""Open the production web dashboard, or the local dashboard when requested."""
 
 from __future__ import annotations
 
@@ -97,9 +97,9 @@ def ensure_local_web_stack() -> LocalWebResult:
 
 
 def _should_open_local_web() -> bool:
-    """Desktop opens local hardware dashboard unless cloud is explicitly requested."""
+    """Desktop opens production by default; set env to opt into the local dashboard."""
     value = os.getenv(DESKTOP_WEB_LOCAL_ENV, "").strip().lower()
-    return value not in {"0", "false", "no", "off", "cloud", "production", "vercel"}
+    return value in {"1", "true", "yes", "on", "local", "localhost"}
 
 
 def apply_local_auth_environment(*, allow_dev_defaults: bool = False) -> dict[str, str]:

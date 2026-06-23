@@ -254,7 +254,7 @@ runtime model; dataset local, database local, `.env.local`, training runs và
 candidate checkpoint được loại khỏi Git có chủ đích. Lần chạy đầu có thể mất vài
 phút vì cần cài Python CUDA packages và dependency web.
 
-Trong desktop có nút `Mở Web`; bấm nút này app sẽ tự bật agent + web local nếu chưa chạy, rồi mở màn đăng nhập web dashboard. Sau khi đăng nhập, Admin vào dashboard vận hành, User vào dashboard báo cáo.
+Trong desktop có nút `Mở Web`; bấm nút này app sẽ mở web production tại `https://trash-sorter-v2.vercel.app/admin?tab=live`. Nếu cần mở dashboard local cho phần cứng/camera, đặt `TRASH_SORTER_DESKTOP_WEB_LOCAL=1` trước khi mở desktop app; khi đó app sẽ tự bật agent + web local nếu chưa chạy.
 
 Mặc định:
 
