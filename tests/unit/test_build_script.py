@@ -13,6 +13,8 @@ def test_datas_returns_list(tmp_path, monkeypatch):
     for entry in out:
         assert sep in entry
     assert any(str(ROOT / "assets" / "audio") in entry for entry in out)
+    assert any("cv2" in entry and "config.py" in entry for entry in out)
+    assert any("cv2" in entry and "config-3.py" in entry for entry in out)
     icon_args = build_exe._icon_arg()
     assert icon_args[:1] == ["--icon"]
     assert icon_args[1].endswith("app.ico")

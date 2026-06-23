@@ -6,12 +6,28 @@ import sys
 from pathlib import Path
 
 import PyInstaller.__main__
+from PyInstaller.utils.hooks import collect_data_files
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 PYINSTALLER_BUILD = BUILD / "pyinstaller"
 APP_NAME = "TrashSorterPro"
+
+
+def _data_arg(src: Path, dst: str) -> str:
+    sep = ";" if sys.platform == "win32" else ":"
+    return f"{src}{sep}{dst}"
+
+
+def _opencv_config_datas() -> list[str]:
+    """Bundle OpenCV loader config files required by cv2.__init__ in frozen builds."""
+    out: list[str] = []
+    for src, dst in collect_data_files("cv2", include_py_files=True):
+        path = Path(src)
+        if path.name in {"config.py", "config-3.py"}:
+            out.append(_data_arg(path, dst))
+    return out
 
 
 def _datas() -> list[str]:
@@ -21,15 +37,15 @@ def _datas() -> list[str]:
         (ROOT / "config.example.json", "."),
     ]
     out: list[str] = []
-    sep = ";" if sys.platform == "win32" else ":"
     for src, dst in items:
         if not src.exists():
             print(f"warn: data path missing, skip: {src}")
             continue
-        out.append(f"{src}{sep}{dst}")
+        out.append(_data_arg(src, dst))
     models = ROOT / "models"
     if any(models.glob("*.pt")):
-        out.append(f"{models}{sep}models")
+        out.append(_data_arg(models, "models"))
+    out.extend(_opencv_config_datas())
     return out
 
 
