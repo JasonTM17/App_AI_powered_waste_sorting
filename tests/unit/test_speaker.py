@@ -1,8 +1,13 @@
+import base64
+import subprocess
 import threading
 import time
+from pathlib import Path
+
+import pytest
 
 import app.core.speaker as speaker_module
-from app.core.speaker import WasteSpeaker
+from app.core.speaker import AudioPlaybackResult, WasteSpeaker
 from app.core.voice_pack import AUDIO_EVENT_LABELS
 from app.core.waste_categories import category_for_command
 
@@ -178,3 +183,104 @@ def test_waste_speaker_stops_active_laptop_process_when_switched_to_hardware():
     speaker.configure(enabled=False, cooldown_seconds=0.0, voice_gender="female")
 
     assert process.terminated is True
+
+
+def test_play_event_for_test_reports_missing_audio(monkeypatch):
+    monkeypatch.setattr(speaker_module, "audio_event_path", lambda _event, _gender: None)
+    speaker = WasteSpeaker(enabled=False)
+
+    result = speaker.play_event_for_test("startup", voice_gender="female")
+
+    assert result == AudioPlaybackResult(False, "Missing laptop audio file for startup.")
+
+
+def test_windows_media_player_uses_encoded_command_and_waits_for_events(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+    audio_path = tmp_path / "voice.mp3"
+    audio_path.write_bytes(b"mp3")
+
+    class _Process:
+        returncode = 0
+
+        def communicate(self, timeout=None):
+            return ("", "")
+
+    def fake_popen(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return _Process()
+
+    monkeypatch.setattr(speaker_module.sys, "platform", "win32")
+    monkeypatch.setattr(speaker_module.subprocess, "Popen", fake_popen)
+    speaker = WasteSpeaker(enabled=False)
+
+    speaker._play_audio_file(audio_path)
+
+    command = captured["command"]
+    assert isinstance(command, list)
+    encoded = command[command.index("-EncodedCommand") + 1]
+    script = base64.b64decode(encoded).decode("utf-16le")
+    assert "add_MediaOpened" in script
+    assert "add_MediaFailed" in script
+    assert "add_MediaEnded" in script
+    assert command[-2] == "-EncodedCommand"
+    assert captured["kwargs"]["stderr"] == subprocess.PIPE
+
+
+def test_powershell_failure_redacts_audio_path(monkeypatch):
+    secret_path = Path(r"C:\private\voice.mp3")
+
+    class _Process:
+        returncode = 7
+
+        def communicate(self, timeout=None):
+            return ("", f"cannot open {secret_path}")
+
+    monkeypatch.setattr(speaker_module.subprocess, "Popen", lambda *_args, **_kwargs: _Process())
+    speaker = WasteSpeaker(enabled=False)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        speaker._run_powershell_script(
+            "throw 'failed'",
+            env={"TRASH_SORTER_AUDIO_PATH": str(secret_path)},
+            timeout_seconds=1,
+            label="PowerShell MediaPlayer",
+        )
+
+    assert str(secret_path) not in str(exc_info.value)
+    assert "<redacted-path>" in str(exc_info.value)
+
+
+def test_powershell_timeout_kills_process(monkeypatch):
+    class _Process:
+        returncode = None
+
+        def __init__(self):
+            self.killed = False
+            self.calls = 0
+
+        def communicate(self, timeout=None):
+            self.calls += 1
+            if self.killed:
+                self.returncode = -9
+                return ("", "stopped")
+            raise subprocess.TimeoutExpired("powershell.exe", timeout)
+
+        def kill(self):
+            self.killed = True
+
+    process = _Process()
+    monotonic = iter((0.0, 2.0))
+    monkeypatch.setattr(speaker_module.subprocess, "Popen", lambda *_args, **_kwargs: process)
+    monkeypatch.setattr(speaker_module.time, "monotonic", lambda: next(monotonic))
+    speaker = WasteSpeaker(enabled=False)
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        speaker._run_powershell_script(
+            "Start-Sleep -Seconds 5",
+            env={},
+            timeout_seconds=1,
+            label="PowerShell MediaPlayer",
+        )
+
+    assert process.killed is True

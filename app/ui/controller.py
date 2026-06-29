@@ -188,6 +188,33 @@ class _UartProbe(QThread):
                 s.close()
 
 
+class _AudioTestWorker(QThread):
+    done = Signal(bool, str)
+
+    def __init__(self, speaker: WasteSpeaker, event_key: str, voice_gender: str):
+        super().__init__()
+        self._speaker = speaker
+        self._event_key = event_key
+        self._voice_gender = voice_gender
+
+    def run(self):
+        try:
+            result = self._speaker.play_event_for_test(
+                self._event_key,
+                voice_gender=self._voice_gender,
+            )
+        except Exception as exc:
+            self.done.emit(False, f"Không phát được loa laptop: {exc}")
+            return
+        if result.ok:
+            label = "giọng nam" if self._voice_gender == "male" else "giọng nữ"
+            self.done.emit(True, f"Đã phát thử {label} trên loa laptop.")
+            return
+        detail = str(result.message or "").strip()
+        suffix = f": {detail}" if detail else "."
+        self.done.emit(False, f"Không phát được loa laptop{suffix}")
+
+
 class _ModelLoadWorker(QThread):
     def __init__(
         self,
@@ -1149,6 +1176,12 @@ class AppController(QObject):
         )
         clean_gender = normalize_voice_gender(voice_gender or self.cfg.speaker.voice_gender)
         if clean_mode == "computer_speaker":
+            player = getattr(self._speaker, "play_event_for_test", None)
+            if callable(player):
+                worker = _AudioTestWorker(self._speaker, clean_event, clean_gender)
+                worker.done.connect(self.test_uart_result.emit)
+                self._track_probe(worker)
+                return
             ok = self._speaker.preview_event(clean_event, voice_gender=clean_gender)
             if ok:
                 label = "giọng nam" if clean_gender == "male" else "giọng nữ"

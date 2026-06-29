@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import base64
+import contextlib
 import os
 import subprocess
 import sys
 import threading
 import time
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -25,6 +28,13 @@ from app.utils.logging import logger
 
 class _PlaybackCancelledError(Exception):
     """Raised internally when laptop audio is stopped by a mode switch."""
+
+
+@dataclass(frozen=True)
+class AudioPlaybackResult:
+    ok: bool
+    message: str
+    audio_path: Path | None = None
 
 
 class Speaker(Protocol):
@@ -215,6 +225,33 @@ class WasteSpeaker:
         )
         return True
 
+    def play_event_for_test(
+        self,
+        event_key: str,
+        *,
+        voice_gender: str | None = None,
+    ) -> AudioPlaybackResult:
+        clean_key = str(event_key or "").strip()
+        selected_gender = (
+            normalize_voice_gender(voice_gender)
+            if voice_gender is not None
+            else self.voice_gender
+        )
+        audio_path = audio_event_path(clean_key, selected_gender)
+        if audio_path is None:
+            return AudioPlaybackResult(False, f"Missing laptop audio file for {clean_key}.")
+        typed_key = cast(AudioEventKey, clean_key)
+        label = AUDIO_EVENT_LABELS.get(typed_key, clean_key)
+        self._playback_cancelled.clear()
+        try:
+            self._play_audio_file(audio_path)
+        except _PlaybackCancelledError:
+            return AudioPlaybackResult(False, "Laptop audio playback was cancelled.", audio_path)
+        except Exception as exc:
+            logger.warning("speaker audio test failed key={}: {}", clean_key, exc)
+            return AudioPlaybackResult(False, str(exc), audio_path)
+        return AudioPlaybackResult(True, f"Played {label}.", audio_path)
+
     def _queue(
         self,
         *,
@@ -307,54 +344,125 @@ class WasteSpeaker:
         env["TRASH_SORTER_AUDIO_PATH"] = str(audio_path)
         script = (
             "$path = $env:TRASH_SORTER_AUDIO_PATH; "
+            "if (-not [System.IO.File]::Exists($path)) { throw 'Audio file not found' }; "
             "Add-Type -AssemblyName PresentationCore; "
             "$player = New-Object System.Windows.Media.MediaPlayer; "
+            "$script:mediaOpened = $false; "
+            "$script:mediaEnded = $false; "
+            "$script:mediaFailure = ''; "
+            "$onOpened = { $script:mediaOpened = $true }; "
+            "$onEnded = { $script:mediaEnded = $true }; "
+            "$onFailed = { param($sender, $args); "
+            "$script:mediaFailure = if ($args.ErrorException) "
+            "{ $args.ErrorException.Message } else { 'MediaPlayer failed' } }; "
+            "$player.add_MediaOpened($onOpened); "
+            "$player.add_MediaEnded($onEnded); "
+            "$player.add_MediaFailed($onFailed); "
+            "try { "
             "$player.Open([Uri]::new($path)); "
+            "$deadline = (Get-Date).AddSeconds(8); "
+            "while (-not $script:mediaOpened -and -not $script:mediaFailure "
+            "-and (Get-Date) -lt $deadline) "
+            "{ Start-Sleep -Milliseconds 50 }; "
+            "if ($script:mediaFailure) { throw \"MediaPlayer failed: $script:mediaFailure\" }; "
+            "if (-not $script:mediaOpened) { throw 'MediaPlayer did not open the audio file' }; "
             "$player.Volume = 1.0; "
             "$player.Play(); "
-            "$deadline = (Get-Date).AddSeconds(8); "
-            "while (-not $player.NaturalDuration.HasTimeSpan -and (Get-Date) -lt $deadline) "
-            "{ Start-Sleep -Milliseconds 50 }; "
-            "if ($player.NaturalDuration.HasTimeSpan) { "
-            "$ms = [Math]::Min($player.NaturalDuration.TimeSpan.TotalMilliseconds + 200, 8000); "
-            "Start-Sleep -Milliseconds ([int]$ms) "
-            "} else { Start-Sleep -Milliseconds 2500 }; "
-            "$player.Stop(); $player.Close()"
+            "while (-not $script:mediaEnded -and -not $script:mediaFailure "
+            "-and (Get-Date) -lt $deadline) { "
+            "if ($player.NaturalDuration.HasTimeSpan "
+            "-and $player.Position -ge $player.NaturalDuration.TimeSpan) { break }; "
+            "Start-Sleep -Milliseconds 50 }; "
+            "if ($script:mediaFailure) { throw \"MediaPlayer failed: $script:mediaFailure\" }; "
+            "if ((Get-Date) -ge $deadline -and -not $script:mediaEnded) "
+            "{ throw 'MediaPlayer playback timed out' }; "
+            "} finally { "
+            "$player.remove_MediaOpened($onOpened); "
+            "$player.remove_MediaEnded($onEnded); "
+            "$player.remove_MediaFailed($onFailed); "
+            "$player.Stop(); "
+            "$player.Close() "
+            "}"
         )
-        creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        process = subprocess.Popen(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-WindowStyle",
-                "Hidden",
-                "-Sta",
-                "-Command",
-                script,
-            ],
+        self._run_powershell_script(
+            script,
             env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            timeout_seconds=10.0,
+            label="PowerShell MediaPlayer",
+            sta=True,
+        )
+
+    def _run_powershell_script(
+        self,
+        script: str,
+        *,
+        env: dict[str, str],
+        timeout_seconds: float,
+        label: str,
+        sta: bool = False,
+    ) -> tuple[str, str]:
+        encoded_command = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+        creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        command = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+        ]
+        if sta:
+            command.append("-Sta")
+        command.extend(["-EncodedCommand", encoded_command])
+        process = subprocess.Popen(
+            command,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
             creationflags=creationflags,
         )
         with self._lock:
             self._active_process = process
-        deadline = time.monotonic() + 10.0
+        deadline = time.monotonic() + timeout_seconds
+        stdout = ""
+        stderr = ""
         try:
-            while process.poll() is None:
+            while True:
+                try:
+                    stdout, stderr = process.communicate(timeout=0.05)
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
                 if self._playback_cancelled.is_set():
                     process.terminate()
+                    with contextlib.suppress(Exception):
+                        stdout, stderr = process.communicate(timeout=1.0)
                     raise _PlaybackCancelledError()
                 if time.monotonic() > deadline:
                     process.kill()
-                    raise RuntimeError("PowerShell MediaPlayer timed out")
-                time.sleep(0.05)
+                    with contextlib.suppress(Exception):
+                        stdout, stderr = process.communicate(timeout=1.0)
+                    details = _format_powershell_details(
+                        stdout,
+                        stderr,
+                        sensitive_values=_sensitive_powershell_values(env),
+                    )
+                    suffix = f": {details}" if details else ""
+                    raise RuntimeError(f"{label} timed out{suffix}")
             if process.returncode != 0:
                 if self._playback_cancelled.is_set():
                     raise _PlaybackCancelledError()
-                raise RuntimeError(f"PowerShell MediaPlayer exited {process.returncode}")
+                details = _format_powershell_details(
+                    stdout,
+                    stderr,
+                    sensitive_values=_sensitive_powershell_values(env),
+                )
+                suffix = f": {details}" if details else ""
+                raise RuntimeError(f"{label} exited {process.returncode}{suffix}")
+            return stdout, stderr
         finally:
             with self._lock:
                 if self._active_process is process:
@@ -374,42 +482,35 @@ class WasteSpeaker:
             "$speaker.Rate = 0; "
             "$speaker.Speak($text)"
         )
-        creationflags = int(getattr(subprocess, "CREATE_NO_WINDOW", 0))
         try:
-            process = subprocess.Popen(
-                [
-                    "powershell.exe",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-WindowStyle",
-                    "Hidden",
-                    "-Command",
-                    script,
-                ],
+            self._run_powershell_script(
+                script,
                 env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=creationflags,
+                timeout_seconds=8.0,
+                label="PowerShell SpeechSynthesizer",
             )
-            with self._lock:
-                self._active_process = process
-            deadline = time.monotonic() + 8.0
-            try:
-                while process.poll() is None:
-                    if self._playback_cancelled.is_set():
-                        process.terminate()
-                        raise _PlaybackCancelledError()
-                    if time.monotonic() > deadline:
-                        process.kill()
-                        logger.warning("speaker TTS timed out")
-                        return
-                    time.sleep(0.05)
-            finally:
-                with self._lock:
-                    if self._active_process is process:
-                        self._active_process = None
         except Exception as e:
             if isinstance(e, _PlaybackCancelledError):
                 raise
             logger.warning("speaker failed: {}", e)
+
+
+def _sensitive_powershell_values(env: dict[str, str]) -> tuple[str, ...]:
+    return tuple(
+        value
+        for key, value in env.items()
+        if key.startswith("TRASH_SORTER_") and key.endswith("_PATH") and value
+    )
+
+
+def _format_powershell_details(
+    stdout: str,
+    stderr: str,
+    *,
+    sensitive_values: tuple[str, ...] = (),
+) -> str:
+    chunks = [str(stderr or "").strip(), str(stdout or "").strip()]
+    details = " | ".join(chunk for chunk in chunks if chunk)
+    for value in sensitive_values:
+        details = details.replace(value, "<redacted-path>")
+    return details[:600]

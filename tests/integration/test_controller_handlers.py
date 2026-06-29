@@ -13,6 +13,7 @@ from PySide6.QtCore import QCoreApplication, QThread, Signal
 import app.ui.controller as controller_module
 from app.core.config import AppConfig, ClassMapping
 from app.core.dataset_queue import is_trainable_meta, save_reviewed_camera_annotation
+from app.core.speaker import AudioPlaybackResult
 from app.ui.controller import AppController
 from app.utils import serial_enum
 
@@ -296,7 +297,7 @@ class _ClosablePipelineSpy(_PipelineSpy):
 
 
 class _FakeInferenceEngine:
-    last_kwargs: dict[str, object] = {}
+    last_kwargs: ClassVar[dict[str, object]] = {}
 
     def __init__(self, path, **_kwargs):
         self.path = path
@@ -753,6 +754,30 @@ def test_laptop_startup_event_plays_selected_voice_pack(tmp_path):
 
     assert speaker.events == [("startup", "male")]
     assert results and results[0][0] is True
+
+
+def test_laptop_audio_test_worker_reports_real_playback_result(tmp_path):
+    class _BlockingSpeaker(_SpeakerSpy):
+        def play_event_for_test(self, event_key, *, voice_gender=None):
+            self.events.append((event_key, voice_gender))
+            return AudioPlaybackResult(False, "MediaPlayer failed")
+
+    cfg = AppConfig()
+    cfg.speaker.output_mode = "computer_speaker"
+    controller = AppController(cfg, tmp_path / "cfg.json", tmp_path / "h.db")
+    speaker = _BlockingSpeaker()
+    controller._speaker = speaker
+    results = []
+    controller.test_uart_result.connect(lambda ok, msg: results.append((ok, msg)))
+
+    try:
+        controller.test_audio_event("startup", "computer_speaker", "female")
+        _wait(lambda: bool(results))
+    finally:
+        controller.stop()
+
+    assert speaker.events == [("startup", "female")]
+    assert results == [(False, "Không phát được loa laptop: MediaPlayer failed")]
 
 
 def test_hardware_audio_event_uses_audio_only_uart_command(tmp_path):
