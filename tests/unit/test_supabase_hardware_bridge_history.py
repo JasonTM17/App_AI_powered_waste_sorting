@@ -78,7 +78,16 @@ def test_demo_target_applies_fullness_only_to_latest_selected_bin(monkeypatch) -
         (sql, params) for sql, params in connection.calls if "insert into public.alerts" in sql
     )
     assert "order by selected_at desc limit 1" in target_query
-    assert bin_update == (95.0, "full", "station-a", 3, "station-a-I", "station-a-I")
+    assert bin_update == (
+        95.0,
+        "full",
+        "station-a",
+        3,
+        "station-a-I",
+        "station-a-I",
+        95.0,
+        "full",
+    )
     assert "'Thùng rác đã đầy'" in alert_sql
     assert alert_params[3] == "Cảm biến demo báo thùng 3 đã đầy 95%."
 
@@ -87,6 +96,50 @@ def test_fullness_status_thresholds() -> None:
     assert bridge.fullness_status(79.9) == "normal"
     assert bridge.fullness_status(80) == "warning"
     assert bridge.fullness_status(95) == "full"
+
+
+def test_sync_once_commits_each_domain_in_order(monkeypatch, tmp_path) -> None:
+    calls: list[str] = []
+
+    class _DomainConnection:
+        def __init__(self):
+            self.commits = 0
+
+        def execute(self, _sql, _params=()):
+            return SimpleNamespace(fetchone=lambda: None)
+
+        def commit(self):
+            self.commits += 1
+
+        def rollback(self):
+            raise AssertionError("rollback was not expected")
+
+    connection = _DomainConnection()
+    monkeypatch.setattr(
+        bridge,
+        "sync_operations",
+        lambda _conn, _path: calls.append("operations") or {1: {"fill_percent": 10}},
+    )
+    monkeypatch.setattr(
+        bridge,
+        "sync_demo_hardware_targets",
+        lambda _conn, _readings: calls.append("demo-targets"),
+    )
+    monkeypatch.setattr(
+        bridge,
+        "sync_history",
+        lambda _conn, _path, _limit: calls.append("history"),
+    )
+    monkeypatch.setattr(
+        bridge,
+        "sync_training_status",
+        lambda _conn: calls.append("training"),
+    )
+
+    bridge.sync_once(connection, tmp_path / "operations.db", tmp_path / "history.db", 20)
+
+    assert calls == ["operations", "demo-targets", "history", "training"]
+    assert connection.commits == 4
 
 
 def history_row(row_id: int, owner: str):
