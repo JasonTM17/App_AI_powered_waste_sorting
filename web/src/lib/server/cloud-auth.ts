@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 
 import { Pool, type QueryResultRow } from "pg";
 
+import { databasePoolConcurrency } from "@/lib/server/db-concurrency";
+
 export type CloudAuthRole = "admin" | "user";
 
 export type CloudAuthIdentity = {
@@ -219,7 +221,7 @@ function getPool() {
   if (!globalThis.trashSorterCloudAuthPool) {
     globalThis.trashSorterCloudAuthPool = new Pool({
       connectionString: connectionStringForPg(databaseUrl),
-      max: 3,
+      max: databasePoolConcurrency(),
       ssl: shouldUseSsl(databaseUrl) ? { rejectUnauthorized: false } : undefined
     });
   }

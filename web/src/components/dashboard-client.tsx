@@ -577,9 +577,10 @@ export function DashboardClient() {
   }
 
   async function fetchHardware<T>(path: string, init?: AgentFetchInit) {
+    const hardwareInit: AgentFetchInit = { ...init, lane: "hardware" };
     if (USE_CLOUD_HARDWARE_BRIDGE) {
       try {
-        const result = await cloudFetch<T>(hardwareBridgePath(path), init, agentToken);
+        const result = await cloudFetch<T>(hardwareBridgePath(path), hardwareInit, agentToken);
         setHardwareBridgeState("online");
         return result;
       } catch (error) {
@@ -587,7 +588,7 @@ export function DashboardClient() {
         throw error;
       }
     }
-    return fetchAgent<T>(path, init);
+    return fetchAgent<T>(path, hardwareInit);
   }
 
   async function refreshIdentity(nextToken = agentToken) {
@@ -901,7 +902,7 @@ export function DashboardClient() {
   }
 
   async function refreshAdminOperations() {
-    const [rolesData, devicesData, binMapData, alertsData, schedulesData, healthData] = await Promise.all([
+    const results = await Promise.allSettled([
       cloudFetch<RoleCatalogResponse>("/api/admin/roles", undefined, agentToken),
       cloudFetch<OperationDevicesResponse>("/api/admin/devices", undefined, agentToken),
       cloudFetch<BinMapResponse>("/api/admin/bin-map", { timeoutMs: 45_000 }, agentToken),
@@ -909,13 +910,22 @@ export function DashboardClient() {
       cloudFetch<CollectionSchedulesResponse>("/api/admin/collection-schedules", { timeoutMs: 45_000 }, agentToken),
       cloudFetch<OperationsHealthResponse>("/api/admin/operations/health", { timeoutMs: 45_000 }, agentToken)
     ]);
-    setRoleCatalog(rolesData);
-    setOperationDevices(devicesData);
-    setAdminBinMap(binMapData);
-    setAdminAlerts(alertsData);
-    showNewBinFullnessPopup(alertsData, "admin");
-    setAdminSchedules(schedulesData);
-    setOperationsHealth(healthData);
+    const [roles, devices, binMap, alerts, schedules, health] = results;
+    if (roles.status === "fulfilled") setRoleCatalog(roles.value);
+    if (devices.status === "fulfilled") setOperationDevices(devices.value);
+    if (binMap.status === "fulfilled") setAdminBinMap(binMap.value);
+    if (alerts.status === "fulfilled") {
+      setAdminAlerts(alerts.value);
+      showNewBinFullnessPopup(alerts.value, "admin");
+    }
+    if (schedules.status === "fulfilled") setAdminSchedules(schedules.value);
+    if (health.status === "fulfilled") setOperationsHealth(health.value);
+    if (results.every((result) => result.status === "rejected")) {
+      const failure = results.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected"
+      );
+      throw failure?.reason ?? new Error("Không tải được dữ liệu vận hành Admin");
+    }
   }
 
   async function refreshAdminRealtimeOperations() {
@@ -924,15 +934,18 @@ export function DashboardClient() {
     }
     adminOperationsRefreshInFlightRef.current = true;
     try {
-      const [binMapData, alertsData, schedulesData] = await Promise.all([
+      const results = await Promise.allSettled([
         cloudFetch<BinMapResponse>("/api/admin/bin-map", { timeoutMs: 45_000 }, agentToken),
         cloudFetch<AlertsResponse>("/api/admin/alerts?include_resolved=false", { timeoutMs: 45_000 }, agentToken),
         cloudFetch<CollectionSchedulesResponse>("/api/admin/collection-schedules", { timeoutMs: 45_000 }, agentToken)
       ]);
-      setAdminBinMap(binMapData);
-      setAdminAlerts(alertsData);
-      showNewBinFullnessPopup(alertsData, "admin");
-      setAdminSchedules(schedulesData);
+      const [binMap, alerts, schedules] = results;
+      if (binMap.status === "fulfilled") setAdminBinMap(binMap.value);
+      if (alerts.status === "fulfilled") {
+        setAdminAlerts(alerts.value);
+        showNewBinFullnessPopup(alerts.value, "admin");
+      }
+      if (schedules.status === "fulfilled") setAdminSchedules(schedules.value);
     } catch {
       // The full Admin refresh remains available from the map button if a
       // transient realtime request fails.
@@ -952,15 +965,24 @@ export function DashboardClient() {
       setBusy(true);
     }
     try {
-      const [binMapData, alertsData, schedulesData] = await Promise.all([
+      const results = await Promise.allSettled([
         cloudFetch<BinMapResponse>("/api/user/bin-map", { timeoutMs: 45_000 }, agentToken),
         cloudFetch<AlertsResponse>("/api/user/alerts?include_resolved=false", { timeoutMs: 45_000 }, agentToken),
         cloudFetch<CollectionSchedulesResponse>("/api/user/collection-schedule", { timeoutMs: 45_000 }, agentToken)
       ]);
-      setUserBinMap(binMapData);
-      setUserAlerts(alertsData);
-      showNewBinFullnessPopup(alertsData, "user");
-      setUserSchedules(schedulesData);
+      const [binMap, alerts, schedules] = results;
+      if (binMap.status === "fulfilled") setUserBinMap(binMap.value);
+      if (alerts.status === "fulfilled") {
+        setUserAlerts(alerts.value);
+        showNewBinFullnessPopup(alerts.value, "user");
+      }
+      if (schedules.status === "fulfilled") setUserSchedules(schedules.value);
+      if (results.every((result) => result.status === "rejected")) {
+        const failure = results.find(
+          (result): result is PromiseRejectedResult => result.status === "rejected"
+        );
+        throw failure?.reason ?? new Error("Không tải được dữ liệu vận hành User");
+      }
       setUserOperationsLastUpdatedAt(new Date().toISOString());
       setUserOperationsRefreshError("");
       setAgentError("");

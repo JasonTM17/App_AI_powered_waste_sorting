@@ -1,3 +1,9 @@
+import {
+  envConcurrency,
+  RequestScheduler,
+  RequestTimeoutError
+} from "@/lib/request-scheduler";
+
 export type DeviceState = {
   connected: boolean;
   running: boolean;
@@ -1134,18 +1140,34 @@ export const DEFAULT_AGENT_TOKEN = process.env.NEXT_PUBLIC_AGENT_TOKEN || "";
 const AGENT_FETCH_TIMEOUT_MS = 20000;
 
 export type AgentFetchInit = RequestInit & {
+  idempotent?: boolean;
+  lane?: "standard" | "hardware";
   timeoutMs?: number;
 };
 
 export class AgentApiError extends Error {
+  retryAfterMs?: number;
   status: number;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, retryAfterMs?: number) {
     super(message);
     this.name = "AgentApiError";
     this.status = status;
+    this.retryAfterMs = retryAfterMs;
   }
 }
+
+const standardRequestScheduler = new RequestScheduler(
+  envConcurrency(process.env.TRASH_SORTER_CLIENT_REQUEST_CONCURRENCY, 2)
+);
+const hardwareRequestScheduler = new RequestScheduler(
+  envConcurrency(process.env.TRASH_SORTER_HARDWARE_REQUEST_CONCURRENCY, 1)
+);
+
+type FetchFailureMessages = {
+  offline: string;
+  timeout: string;
+};
 
 export function streamUrl(streamToken = "") {
   const url = new URL(`${AGENT_URL}/api/camera/stream`);
@@ -1236,28 +1258,15 @@ export async function agentFetchBlob(
   token = DEFAULT_AGENT_TOKEN,
   init?: AgentFetchInit
 ): Promise<Blob> {
-  const { timeoutMs, signal, ...requestInit } = init ?? {};
-  const headers = new Headers(init?.headers);
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-  const controller = new AbortController();
-  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs ?? AGENT_FETCH_TIMEOUT_MS);
-  try {
-    const baseUrl = process.env.NODE_ENV === "production" && path.startsWith("/api/user/") ? CLOUD_API_URL : AGENT_URL;
-    const res = await fetch(`${baseUrl}${path}`, {
-      ...requestInit,
-      headers,
-      cache: "no-store",
-      signal: signal ?? controller.signal
-    });
-    if (!res.ok) {
-      throw new AgentApiError(`Agent request failed: ${res.status}`, res.status);
-    }
-    return await res.blob();
-  } finally {
-    globalThis.clearTimeout(timeoutId);
-  }
+  const baseUrl =
+    process.env.NODE_ENV === "production" && path.startsWith("/api/user/")
+      ? CLOUD_API_URL
+      : AGENT_URL;
+  const response = await scheduledResponse(baseUrl, path, init, token, {
+    offline: "Không kết nối được local agent.",
+    timeout: "Local agent phản hồi quá lâu."
+  });
+  return await response.blob();
 }
 
 export async function openAgentBlob(path: string, token = DEFAULT_AGENT_TOKEN) {
@@ -1310,40 +1319,12 @@ export async function agentFetch<T>(
   init?: AgentFetchInit,
   token = DEFAULT_AGENT_TOKEN
 ): Promise<T> {
-  const { timeoutMs, signal, ...requestInit } = init ?? {};
-  const headers = new Headers(init?.headers);
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-  const controller = new AbortController();
-  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs ?? AGENT_FETCH_TIMEOUT_MS);
-  let res: Response;
-  try {
-    res = await fetch(`${AGENT_URL}${path}`, {
-      ...requestInit,
-      headers,
-      cache: "no-store",
-      signal: signal ?? controller.signal
-    });
-  } catch (error) {
-    if (signal?.aborted) {
-      throw error;
-    }
-    const aborted = error instanceof DOMException && error.name === "AbortError";
-    throw new AgentApiError(
-      aborted
-        ? "Local agent phản hồi quá lâu. Kiểm tra agent hoặc thử lại sau vài giây."
-        : "Không kết nối được local agent. Hãy bật agent bằng scripts/start_local.ps1 rồi tải lại web.",
-      0
-    );
-  } finally {
-    globalThis.clearTimeout(timeoutId);
-  }
-  if (!res.ok) {
-    const detail = await agentResponseErrorDetail(res);
-    throw new AgentApiError(detail || `${res.status} ${res.statusText}`, res.status);
-  }
-  return (await res.json()) as T;
+  const response = await scheduledResponse(AGENT_URL, path, init, token, {
+    offline:
+      "Không kết nối được local agent. Hãy bật agent bằng scripts/start_local.ps1 rồi tải lại web.",
+    timeout: "Local agent phản hồi quá lâu. Kiểm tra agent hoặc thử lại sau vài giây."
+  });
+  return (await response.json()) as T;
 }
 
 export async function cloudFetch<T>(
@@ -1351,40 +1332,91 @@ export async function cloudFetch<T>(
   init?: AgentFetchInit,
   token = DEFAULT_AGENT_TOKEN
 ): Promise<T> {
-  const { timeoutMs, signal, ...requestInit } = init ?? {};
-  const headers = new Headers(init?.headers);
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-  const controller = new AbortController();
-  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs ?? AGENT_FETCH_TIMEOUT_MS);
-  let res: Response;
+  const response = await scheduledResponse(CLOUD_API_URL, path, init, token, {
+    offline: "Khong ket noi duoc Cloud API tren Vercel. Kiem tra mang hoac deployment.",
+    timeout: "Cloud API phan hoi qua lau. Thu lai sau vai giay."
+  });
+  return (await response.json()) as T;
+}
+
+async function scheduledResponse(
+  baseUrl: string,
+  path: string,
+  init: AgentFetchInit | undefined,
+  token: string,
+  messages: FetchFailureMessages
+): Promise<Response> {
+  const {
+    timeoutMs = AGENT_FETCH_TIMEOUT_MS,
+    signal,
+    lane = "standard",
+    idempotent = false,
+    ...requestInit
+  } = init ?? {};
+  const method = String(requestInit.method ?? "GET").toUpperCase();
+  const externalSignal = signal ?? undefined;
+  const retryableMethod = method === "GET" || method === "HEAD" || idempotent;
+  const scheduler = lane === "hardware" ? hardwareRequestScheduler : standardRequestScheduler;
   try {
-    res = await fetch(`${CLOUD_API_URL}${path}`, {
-      ...requestInit,
-      headers,
-      cache: "no-store",
-      signal: signal ?? controller.signal
-    });
-  } catch (error) {
-    if (signal?.aborted) {
-      throw error;
-    }
-    const aborted = error instanceof DOMException && error.name === "AbortError";
-    throw new AgentApiError(
-      aborted
-        ? "Cloud API phan hoi qua lau. Thu lai sau vai giay."
-        : "Khong ket noi duoc Cloud API tren Vercel. Kiem tra mang hoac deployment.",
-      0
+    return await scheduler.schedule<Response>(
+      async ({ signal: attemptSignal }) => {
+        const headers = new Headers(requestInit.headers);
+        if (token) headers.set("Authorization", `Bearer ${token}`);
+        let response: Response;
+        try {
+          response = await fetch(`${baseUrl}${path}`, {
+            ...requestInit,
+            headers,
+            cache: "no-store",
+            signal: attemptSignal
+          });
+        } catch (error) {
+          if (externalSignal?.aborted) throw error;
+          throw new AgentApiError(messages.offline, 0);
+        }
+        if (!response.ok) {
+          const detail = await agentResponseErrorDetail(response);
+          throw new AgentApiError(
+            detail || `${response.status} ${response.statusText}`,
+            response.status,
+            retryAfterMilliseconds(response.headers.get("retry-after"))
+          );
+        }
+        return response;
+      },
+      {
+        signal: externalSignal,
+        timeoutMs,
+        maxRetries: retryableMethod ? 3 : 0,
+        retryOn: ({ error }) => ({
+          retry: retryableMethod && isTransientRequestError(error),
+          retryAfterMs: error instanceof AgentApiError ? error.retryAfterMs : undefined
+        })
+      }
     );
-  } finally {
-    globalThis.clearTimeout(timeoutId);
+  } catch (error) {
+    if (externalSignal?.aborted) throw error;
+    if (error instanceof RequestTimeoutError) {
+      throw new AgentApiError(messages.timeout, 0);
+    }
+    throw error;
   }
-  if (!res.ok) {
-    const detail = await agentResponseErrorDetail(res);
-    throw new AgentApiError(detail || `${res.status} ${res.statusText}`, res.status);
-  }
-  return (await res.json()) as T;
+}
+
+function isTransientRequestError(error: unknown) {
+  return (
+    error instanceof RequestTimeoutError ||
+    (error instanceof AgentApiError &&
+      (error.status === 0 || [429, 502, 503, 504].includes(error.status)))
+  );
+}
+
+function retryAfterMilliseconds(value: string | null) {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
 }
 
 export async function agentResponseErrorDetail(res: Response) {

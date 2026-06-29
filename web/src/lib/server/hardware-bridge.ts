@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import {
+  envConcurrency,
+  RequestScheduler,
+  RequestTimeoutError
+} from "@/lib/request-scheduler";
 import { authenticateSession, CloudAuthConfigError, extractBearerToken } from "@/lib/server/cloud-auth";
 
 type BridgeRoute = {
@@ -43,6 +48,9 @@ const ALLOWED_DYNAMIC_ROUTES = [
 ];
 
 const DEFAULT_TIMEOUT_MS = 45_000;
+const hardwareBridgeScheduler = new RequestScheduler(
+  envConcurrency(process.env.TRASH_SORTER_HARDWARE_REQUEST_CONCURRENCY, 1)
+);
 
 export async function proxyHardwareBridge(request: NextRequest, segments: string[]) {
   try {
@@ -92,7 +100,9 @@ export async function proxyHardwareBridge(request: NextRequest, segments: string
     if (error instanceof CloudAuthConfigError) {
       return NextResponse.json({ detail: "Cloud database is not configured" }, { status: 503 });
     }
-    const aborted = error instanceof DOMException && error.name === "AbortError";
+    const aborted =
+      error instanceof RequestTimeoutError ||
+      (error instanceof DOMException && error.name === "AbortError");
     return NextResponse.json(
       { detail: aborted ? "Hardware bridge timed out" : "Hardware bridge request failed" },
       { status: 502 }
@@ -146,20 +156,36 @@ async function forwardToBridge(request: NextRequest, targetUrl: URL, bridgeSecre
   if (contentType) {
     headers.set("Content-Type", contentType);
   }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-  try {
-    const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.text();
-    return await fetch(targetUrl, {
-      method: request.method,
-      headers,
-      body,
-      cache: "no-store",
-      signal: controller.signal
-    });
-  } finally {
-    clearTimeout(timer);
-  }
+  const method = request.method.toUpperCase();
+  const body = method === "GET" || method === "HEAD" ? undefined : await request.text();
+  return hardwareBridgeScheduler.schedule(
+    ({ signal }) =>
+      fetch(targetUrl, {
+        method,
+        headers,
+        body,
+        cache: "no-store",
+        signal
+      }),
+    {
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      maxRetries: method === "GET" || method === "HEAD" ? 3 : 0,
+      retryOn: ({ error, value }) => ({
+        retry:
+          Boolean(error) ||
+          Boolean(value && [429, 502, 503, 504].includes((value as Response).status)),
+        retryAfterMs: value ? retryAfterMilliseconds((value as Response).headers.get("retry-after")) : undefined
+      })
+    }
+  );
+}
+
+function retryAfterMilliseconds(value: string | null) {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
 }
 
 function responseFromBridge(payload: string, contentType: string, status: number) {

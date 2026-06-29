@@ -1,5 +1,6 @@
 import { Pool, type QueryResultRow } from "pg";
 
+import { databasePoolConcurrency } from "@/lib/server/db-concurrency";
 import {
   authDatabaseUrl,
   capabilitiesForRole,
@@ -698,7 +699,7 @@ function pool() {
   if (!globalThis.trashSorterCloudOperationsPool) {
     globalThis.trashSorterCloudOperationsPool = new Pool({
       connectionString: stripPgSslParams(databaseUrl),
-      max: 3,
+      max: databasePoolConcurrency(),
       ssl: shouldUseSsl(databaseUrl) ? { rejectUnauthorized: false } : undefined
     });
   }
