@@ -4,6 +4,24 @@ Date: 2026-06-17
 
 Update: 2026-06-18
 
+Update: 2026-06-30
+
+## Bridge Resilience Update (2026-06-30)
+
+- The Supabase bridge runs one sync cycle at a time and commits by domain:
+  operations, demo targets, history, then training.
+- Each bridge transaction sets `lock_timeout` and `statement_timeout` from:
+  - `TRASH_SORTER_DB_LOCK_TIMEOUT_MS` default `2000`
+  - `TRASH_SORTER_DB_STATEMENT_TIMEOUT_MS` default `15000`
+- Lock-not-available, deadlock, and serialization failures retry at the domain
+  transaction boundary with bounded jittered retry. Statement timeout,
+  authentication, and schema errors fail the cycle clearly instead of retrying
+  forever.
+- Conflict upserts skip unchanged rows with `IS DISTINCT FROM` where possible,
+  so timestamps only move when business data changes.
+- A successful sync writes a heartbeat. Docker healthcheck verifies process
+  health and heartbeat freshness.
+
 ## User Cloud Dashboard Update (2026-06-18)
 
 - Production User analytics, history, device, report, experience, advisor, and

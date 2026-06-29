@@ -175,6 +175,7 @@ Video được quay trực tiếp trên nguyên mẫu phần cứng thật; khô
 - [Project showcase, kiến trúc và GitHub About](docs/project-showcase.md)
 - [Hướng dẫn chạy web app](docs/huong-dan-chay-web-app.md)
 - [Supabase/cloud readiness](docs/supabase-full-cloud-readiness.md)
+- [Docker production stack: web, agent, Supabase bridge, CPU/GPU, push, rollback](docs/docker-production-stack.md)
 - [Checklist tích hợp phần cứng](docs/hardware_integration_checklist.md)
 - [Operations map local-first](docs/operations-map-local-first.md)
 - [Release v2.1.0: cloud map and hardware bridge](docs/releases/v2.1.0.md)

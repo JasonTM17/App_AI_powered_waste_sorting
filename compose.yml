@@ -1,0 +1,118 @@
+name: trash-sorter
+
+x-runtime-environment: &runtime-environment
+  TRASH_SORTER_CLIENT_REQUEST_CONCURRENCY: ${TRASH_SORTER_CLIENT_REQUEST_CONCURRENCY:-2}
+  TRASH_SORTER_HARDWARE_REQUEST_CONCURRENCY: ${TRASH_SORTER_HARDWARE_REQUEST_CONCURRENCY:-1}
+  TRASH_SORTER_DB_QUEUE_CONCURRENCY: ${TRASH_SORTER_DB_QUEUE_CONCURRENCY:-1}
+  TRASH_SORTER_DB_LOCK_TIMEOUT_MS: ${TRASH_SORTER_DB_LOCK_TIMEOUT_MS:-2000}
+  TRASH_SORTER_DB_STATEMENT_TIMEOUT_MS: ${TRASH_SORTER_DB_STATEMENT_TIMEOUT_MS:-15000}
+
+services:
+  trash-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    environment:
+      <<: *runtime-environment
+      DATABASE_URL: ${DATABASE_URL:-}
+      TRASH_SORTER_AGENT_HOST: 0.0.0.0
+      TRASH_SORTER_AGENT_PORT: "8765"
+      TRASH_SORTER_ALLOWED_ORIGINS: ${TRASH_SORTER_ALLOWED_ORIGINS:-http://localhost:3000}
+      TRASH_SORTER_AUTH_DATABASE_URL: ${TRASH_SORTER_AUTH_DATABASE_URL:-}
+      TRASH_SORTER_AUTOSTART_CAMERA: "0"
+      TRASH_SORTER_DISABLE_UART_AUTO_SELECT: "1"
+    ports:
+      - "${TRASH_SORTER_AGENT_PORT:-8765}:8765"
+    restart: unless-stopped
+    volumes:
+      - agent-data:/data
+
+  trash-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_AGENT_URL: ${NEXT_PUBLIC_AGENT_URL:-http://localhost:8765}
+        NEXT_PUBLIC_CLOUD_API_URL: ${NEXT_PUBLIC_CLOUD_API_URL:-http://localhost:3000}
+        NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE: ${NEXT_PUBLIC_USE_CLOUD_HARDWARE_BRIDGE:-0}
+        TRASH_SORTER_CLIENT_REQUEST_CONCURRENCY: ${TRASH_SORTER_CLIENT_REQUEST_CONCURRENCY:-2}
+        TRASH_SORTER_HARDWARE_REQUEST_CONCURRENCY: ${TRASH_SORTER_HARDWARE_REQUEST_CONCURRENCY:-1}
+    depends_on:
+      trash-agent:
+        condition: service_healthy
+    environment:
+      <<: *runtime-environment
+      DATABASE_URL: ${DATABASE_URL:-}
+      POSTGRES_URL: ${POSTGRES_URL:-}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      TRASH_SORTER_AUTH_DATABASE_URL: ${TRASH_SORTER_AUTH_DATABASE_URL:-}
+      TRASH_SORTER_HARDWARE_BRIDGE_SECRET: ${TRASH_SORTER_HARDWARE_BRIDGE_SECRET:-}
+      TRASH_SORTER_HARDWARE_BRIDGE_URL: ${TRASH_SORTER_HARDWARE_BRIDGE_URL:-}
+    ports:
+      - "${TRASH_SORTER_WEB_PORT:-3000}:3000"
+    restart: unless-stopped
+
+  supabase-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    command:
+      - python
+      - scripts/supabase_hardware_bridge.py
+      - --interval
+      - "${TRASH_SORTER_BRIDGE_INTERVAL:-2}"
+      - --history-limit
+      - "${TRASH_SORTER_BRIDGE_HISTORY_LIMIT:-200}"
+      - --operations-db
+      - /source-data/operations.db
+      - --history-db
+      - /source-data/history.db
+      - --heartbeat-file
+      - /tmp/trash-sorter/bridge-heartbeat.json
+    environment:
+      <<: *runtime-environment
+      TRASH_SORTER_DEMO_HARDWARE_TARGET: ${TRASH_SORTER_DEMO_HARDWARE_TARGET:-0}
+      TRASH_SORTER_SUPABASE_DATABASE_URL: ${TRASH_SORTER_SUPABASE_DATABASE_URL:-}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - scripts/supabase_hardware_bridge.py
+        - --healthcheck
+        - --heartbeat-file
+        - /tmp/trash-sorter/bridge-heartbeat.json
+        - --max-heartbeat-age
+        - "30"
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: ${TRASH_SORTER_HOST_DATA_DIR:-./.docker-data}
+        target: /source-data
+        read_only: true
+
+  postgres-dev:
+    image: postgres:17-alpine
+    profiles: [dev-db]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-trash_sorter}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trash_sorter_dev}
+      POSTGRES_USER: ${POSTGRES_USER:-trash_sorter}
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+
+volumes:
+  agent-data:
+  postgres-dev-data:
