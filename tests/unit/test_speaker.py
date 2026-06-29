@@ -86,6 +86,39 @@ def test_waste_speaker_previews_all_audio_events(tmp_path, monkeypatch):
     assert {item[1] for item in played} == {str(fake_audio)}
 
 
+def test_waste_speaker_audio_test_reports_real_playback_success(tmp_path, monkeypatch):
+    fake_audio = tmp_path / "voice.mp3"
+    fake_audio.write_bytes(b"mp3")
+    played = []
+    monkeypatch.setattr(speaker_module, "audio_event_path", lambda _event, _gender="female": fake_audio)
+    speaker = WasteSpeaker(enabled=False, voice_gender="female")
+    monkeypatch.setattr(speaker, "_play_audio_file", played.append)
+
+    result = speaker.play_event_for_test("startup", voice_gender="male")
+
+    assert result.ok is True
+    assert result.audio_path == fake_audio
+    assert played == [fake_audio]
+
+
+def test_waste_speaker_audio_test_reports_playback_failure(tmp_path, monkeypatch):
+    fake_audio = tmp_path / "voice.mp3"
+    fake_audio.write_bytes(b"mp3")
+    monkeypatch.setattr(speaker_module, "audio_event_path", lambda _event, _gender="female": fake_audio)
+    speaker = WasteSpeaker(enabled=False)
+
+    def fail_playback(_audio_path):
+        raise RuntimeError("decoder unavailable")
+
+    monkeypatch.setattr(speaker, "_play_audio_file", fail_playback)
+
+    result = speaker.play_event_for_test("startup")
+
+    assert result.ok is False
+    assert result.audio_path == fake_audio
+    assert "decoder unavailable" in result.message
+
+
 def test_completion_beep_plays_exactly_once_per_trial(monkeypatch):
     events = []
     monkeypatch.setattr(speaker_module.threading, "Thread", _ImmediateThread)
