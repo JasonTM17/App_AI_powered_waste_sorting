@@ -6,20 +6,24 @@ This is the tracked repo plan for one combined release: fix/build the Windows de
 
 ## 1. Scope and release boundary
 
-The release has four deliverables:
+The release has five deliverables:
 
 1. Windows desktop EXE:
    - output: `dist/TrashSorterPro/TrashSorterPro.exe`;
    - includes PySide6 desktop GUI, local camera/UART/audio behavior, assets, config sample, OpenCV runtime, and runtime models as required by `scripts/build_exe.py`;
    - does not run inside Docker.
-2. Docker Hub runtime images:
-   - `docker.io/<namespace>/trash-sorter-web:<git-sha>`;
-   - `docker.io/<namespace>/trash-sorter-agent:<git-sha>`;
+2. Docker Hub desktop artifact image:
+   - `docker.io/nguyenson1710/trash-sorter-desktop-exe:<git-sha>`;
+   - contains `dist/TrashSorterPro/`, `desktop-exe.sha256`, and `desktop-release-manifest.json`;
+   - default command prints restore instructions; it does not launch the Windows GUI inside Docker.
+3. Docker Hub runtime images:
+   - `docker.io/nguyenson1710/trash-sorter-web:<git-sha>`;
+   - `docker.io/nguyenson1710/trash-sorter-agent:<git-sha>`;
    - optional `latest` tags only after SHA tags pass verification.
-3. Optional Docker Hub artifact images:
-   - `docker.io/<namespace>/trash-sorter-models:<manifest-sha>` if models need their own artifact;
-   - `docker.io/<namespace>/trash-sorter-dataset-archive:<YYYYMMDD>` only if the owner explicitly wants a large non-runtime archive on Docker Hub after privacy review.
-4. Vercel/Supabase keepalive:
+4. Optional Docker Hub artifact images:
+   - `docker.io/nguyenson1710/trash-sorter-models:<manifest-sha>` if models need their own artifact;
+   - `docker.io/nguyenson1710/trash-sorter-dataset-archive:<YYYYMMDD>` only if the owner explicitly wants a large non-runtime archive on Docker Hub after privacy review.
+5. Vercel/Supabase keepalive:
    - Vercel Cron calls a protected Next.js route;
    - the route performs one tiny Supabase/Postgres read or single-row upsert;
    - this creates real backend/database activity instead of merely pinging a static page.
@@ -74,6 +78,7 @@ Steps:
    - `Test-Path web\node_modules`.
 7. Confirm Docker Hub namespace:
    - use `docker info | Select-String Username`;
+   - target namespace is `nguyenson1710`;
    - if empty or push fails, owner must run `docker login` or create/provide the right repository namespace.
 
 Exit criteria:
@@ -128,6 +133,7 @@ Default images:
 
 | Image | Purpose | Included | Excluded |
 | --- | --- | --- | --- |
+| `trash-sorter-desktop-exe` | Windows EXE artifact | `dist/TrashSorterPro`, checksum, release manifest | `.env*`, local DB, logs, user config, caches |
 | `trash-sorter-web` | Next.js dashboard | standalone Next build, public assets | `.env*`, host `node_modules`, local caches |
 | `trash-sorter-agent` | FastAPI/YOLO runtime + bridge command | app, scripts, config sample, `best.pt`, `new-class-specialist.pt` | dataset, runs, local DB, secrets |
 | `trash-sorter-models` optional | model artifact | promoted model set + checksum manifest | app source, datasets, secrets |
@@ -136,17 +142,21 @@ Default images:
 Steps:
 
 1. Audit `.dockerignore`.
-2. Rebuild clean images:
+2. Package the desktop EXE artifact:
+   - `python -m uv run python scripts/build_exe.py`;
+   - `python -m uv run python scripts/package_desktop_artifact.py`;
+   - `docker build -f Dockerfile.desktop-artifact -t trash-sorter-desktop-exe:local .`.
+3. Rebuild clean runtime images:
    - `docker build -f Dockerfile.web -t trash-sorter-web:local .`;
    - `docker build -f Dockerfile.agent -t trash-sorter-agent:local .`.
-3. Verify model checksums inside agent:
+4. Verify model checksums inside agent:
    - `docker run --rm trash-sorter-agent:local sha256sum -c models/runtime-models.sha256`.
-4. Smoke local containers:
+5. Smoke local containers:
    - agent `/api/health`;
    - agent `/api/status` and `/api/model/classes` with temporary token;
    - web `/` on a temporary port.
-5. Decide whether optional artifact images are needed.
-6. Label images with git SHA, build date, source repo, and model manifest hash.
+6. Decide whether optional artifact images are needed.
+7. Label images with git SHA, build date, source repo, and model manifest hash.
 
 Exit criteria:
 
@@ -163,28 +173,31 @@ Push order:
 
 1. `trash-sorter-web:<git-sha>`;
 2. `trash-sorter-agent:<git-sha>`;
-3. `latest` tags after SHA tags are verified;
-4. optional artifact images after explicit approval.
+3. `trash-sorter-desktop-exe:<git-sha>`;
+4. `latest` tags after SHA tags are verified;
+5. optional artifact images after explicit approval.
 
 Steps:
 
 1. Confirm Docker Hub login/namespace/repository.
 2. Tag images:
-   - `docker tag trash-sorter-web:local <namespace>/trash-sorter-web:<git-sha>`;
-   - `docker tag trash-sorter-agent:local <namespace>/trash-sorter-agent:<git-sha>`.
+   - `docker tag trash-sorter-web:local nguyenson1710/trash-sorter-web:<git-sha>`;
+   - `docker tag trash-sorter-agent:local nguyenson1710/trash-sorter-agent:<git-sha>`;
+   - `docker tag trash-sorter-desktop-exe:local nguyenson1710/trash-sorter-desktop-exe:<git-sha>`.
 3. Push web first:
    - if `insufficient_scope`, stop and fix Docker Hub permissions.
 4. Push agent.
-5. Capture remote digests:
+5. Push desktop EXE artifact.
+6. Capture remote digests:
    - `docker buildx imagetools inspect <image>:<tag>`.
-6. Update docs:
+7. Update docs:
    - image names/tags/digests;
    - CPU/GPU compose commands;
    - environment variables;
    - model checksum verification;
    - rollback commands;
    - disk cleanup commands.
-7. Commit and push GitHub.
+8. Commit and push GitHub.
 
 Exit criteria:
 
@@ -222,7 +235,7 @@ Safer schedule recommendation:
 }
 ```
 
-Reason: Supabase Free pausing is based on low activity over a 7-day period, and Vercel Hobby cron timing can drift. Exactly weekly can be close to the edge. If the owner insists on exactly one request per week, add a stale-heartbeat warning when last success is older than 5.5 days.
+Decision: use the safer twice-weekly schedule (`0 3 * * 1,4`). Reason: Supabase Free pausing is based on low activity over a 7-day period, and Vercel Hobby cron timing can drift. Exactly weekly can be close to the edge.
 
 Route contract:
 
@@ -276,6 +289,9 @@ Verification checklist:
    - web root 200;
    - model checksum inside agent.
 3. Docker Hub:
+   - pull desktop EXE SHA tag;
+   - extract `/artifacts/TrashSorterPro`;
+   - run `sha256sum -c desktop-exe.sha256`;
    - pull web SHA tag;
    - pull agent SHA tag;
    - inspect digests;
@@ -304,11 +320,9 @@ Exit criteria:
 
 ## 4. Known blockers before implementation
 
-- Docker Hub push already failed once with `insufficient_scope`. Need confirmed Docker Hub login, namespace, and repositories.
-- Current `python` launcher reports 3.14, while the project requires `<3.13`. Need uv-managed Python 3.12 or another compatible interpreter for desktop build.
-- Exact keepalive cadence needs owner decision:
-  - exact weekly per request;
-  - or safer twice-weekly to avoid the Supabase 7-day inactivity edge.
+- Docker Hub push previously failed once with `insufficient_scope` under a different namespace. Current target namespace is `nguyenson1710`; push still requires Docker Desktop login with rights to that namespace.
+- Use uv-managed Python 3.12 because `pyproject.toml` requires `<3.13`.
+- Keepalive cadence is twice weekly to avoid the Supabase 7-day inactivity edge.
 - Manual hardware acceptance needs the Windows machine, camera, COM/UART, and laptop speaker available.
 
 ## 5. Source notes
@@ -319,6 +333,5 @@ Exit criteria:
 
 ## 6. Unresolved questions
 
-- Docker Hub namespace/repositories: use `jasontm17` or another org?
-- Keepalive cadence: exactly weekly, or safer twice-weekly?
-- Should Docker Hub hold only runtime images, or also a large non-runtime dataset/archive image?
+- None for the desktop EXE artifact image.
+- Runtime web/agent image push, keepalive implementation, and large dataset/model archive images remain separate release slices unless explicitly included in the current implementation run.

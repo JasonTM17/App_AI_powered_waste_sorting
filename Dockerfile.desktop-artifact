@@ -1,0 +1,19 @@
+FROM alpine:3.20
+
+ARG BUILD_COMMIT=unknown
+ARG BUILD_DATE=unknown
+
+LABEL org.opencontainers.image.title="Trash Sorter Pro Desktop EXE Artifact" \
+      org.opencontainers.image.description="Windows PySide6 desktop EXE bundle for Trash Sorter Pro; extract artifact, do not run GUI inside Docker." \
+      org.opencontainers.image.source="https://github.com/JasonTM17/App_AI_powered_waste_sorting" \
+      org.opencontainers.image.revision="${BUILD_COMMIT}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+
+WORKDIR /artifacts
+COPY dist/TrashSorterPro/ /artifacts/TrashSorterPro/
+
+RUN test -f /artifacts/TrashSorterPro/TrashSorterPro.exe \
+    && test -f /artifacts/TrashSorterPro/desktop-exe.sha256 \
+    && test -f /artifacts/TrashSorterPro/desktop-release-manifest.json
+
+CMD ["sh", "-c", "printf '%s\n' 'Trash Sorter Pro desktop EXE artifact' 'Extract /artifacts/TrashSorterPro from this image on Windows.' 'Verify /artifacts/TrashSorterPro/desktop-exe.sha256 before use.'"]

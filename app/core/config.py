@@ -172,7 +172,9 @@ class ModelConfig(BaseModel):
     iou_threshold: float = Field(0.45, ge=0.0, le=1.0)
     input_size: int = 640
     half_precision: bool = True
-    specialist: SpecialistModelConfig = Field(default_factory=SpecialistModelConfig)
+    specialist: SpecialistModelConfig = Field(
+        default_factory=lambda: SpecialistModelConfig.model_validate({})
+    )
 
     @field_validator("class_thresholds")
     @classmethod
@@ -420,8 +422,12 @@ class AppConfig(BaseModel):
     mappings: list[ClassMapping] = Field(default_factory=list)
     roi: RoiConfig = Field(default_factory=lambda: RoiConfig())
     capture: CaptureConfig = Field(default_factory=lambda: CaptureConfig(low_conf_threshold=0.6))
-    auto_review_queue: AutoReviewQueueConfig = Field(default_factory=AutoReviewQueueConfig)
-    hazardous_waste: HazardousWasteConfig = Field(default_factory=HazardousWasteConfig)
+    auto_review_queue: AutoReviewQueueConfig = Field(
+        default_factory=lambda: AutoReviewQueueConfig.model_validate({})
+    )
+    hazardous_waste: HazardousWasteConfig = Field(
+        default_factory=lambda: HazardousWasteConfig.model_validate({})
+    )
     speaker: SpeakerConfig = Field(
         default_factory=lambda: SpeakerConfig(
             enabled=False,

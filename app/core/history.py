@@ -23,13 +23,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
+from app.core.history_labels import infer_history_label, validate_review_label
 from app.core.waste_categories import (
     category_for_bin_index,
     category_for_class,
     category_for_command,
     category_for_known_class,
 )
-from app.core.history_labels import infer_history_label, validate_review_label
 
 metadata = MetaData()
 
@@ -165,6 +165,10 @@ class HistoryRow:
     route_label: str | None
     bin_index: int | None
     uart_command: str | None
+    display_label: str | None
+    label_status: str | None
+    label_source: str | None
+    label_confidence: float | None
 
     def __init__(self, **kw):
         for k, v in kw.items():

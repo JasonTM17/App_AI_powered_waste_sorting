@@ -239,6 +239,8 @@ def three_bin_route(command: str):
 
 def three_bin_display_name(cls_name: str) -> str:
     command = parse_three_bin_class_name(cls_name)
+    if command is None:
+        return cls_name
     return THREE_BIN_DISPLAY_NAMES.get(command, cls_name)
 
 

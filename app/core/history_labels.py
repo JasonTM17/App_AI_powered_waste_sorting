@@ -70,7 +70,7 @@ def infer_history_label(
     if command:
         category = category_for_class(clean_class)
         return HistoryLabelDecision(
-            f"Chưa xác định vật – {category.name}",
+            f"Chưa xác định vật - {category.name}",
             "needs_review" if image_available else "no_evidence",
             "three_bin_route_only",
             None,
