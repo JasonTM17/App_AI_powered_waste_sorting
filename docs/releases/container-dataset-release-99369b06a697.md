@@ -110,6 +110,6 @@ Vercel Cron is configured to call `/api/cron/keepalive` twice weekly:
 0 3 * * 1,4
 ```
 
-That means Monday and Thursday at 03:00 UTC. The route is protected by
-`CRON_SECRET` and touches configured Postgres/Supabase targets with sanitized
-output only.
+That means Monday and Thursday at 03:00 UTC. The route accepts documented Vercel
+Cron headers or manual bearer `CRON_SECRET`, then touches configured
+Postgres/Supabase targets with sanitized output only.

@@ -138,16 +138,19 @@ active whether Vercel's Root Directory is the repository root or `web/`:
 This runs on Monday and Thursday at 03:00 UTC. Vercel Hobby may execute within
 the scheduled hour. The protected route `/api/cron/keepalive`:
 
-1. requires `Authorization: Bearer ${CRON_SECRET}`;
-2. fails closed when the secret or database configuration is absent;
-3. deduplicates identical auth/Supabase database URLs;
-4. touches configured databases sequentially with bounded query timeout;
-5. performs a tiny Supabase PostgREST read when `SUPABASE_URL` and a server-side
+1. accepts real Vercel Cron calls identified by `User-Agent: vercel-cron/1.0`
+   plus the configured `x-vercel-cron-schedule`;
+2. also accepts manual verification with `Authorization: Bearer ${CRON_SECRET}`;
+3. fails closed for requests that are neither Vercel Cron nor bearer-authorized;
+4. deduplicates identical auth/Supabase database URLs;
+5. touches configured databases sequentially with bounded query timeout;
+6. performs a tiny Supabase PostgREST read when `SUPABASE_URL` and a server-side
    service key are configured;
-6. returns only sanitized target names and timestamps.
+7. returns only sanitized target names and timestamps.
 
-Vercel injects the bearer header automatically when `CRON_SECRET` is configured
-in Production. Generate a long random value in Vercel; never add it to Git.
+Manual testing can use the bearer header. Real Vercel Cron execution is accepted
+through Vercel's documented cron headers. Generate a long `CRON_SECRET` in
+Vercel for manual checks; never add it to Git.
 
 ## Publish images to Docker Hub
 

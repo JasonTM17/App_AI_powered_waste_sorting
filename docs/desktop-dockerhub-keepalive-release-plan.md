@@ -248,11 +248,13 @@ the request can arrive at any point during the 03:00 UTC hour.
 Route contract:
 
 1. Force dynamic execution.
-2. Verify `Authorization: Bearer ${CRON_SECRET}`.
-3. Reject bad auth with 401.
-4. Fail safely if `CRON_SECRET` is missing.
-5. Perform one DB operation with timeout.
-6. Return sanitized JSON:
+2. Accept real Vercel Cron calls with `User-Agent: vercel-cron/1.0` and the
+   expected `x-vercel-cron-schedule`.
+3. Keep `Authorization: Bearer ${CRON_SECRET}` for manual verification.
+4. Reject bad manual auth with 401.
+5. Fail safely for requests that are neither Vercel Cron nor bearer-authorized.
+6. Perform one DB operation with timeout.
+7. Return sanitized JSON:
 
 ```json
 {
