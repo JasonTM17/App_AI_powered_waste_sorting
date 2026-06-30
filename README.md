@@ -38,9 +38,9 @@ Docker Hub is the complete artifact registry for this project:
 - `nguyenson1710/trash-sorter-desktop-exe`
 - `nguyenson1710/trash-sorter-dataset-archive`
 
-GitHub Packages may show only four packages. That is expected: the large split
-dataset/cache archive is intentionally kept on Docker Hub only as
-`trash-sorter-dataset-archive` plus `part01` to `part10` payload images.
+GitHub Packages should show the same five project packages after the GHCR mirror
+workflow completes. The dataset package includes the index tag plus `part01` to
+`part10` payload tags; Docker Hub remains the primary source registry.
 
 ## Tổng quan kỹ thuật
 

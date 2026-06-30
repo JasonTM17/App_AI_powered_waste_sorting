@@ -200,20 +200,25 @@ section. The workflow never receives Docker Hub credentials because it reads
 the public source images and authenticates to GHCR with the repository-scoped
 `GITHUB_TOKEN`.
 
-### Why GitHub Packages shows four packages
+### GitHub Packages mirror
 
-The GitHub repository **Packages** tab is a GHCR mirror, not the source of truth
-for large release artifacts. It intentionally shows four packages:
+The GitHub repository **Packages** tab is a GHCR mirror of the Docker Hub
+release artifacts. It should show five packages:
 
 - `trash-sorter-web`
 - `trash-sorter-agent`
 - `trash-sorter-models`
 - `trash-sorter-desktop-exe`
+- `trash-sorter-dataset-archive`
 
-The fifth artifact, `trash-sorter-dataset-archive`, is intentionally published
-on Docker Hub only because it is a large split dataset/cache archive with ten
-payload part images. Seeing **4 packages** on GitHub is expected; the complete
-artifact set is under Docker Hub namespace `nguyenson1710`.
+The dataset archive package has one index image and ten payload part images:
+
+```text
+ghcr.io/jasontm17/trash-sorter-dataset-archive:<release-tag>
+ghcr.io/jasontm17/trash-sorter-dataset-archive:<release-tag>-part01
+...
+ghcr.io/jasontm17/trash-sorter-dataset-archive:<release-tag>-part10
+```
 
 Final 2026-06-30 Docker Hub sync tags were also created for commit
 `4ff451405b95` and short tag `4ff4514`. Runtime code did not change after that

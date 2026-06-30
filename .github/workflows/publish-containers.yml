@@ -27,6 +27,7 @@ jobs:
           - trash-sorter-agent
           - trash-sorter-models
           - trash-sorter-desktop-exe
+          - trash-sorter-dataset-archive
     steps:
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -53,3 +54,46 @@ jobs:
           docker buildx imagetools create
           --tag "ghcr.io/${TARGET_OWNER,,}/${IMAGE}:latest"
           "docker.io/nguyenson1710/${IMAGE}:${RELEASE_TAG}"
+
+  mirror-dataset-parts:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part:
+          - part01
+          - part02
+          - part03
+          - part04
+          - part05
+          - part06
+          - part07
+          - part08
+          - part09
+          - part10
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Mirror dataset archive part from Docker Hub
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          TARGET_OWNER: ${{ github.repository_owner }}
+          PART: ${{ matrix.part }}
+        run: >-
+          docker buildx imagetools create
+          --tag "ghcr.io/${TARGET_OWNER,,}/trash-sorter-dataset-archive:${RELEASE_TAG}-${PART}"
+          "docker.io/nguyenson1710/trash-sorter-dataset-archive:${RELEASE_TAG}-${PART}"
+      - name: Update latest dataset archive part tag
+        if: ${{ inputs.publish_latest }}
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          TARGET_OWNER: ${{ github.repository_owner }}
+          PART: ${{ matrix.part }}
+        run: >-
+          docker buildx imagetools create
+          --tag "ghcr.io/${TARGET_OWNER,,}/trash-sorter-dataset-archive:latest-${PART}"
+          "docker.io/nguyenson1710/trash-sorter-dataset-archive:${RELEASE_TAG}-${PART}"
