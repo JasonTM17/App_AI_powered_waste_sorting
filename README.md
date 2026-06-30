@@ -13,6 +13,35 @@
 [![Hardware](https://img.shields.io/badge/Hardware-USB_Camera_+_UART-F59E0B?style=for-the-badge)](#quy-tắc-camera-và-uart)
 [![Docker Hub](https://img.shields.io/badge/Docker_Hub-nguyenson1710-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://hub.docker.com/u/nguyenson1710)
 
+## Demo production login
+
+Production web: [https://trash-sorter-v2.vercel.app](https://trash-sorter-v2.vercel.app)
+
+| Field | Value |
+| --- | --- |
+| Role | `user` |
+| Username | `demo-user` |
+| Password | `TrashSorterDemo#2026!` |
+
+This is a low-privilege public demo account with seeded sample data. It cannot
+manage Admin users, devices, hardware mappings, or system-wide settings. Rotate
+this password if the account is abused. Real Admin credentials must stay private
+and must not be committed to this repository.
+
+## Container/package note
+
+Docker Hub is the complete artifact registry for this project:
+
+- `nguyenson1710/trash-sorter-web`
+- `nguyenson1710/trash-sorter-agent`
+- `nguyenson1710/trash-sorter-models`
+- `nguyenson1710/trash-sorter-desktop-exe`
+- `nguyenson1710/trash-sorter-dataset-archive`
+
+GitHub Packages may show only four packages. That is expected: the large split
+dataset/cache archive is intentionally kept on Docker Hub only as
+`trash-sorter-dataset-archive` plus `part01` to `part10` payload images.
+
 ## Tổng quan kỹ thuật
 
 Trash Sorter Pro là một hệ sinh thái AI phân loại rác end-to-end, thiết kế theo hướng
