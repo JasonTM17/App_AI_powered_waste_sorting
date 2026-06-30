@@ -220,6 +220,14 @@ ghcr.io/jasontm17/trash-sorter-dataset-archive:<release-tag>-part01
 ghcr.io/jasontm17/trash-sorter-dataset-archive:<release-tag>-part10
 ```
 
+Verification on 2026-06-30:
+
+- GitHub Actions run `28436881847` completed successfully.
+- `ghcr.io/jasontm17/trash-sorter-dataset-archive:4ff451405b95` exists.
+- `ghcr.io/jasontm17/trash-sorter-dataset-archive:4ff451405b95-part01`
+  through `part10` exist.
+- Matching `latest` and `latest-part01` through `latest-part10` tags exist.
+
 Final 2026-06-30 Docker Hub sync tags were also created for commit
 `4ff451405b95` and short tag `4ff4514`. Runtime code did not change after that
 sync except documentation-only commits, and documentation is excluded from the
