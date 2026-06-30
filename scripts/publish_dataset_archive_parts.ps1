@@ -97,7 +97,11 @@ function Publish-Part {
   New-PartArchive -Part $Part -ArchivePath $archivePath
 
   $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash.ToLowerInvariant()
-  "$hash  $archiveName" | Set-Content -LiteralPath (Join-Path $work "$archiveName.sha256") -Encoding ascii
+  [IO.File]::WriteAllText(
+    (Join-Path $work "$archiveName.sha256"),
+    "$hash  $archiveName`n",
+    [Text.UTF8Encoding]::new($false)
+  )
   $manifest = [ordered]@{
     schema_version = 1
     git_commit = $gitSha
