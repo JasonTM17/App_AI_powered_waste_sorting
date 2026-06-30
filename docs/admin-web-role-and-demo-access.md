@@ -78,6 +78,16 @@ User-facing modules include:
 
 ## Screenshots
 
+Admin screenshots:
+
+| Accounts | Roles |
+| --- | --- |
+| ![Admin accounts](assets/screenshots/web-admin-accounts.png) | ![Admin roles](assets/screenshots/web-admin-roles.png) |
+
+| Bin map |
+| --- |
+| ![Admin bin map](assets/screenshots/web-admin-bin-map.png) |
+
 Existing web screenshots:
 
 | User dashboard | Analytics |
@@ -92,10 +102,9 @@ Existing web screenshots:
 | --- |
 | ![EcoPet chat](assets/screenshots/web-ecopet-chat.png) |
 
-Admin-specific screenshots should be captured after the next production UI pass.
-The current repo already documents the Admin features through code and docs, but
-the screenshot asset folder does not yet contain a dedicated Admin accounts/roles
-screen capture.
+These Admin screenshots were captured from the local Playwright QA stack with
+the seeded `qa-admin` account. They show the production UI shell and local agent
+state without exposing real production credentials.
 
 ## Login accounts
 
@@ -126,25 +135,21 @@ They are for automated tests only and do not touch production:
 
 ### Production demo access policy
 
-Do not commit real production passwords, Supabase service-role keys, database
-URLs, or admin credentials to this repository.
+Do not commit real Admin passwords, Supabase service-role keys, or database URLs
+to this repository.
 
-For public testers, create a disposable low-privilege demo user in the production
-auth database, seed demo data for that username, and rotate the password when it
-is shared. The safe pattern is:
+The current public production demo account is intentionally low privilege:
 
 | Public field | Recommended value |
 | --- | --- |
 | Production URL | `https://trash-sorter-v2.vercel.app` |
 | Public demo role | `user` |
-| Public demo username | `demo-user` or `teacher-demo-user` |
-| Public demo password | Store outside git; rotate often. |
+| Public demo username | `demo-user` |
+| Public demo password | `TrashSorterDemo#2026!` |
 | Admin demo account | Share privately only, not in public git. |
 
-If the maintainer intentionally wants a public credential in the README, create
-a low-privilege demo User account first, confirm it cannot manage devices/users,
-then document only that disposable User account. Never publish a real Admin
-password.
+This account has seeded demo stations/history and should be rotated whenever it
+is abused or before a formal public launch. Never publish a real Admin password.
 
 ## Creating or rotating accounts
 
@@ -169,7 +174,7 @@ Seed persistent demo station/history data for active User accounts:
 
 ```powershell
 $env:TRASH_SORTER_SUPABASE_DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DATABASE"
-python -m uv run python scripts/seed_supabase_demo_data.py --apply
+python -m uv run python scripts/seed_supabase_demo_data.py --username demo-user --apply
 ```
 
 ## Supabase realtime model
@@ -202,12 +207,14 @@ Keepalive is configured in both deployment config files:
 
 The route:
 
-1. requires `Authorization: Bearer ${CRON_SECRET}`;
-2. returns `503` if `CRON_SECRET` is missing;
-3. touches the configured auth/Postgres database with `select current_timestamp`;
-4. touches Supabase PostgREST when `SUPABASE_URL` plus a server-side service key
+1. accepts real Vercel Cron requests with `User-Agent: vercel-cron/1.0` and the
+   expected `x-vercel-cron-schedule`;
+2. also accepts manual verification with `Authorization: Bearer ${CRON_SECRET}`;
+3. rejects non-cron/manual requests;
+4. touches the configured auth/Postgres database with `select current_timestamp`;
+5. touches Supabase PostgREST when `SUPABASE_URL` plus a server-side service key
    are configured;
-5. returns per-target success/failure without leaking connection strings.
+6. returns per-target success/failure without leaking connection strings.
 
 Production checklist:
 
@@ -217,12 +224,15 @@ Production checklist:
 - Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` only as server-side env
   variables if Supabase API keepalive is desired.
 - Confirm Vercel cron logs show two successful requests per week.
+- Manual check after deploy: call `/api/cron/keepalive` with bearer
+  `CRON_SECRET`; never paste the secret into logs or docs.
 
 ## Security boundaries
 
 - Never commit `.env.local`, real database URLs, Supabase service-role keys,
   CRON secrets, or real production passwords.
-- Public demo accounts should be `user`, not `admin`.
+- Public demo accounts should be `user`, not `admin`; rotate the public demo
+  password if the account is abused.
 - Admin accounts can create users, reset passwords, manage devices, map bins, and
   read all history; sharing an Admin password publicly is equivalent to sharing
   operational control.

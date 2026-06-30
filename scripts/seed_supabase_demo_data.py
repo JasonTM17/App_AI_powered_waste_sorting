@@ -40,6 +40,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="Write demo data. Default is dry-run.")
     parser.add_argument("--history-count", type=int, default=240)
+    parser.add_argument(
+        "--username",
+        action="append",
+        default=[],
+        help="Seed only this active User username. Repeat for multiple users.",
+    )
     args = parser.parse_args()
     database_url = next((os.getenv(name, "").strip() for name in DATABASE_ENV_NAMES if os.getenv(name, "").strip()), "")
     if not database_url:
@@ -47,6 +53,12 @@ def main() -> int:
 
     with psycopg.connect(database_url, autocommit=False, prepare_threshold=None) as conn:
         users = active_usernames(conn)
+        if args.username:
+            requested = {item.strip() for item in args.username if item.strip()}
+            users = [username for username in users if username in requested]
+            missing = sorted(requested - set(users))
+            if missing:
+                raise SystemExit(f"Active user account(s) not found: {', '.join(missing)}")
         print(f"Mode: {'APPLY' if args.apply else 'DRY RUN'}")
         print(f"Users: {len(users)}")
         history_count = max(180, args.history_count)
