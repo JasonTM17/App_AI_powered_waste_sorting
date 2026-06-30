@@ -18,6 +18,7 @@ export type KeepaliveTargetResult = {
 type RunKeepaliveOptions = {
   env?: KeepaliveEnvironment;
   touch?: (target: KeepaliveTarget, env: KeepaliveEnvironment) => Promise<string>;
+  touchSupabase?: (env: KeepaliveEnvironment) => Promise<string>;
 };
 
 export function configuredKeepaliveTargets(env: KeepaliveEnvironment = process.env): KeepaliveTarget[] {
@@ -43,10 +44,11 @@ export function configuredKeepaliveTargets(env: KeepaliveEnvironment = process.e
   }));
 }
 
-export async function runDatabaseKeepalive(options: RunKeepaliveOptions = {}) {
+export async function runCloudKeepalive(options: RunKeepaliveOptions = {}) {
   const env = options.env ?? process.env;
   const targets = configuredKeepaliveTargets(env);
   const touch = options.touch ?? touchDatabase;
+  const touchSupabase = options.touchSupabase ?? touchSupabaseApi;
   const results: KeepaliveTargetResult[] = [];
 
   for (const target of targets) {
@@ -61,9 +63,21 @@ export async function runDatabaseKeepalive(options: RunKeepaliveOptions = {}) {
     }
   }
 
+  if (supabaseApiIsConfigured(env)) {
+    try {
+      results.push({
+        name: "supabase-api",
+        ok: true,
+        touched_at: await touchSupabase(env)
+      });
+    } catch {
+      results.push({ name: "supabase-api", ok: false });
+    }
+  }
+
   return {
-    configured: targets.length > 0,
-    ok: targets.length > 0 && results.every((result) => result.ok),
+    configured: results.length > 0,
+    ok: results.length > 0 && results.every((result) => result.ok),
     targets: results
   };
 }
@@ -93,6 +107,32 @@ async function touchDatabase(target: KeepaliveTarget, env: KeepaliveEnvironment)
 function positiveInteger(raw: string | undefined, fallback: number) {
   const parsed = Number.parseInt(raw ?? "", 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function supabaseApiIsConfigured(env: KeepaliveEnvironment) {
+  return Boolean(
+    env.SUPABASE_URL?.trim() &&
+    (env.SUPABASE_SERVICE_ROLE_KEY?.trim() || env.SUPABASE_SECRET_KEY?.trim())
+  );
+}
+
+async function touchSupabaseApi(env: KeepaliveEnvironment) {
+  const baseUrl = env.SUPABASE_URL?.trim().replace(/\/$/, "") ?? "";
+  const serviceKey =
+    env.SUPABASE_SERVICE_ROLE_KEY?.trim() || env.SUPABASE_SECRET_KEY?.trim() || "";
+  const timeoutMs = positiveInteger(env.TRASH_SORTER_DB_STATEMENT_TIMEOUT_MS, 15_000);
+  const response = await fetch(`${baseUrl}/rest/v1/realtime_events?select=id&limit=1`, {
+    headers: {
+      apikey: serviceKey,
+      Authorization: `Bearer ${serviceKey}`
+    },
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+  if (!response.ok) {
+    throw new Error("Supabase keepalive failed");
+  }
+  await response.arrayBuffer();
+  return new Date().toISOString();
 }
 
 function shouldUseSsl(databaseUrl: string) {

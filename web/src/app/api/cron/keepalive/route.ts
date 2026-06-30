@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-import { runDatabaseKeepalive } from "@/lib/server/keepalive";
+import { runCloudKeepalive } from "@/lib/server/keepalive";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ detail: "Unauthorized" }, { status: 401 });
   }
 
-  const result = await runDatabaseKeepalive();
+  const result = await runCloudKeepalive();
   const status = result.ok ? 200 : 503;
   return NextResponse.json(
     {

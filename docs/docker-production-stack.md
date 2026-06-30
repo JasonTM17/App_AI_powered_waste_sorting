@@ -142,7 +142,9 @@ the scheduled hour. The protected route `/api/cron/keepalive`:
 2. fails closed when the secret or database configuration is absent;
 3. deduplicates identical auth/Supabase database URLs;
 4. touches configured databases sequentially with bounded query timeout;
-5. returns only sanitized target names and timestamps.
+5. performs a tiny Supabase PostgREST read when `SUPABASE_URL` and a server-side
+   service key are configured;
+6. returns only sanitized target names and timestamps.
 
 Vercel injects the bearer header automatically when `CRON_SECRET` is configured
 in Production. Generate a long random value in Vercel; never add it to Git.

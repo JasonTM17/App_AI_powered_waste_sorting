@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   configuredKeepaliveTargets,
-  runDatabaseKeepalive
+  runCloudKeepalive
 } from "@/lib/server/keepalive";
 
 describe("database keepalive", () => {
@@ -23,7 +23,7 @@ describe("database keepalive", () => {
       TRASH_SORTER_SUPABASE_DATABASE_URL: "postgresql://supabase"
     } as NodeJS.ProcessEnv;
 
-    const result = await runDatabaseKeepalive({
+    const result = await runCloudKeepalive({
       env,
       touch: async (target) => {
         events.push(`start:${target.name}`);
@@ -42,10 +42,37 @@ describe("database keepalive", () => {
   });
 
   it("reports an unconfigured database without pretending success", async () => {
-    await expect(runDatabaseKeepalive({ env: {} })).resolves.toEqual({
+    await expect(runCloudKeepalive({ env: {} })).resolves.toEqual({
       configured: false,
       ok: false,
       targets: []
     });
+  });
+
+  it("touches Supabase PostgREST after the database queue", async () => {
+    const events: string[] = [];
+    const env = {
+      TRASH_SORTER_AUTH_DATABASE_URL: "postgresql://auth",
+      SUPABASE_URL: "https://project.supabase.co",
+      SUPABASE_SERVICE_ROLE_KEY: "test-service-key"
+    } as NodeJS.ProcessEnv;
+
+    const result = await runCloudKeepalive({
+      env,
+      touch: async () => {
+        events.push("database");
+        return "2026-06-30T03:00:00.000Z";
+      },
+      touchSupabase: async () => {
+        events.push("supabase-api");
+        return "2026-06-30T03:00:01.000Z";
+      }
+    });
+
+    expect(events).toEqual(["database", "supabase-api"]);
+    expect(result.targets).toEqual([
+      { name: "auth", ok: true, touched_at: "2026-06-30T03:00:00.000Z" },
+      { name: "supabase-api", ok: true, touched_at: "2026-06-30T03:00:01.000Z" }
+    ]);
   });
 });
