@@ -89,9 +89,10 @@ Vercel CLI evidence on 2026-06-30:
 - production env names exist for `CRON_SECRET`, auth/Postgres, Supabase URL, and
   Supabase service-role key;
 - no raw secret values were printed;
-- `vercel logs --environment production --query "/api/cron/keepalive" --since 14d`
-  returned no keepalive records, so deploy the route fix before treating cron as
-  fully verified by logs.
+- after deploying commit `dc8f921`, a cron-header smoke request to
+  `/api/cron/keepalive` returned `200` and touched `auth` plus `supabase-api`;
+- Vercel Production logs show `/api/cron/keepalive` status `200` on deployment
+  `dpl_4KpJX3rS3b1MsHh2Rw5HEBq6Vs5X`.
 
 ## Disk cleanup state
 
