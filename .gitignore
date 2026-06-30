@@ -80,6 +80,8 @@ scripts/refactor_dashboard.py
 # Private docs (per global rule)
 .codex/
 .claude/
+.agents/
+AGENTS.md
 plans/
 CLAUDE.md
 CLAUDE.MD
@@ -119,6 +121,4 @@ models/*.pt
 !models/.gitkeep
 !models/best.pt
 !models/new-class-specialist.pt
-.agents/
-
 .vercel
