@@ -2233,7 +2233,6 @@ class Pipeline:
         label = detection.operator_label or ""
         return (
             detection.cls_name == self.cfg.unknown_fallback.class_name
-            or "cáº§n tÃ¡ch" in label
             or "cần tách" in label
         )
 

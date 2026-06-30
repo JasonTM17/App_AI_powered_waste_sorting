@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { AlertTriangle, CheckCircle2, LocateFixed, MapPin, Maximize2, Minimize2, RefreshCcw } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";

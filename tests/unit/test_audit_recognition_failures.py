@@ -31,7 +31,10 @@ def test_audit_marks_clipboard_screenshots_as_not_trainable(tmp_path):
     write_report(report, items, summary)
     report_text = report.read_text(encoding="utf-8")
     assert "Cục sạc" in report_text
-    assert "cá»¥c sáº¡c" not in report_text
+    broken_charger_text = (
+        r"c\u00e1\u00bb\u00a5c s\u00e1\u00ba\u00a1c".encode("ascii").decode("unicode_escape")
+    )
+    assert broken_charger_text not in report_text
 
 
 def test_audit_ignores_non_recognition_clipboard_screenshots(tmp_path):
