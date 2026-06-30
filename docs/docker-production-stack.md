@@ -114,8 +114,10 @@ TRASH_SORTER_HARDWARE_REQUEST_CONCURRENCY=1
 Set server-side values only as private Vercel environment variables:
 
 ```text
+CRON_SECRET
 DATABASE_URL
 TRASH_SORTER_AUTH_DATABASE_URL
+TRASH_SORTER_SUPABASE_DATABASE_URL
 TRASH_SORTER_HARDWARE_BRIDGE_URL
 TRASH_SORTER_HARDWARE_BRIDGE_SECRET
 DEEPSEEK_API_KEY
@@ -123,6 +125,27 @@ DEEPSEEK_API_KEY
 
 The Vercel request scheduler is process-local. It limits bursts inside a single
 serverless process/container; it is not a distributed global lock.
+
+### Twice-weekly database keepalive
+
+Both `vercel.json` files define the same production schedule so the cron remains
+active whether Vercel's Root Directory is the repository root or `web/`:
+
+```text
+0 3 * * 1,4
+```
+
+This runs on Monday and Thursday at 03:00 UTC. Vercel Hobby may execute within
+the scheduled hour. The protected route `/api/cron/keepalive`:
+
+1. requires `Authorization: Bearer ${CRON_SECRET}`;
+2. fails closed when the secret or database configuration is absent;
+3. deduplicates identical auth/Supabase database URLs;
+4. touches configured databases sequentially with bounded query timeout;
+5. returns only sanitized target names and timestamps.
+
+Vercel injects the bearer header automatically when `CRON_SECRET` is configured
+in Production. Generate a long random value in Vercel; never add it to Git.
 
 ## Publish images to Docker Hub
 
@@ -143,6 +166,19 @@ docker push "$repo/trash-sorter-agent:latest"
 Because `trash-agent` contains the two model artifacts, do not push it to a
 public registry unless the model license/project policy allows public model
 distribution.
+
+The release namespace for this project is:
+
+```text
+docker.io/nguyenson1710
+```
+
+The `Publish release containers` GitHub Actions workflow mirrors an already
+verified Docker Hub release tag to `ghcr.io/JasonTM17` so the web, agent, model,
+and desktop artifact images also appear under the repository's **Packages**
+section. The workflow never receives Docker Hub credentials because it reads
+the public source images and authenticates to GHCR with the repository-scoped
+`GITHUB_TOKEN`.
 
 ## Free local disk safely
 

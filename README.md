@@ -11,6 +11,7 @@
 [![Desktop](https://img.shields.io/badge/Desktop-PySide6_+_YOLO-0F172A?style=for-the-badge)](docs/project-showcase.md#desktop-app)
 [![Web](https://img.shields.io/badge/Web-Next.js_+_Vercel-2563EB?style=for-the-badge)](docs/project-showcase.md#web-dashboard)
 [![Hardware](https://img.shields.io/badge/Hardware-USB_Camera_+_UART-F59E0B?style=for-the-badge)](#quy-tắc-camera-và-uart)
+[![Docker Hub](https://img.shields.io/badge/Docker_Hub-nguyenson1710-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://hub.docker.com/u/nguyenson1710)
 
 ## Tổng quan kỹ thuật
 
@@ -176,6 +177,7 @@ Video được quay trực tiếp trên nguyên mẫu phần cứng thật; khô
 - [Hướng dẫn chạy web app](docs/huong-dan-chay-web-app.md)
 - [Supabase/cloud readiness](docs/supabase-full-cloud-readiness.md)
 - [Docker production stack: web, agent, Supabase bridge, CPU/GPU, push, rollback](docs/docker-production-stack.md)
+- [Desktop EXE, Docker Hub, GitHub Packages and keepalive release plan](docs/desktop-dockerhub-keepalive-release-plan.md)
 - [Checklist tích hợp phần cứng](docs/hardware_integration_checklist.md)
 - [Operations map local-first](docs/operations-map-local-first.md)
 - [Release v2.1.0: cloud map and hardware bridge](docs/releases/v2.1.0.md)

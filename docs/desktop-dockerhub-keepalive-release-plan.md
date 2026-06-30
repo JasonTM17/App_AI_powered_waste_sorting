@@ -206,11 +206,11 @@ Exit criteria:
 - README/deployment docs are current.
 - GitHub repo is pushed.
 
-### Phase 5: Weekly Vercel/Supabase keepalive
+### Phase 5: Twice-weekly Vercel/Supabase keepalive
 
 Goal: add a scheduled Vercel request that genuinely touches Supabase/Postgres.
 
-Recommended implementation:
+Implemented contract:
 
 - route: `web/src/app/api/cron/keepalive/route.ts`;
 - env: `CRON_SECRET`;
@@ -235,7 +235,9 @@ Safer schedule recommendation:
 }
 ```
 
-Decision: use the safer twice-weekly schedule (`0 3 * * 1,4`). Reason: Supabase Free pausing is based on low activity over a 7-day period, and Vercel Hobby cron timing can drift. Exactly weekly can be close to the edge.
+Decision: use the safer twice-weekly schedule (`0 3 * * 1,4`). Vercel
+interprets the schedule in UTC. Hobby cron execution has hourly precision, so
+the request can arrive at any point during the 03:00 UTC hour.
 
 Route contract:
 
@@ -333,5 +335,7 @@ Exit criteria:
 
 ## 6. Unresolved questions
 
-- None for the desktop EXE artifact image.
-- Runtime web/agent image push, keepalive implementation, and large dataset/model archive images remain separate release slices unless explicitly included in the current implementation run.
+- Production route verification must run after the commit containing the route
+  is deployed by Vercel.
+- The large dataset archive is published as bounded parts because a single
+  41 GB build context exhausted local Docker storage during layer creation.
