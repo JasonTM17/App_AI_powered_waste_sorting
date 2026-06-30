@@ -53,6 +53,20 @@ function Invoke-Checked {
   }
 }
 
+function Invoke-DockerRegistryCommand {
+  param([string[]]$Arguments, [int]$MaxAttempts = 3)
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    & docker @Arguments
+    if ($LASTEXITCODE -eq 0) { return }
+    if ($attempt -eq $MaxAttempts) {
+      throw "docker $($Arguments[0]) failed after $MaxAttempts attempts"
+    }
+    $delaySeconds = 10 * [Math]::Pow(2, $attempt - 1)
+    Write-Warning "Docker registry command failed (attempt $attempt/$MaxAttempts); retrying in $delaySeconds seconds."
+    Start-Sleep -Seconds $delaySeconds
+  }
+}
+
 function Remove-WorkDirectory {
   param([string]$Path)
   if (-not (Test-Path -LiteralPath $Path)) { return }
@@ -127,7 +141,7 @@ COPY ["$archiveName", "./$archiveName"]
 COPY ["$archiveName.sha256", "./$archiveName.sha256"]
 COPY ["$name.manifest.json", "./$name.manifest.json"]
 RUN sha256sum -c "$archiveName.sha256"
-CMD ["sh", "-c", "printf '%s\n' 'Dataset archive $partId/$($parts.Count).' 'Copy all part archives from their images, verify each .sha256 file, concatenate only if your restore tooling requires it, then extract every archive at the same destination root.'"]
+CMD ["sh", "-c", "printf '%s\n' 'Dataset archive $partId/$($parts.Count).' 'Copy this part archive from the image, verify the bundled .sha256 file, then extract the archive into the common restore root. Do not concatenate parts; every part is an independent tar archive rooted at dataset_v2/.'"]
 "@
   $dockerfile | Set-Content -LiteralPath (Join-Path $work "Dockerfile") -Encoding utf8
 
@@ -140,20 +154,20 @@ CMD ["sh", "-c", "printf '%s\n' 'Dataset archive $partId/$($parts.Count).' 'Copy
   )
 
   if ($Push) {
-    Invoke-Checked "docker" @("push", $shaTag)
+    Invoke-DockerRegistryCommand @("push", $shaTag)
     $inspection = (& docker buildx imagetools inspect $shaTag 2>&1 | Out-String)
     if ($LASTEXITCODE -ne 0 -or $inspection -notmatch "Digest:\s+(sha256:[0-9a-f]{64})") {
       throw "Remote digest verification failed for $shaTag"
     }
     $remoteDigest = $Matches[1]
     Invoke-Checked "docker" @("image", "rm", "-f", $shaTag)
-    Invoke-Checked "docker" @("pull", $shaTag)
+    Invoke-DockerRegistryCommand @("pull", $shaTag)
     Invoke-Checked "docker" @(
       "run", "--rm", "--entrypoint", "sh", $shaTag, "-c",
       "cd /artifacts/dataset && sha256sum -c '$archiveName.sha256'"
     )
     Invoke-Checked "docker" @("tag", $shaTag, $latestTag)
-    Invoke-Checked "docker" @("push", $latestTag)
+    Invoke-DockerRegistryCommand @("push", $latestTag)
     $manifest.remote_digest = $remoteDigest
     $manifest | ConvertTo-Json -Depth 6 |
       Set-Content -LiteralPath (Join-Path $manifestRoot "$name.manifest.json") -Encoding utf8

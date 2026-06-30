@@ -30,6 +30,12 @@ The release has five deliverables:
 
 Do not publish the whole 70GB workspace as one image. Clean release means split runtime from archive data, remove caches/secrets/local DBs, and push reproducible artifacts with checksums.
 
+Implementation note for release `99369b06a697`: the owner approved publishing
+the large dataset/model archive. It was shipped as a ten-part non-runtime Docker
+Hub artifact plus a metadata-only index image, not as one giant workspace image.
+See `docs/releases/container-dataset-release-99369b06a697.md` for digests and
+restore commands.
+
 ## 2. Non-negotiable safety rules
 
 - Preserve local dirty file `web/next-env.d.ts` byte-for-byte. Expected SHA-256:

@@ -175,12 +175,51 @@ The release namespace for this project is:
 docker.io/nguyenson1710
 ```
 
+### Verified 2026-06-30 release
+
+The current verified release is tied to Git commit `99369b06a697`.
+
+| Artifact | Docker Hub tag | Digest |
+| --- | --- | --- |
+| Web dashboard | `nguyenson1710/trash-sorter-web:99369b06a697` | `sha256:9b0ce23c8c673a3fc55503b1faba5e8097a0aa246ef8ac6f9284fee5e6351bd6` |
+| FastAPI/YOLO agent | `nguyenson1710/trash-sorter-agent:99369b06a697` | `sha256:ce27b8f19681c33a8527551ff1f52a7365737cce0ff46734de2b86178f46eba4` |
+| Model artifact | `nguyenson1710/trash-sorter-models:99369b06a697` | `sha256:e694a9b23807423d1cd925fc2db7cdb5dfbde7cad0324350bd7c0988f5daf94c` |
+| Desktop EXE artifact | `nguyenson1710/trash-sorter-desktop-exe:99369b06a697` | `sha256:f05770117016f963f46c12ec6fc0b67b382a620ff69b02528ba02ad5ce36c6d7` |
+| Dataset archive index | `nguyenson1710/trash-sorter-dataset-archive:99369b06a697` | `sha256:4aad51a7e73a8fff06dc780e1b6c7f902a454c25289466eb628ceb4119c1e53e` |
+
+See [container and dataset artifact release `99369b06a697`](releases/container-dataset-release-99369b06a697.md)
+for the full ten-part dataset archive manifest and restore commands.
+
 The `Publish release containers` GitHub Actions workflow mirrors an already
 verified Docker Hub release tag to `ghcr.io/JasonTM17` so the web, agent, model,
 and desktop artifact images also appear under the repository's **Packages**
 section. The workflow never receives Docker Hub credentials because it reads
 the public source images and authenticates to GHCR with the repository-scoped
 `GITHUB_TOKEN`.
+
+## Dataset archive on Docker Hub
+
+Large training data is published as non-runtime artifact images. The runtime
+containers do not depend on these images.
+
+Index image:
+
+```powershell
+docker pull nguyenson1710/trash-sorter-dataset-archive:99369b06a697
+docker run --rm nguyenson1710/trash-sorter-dataset-archive:99369b06a697
+```
+
+Payload images:
+
+```text
+nguyenson1710/trash-sorter-dataset-archive:99369b06a697-part01
+...
+nguyenson1710/trash-sorter-dataset-archive:99369b06a697-part10
+```
+
+Each payload image contains one `.tar.zst` archive, one `.sha256` file, and one
+part manifest under `/artifacts/dataset/`. Do not concatenate the archives:
+extract each independent archive into the same restore root.
 
 ## Free local disk safely
 
